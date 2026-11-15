@@ -3,7 +3,7 @@ const { spawn } = require("node:child_process");
 const { once } = require("node:events");
 const { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
-const { join } = require("node:path");
+const { dirname, join } = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 const { test } = require("node:test");
 const { SampleDatabase } = require("../build/database.js");
@@ -13,7 +13,27 @@ function fixture(t) {
   const databasePath = join(root, "data", "workspace.sqlite3");
   const marker = join(root, "database.initialized");
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  return { databasePath, marker, open: () => SampleDatabase.open(databasePath, marker) };
+  return { root, databasePath, marker, open: () => SampleDatabase.open(databasePath, marker) };
+}
+
+async function interruptWorker(t, script, args, stage) {
+  const child = spawn(process.execPath, [join(__dirname, script), ...args],
+    { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  let errors = "";
+  child.stderr.setEncoding("utf8").on("data", chunk => { errors += chunk; });
+  const exited = once(child, "exit");
+  try {
+    const [signal] = await Promise.race([
+      once(child.stdout, "data", { signal: t.signal }),
+      exited.then(() => { throw new Error(`${script} exited before ${stage}: ${errors}`); }),
+    ]);
+    assert.equal(signal.toString().trim(), stage);
+    assert.ok(child.kill("SIGKILL"));
+    await exited;
+  } finally {
+    if (child.exitCode === null && child.signalCode === null && !child.killed) child.kill("SIGKILL");
+    await exited.catch(() => {});
+  }
 }
 
 test("persist a single Chinese test record; update its revision after reopening", (t) => {
@@ -71,19 +91,7 @@ test("reject a newer schema or another application's file", (t) => {
 test("an abruptly killed writer preserves commit and discards an open transaction", { timeout: 12000 }, async (t) => {
   const f = fixture(t);
   f.open().close();
-  const child = spawn(process.execPath, [join(__dirname, "crash-writer.cjs"), f.databasePath],
-    { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-  t.after(() => { if (child.exitCode === null && !child.killed) child.kill(); });
-  let errors = "";
-  child.stderr.setEncoding("utf8").on("data", chunk => { errors += chunk; });
-  const exited = once(child, "exit");
-  const [signal] = await Promise.race([
-    once(child.stdout, "data"),
-    exited.then(() => { throw new Error("Writer exited before the crash: " + errors); }),
-  ]);
-  assert.match(signal.toString(), /committed-and-open/);
-  assert.ok(child.kill("SIGKILL"));
-  await exited;
+  await interruptWorker(t, "crash-writer.cjs", [f.databasePath], "committed-and-open");
 
   const store = f.open();
   try {
@@ -99,4 +107,32 @@ test("an abruptly killed writer preserves commit and discards an open transactio
   } finally {
     db.close();
   }
+});
+
+test("an interrupted first initialization preserves the database and requires manual recovery", { timeout: 12000 }, async (t) => {
+  const f = fixture(t);
+  assert.equal(existsSync(f.databasePath), false);
+  await interruptWorker(t, "interrupt-initialization.cjs", [f.databasePath, f.marker], "migration-open");
+
+  const interruptedBytes = readFileSync(f.databasePath);
+  assert.ok(interruptedBytes.length > 0);
+  assert.equal(existsSync(f.marker), false);
+  assert.throws(f.open, /数据库应用标识不匹配/);
+  assert.deepEqual(readFileSync(f.databasePath), interruptedBytes);
+  assert.equal(existsSync(f.marker), false);
+
+  // Preserve the entire data directory, including any remaining SQLite sidecars.
+  const retained = join(f.root, "data.retained");
+  renameSync(dirname(f.databasePath), retained);
+  const store = f.open();
+  try {
+    assert.equal(store.details.schemaVersion, 1);
+    assert.equal(existsSync(f.marker), true);
+    assert.equal(store.read(), null);
+    const saved = store.save({ content: "虚构初始化恢复记录", expectedRevision: null });
+    assert.deepEqual(store.read(), saved);
+  } finally {
+    store.close();
+  }
+  assert.deepEqual(readFileSync(join(retained, "workspace.sqlite3")), interruptedBytes);
 });
