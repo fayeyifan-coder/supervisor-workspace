@@ -1,0 +1,25 @@
+appId: cn.supervisorworkspace.desktop.pr1a
+productName: Supervisor Workspace PR1A
+executableName: SupervisorWorkspace-PR1A
+directories:
+  output: release
+files:
+  - build/**/*.js
+  - dist/**/*
+  - "!**/node_modules/**/*"
+asar: true
+npmRebuild: false
+win:
+  target:
+    - nsis
+  signAndEditExecutable: false
+  artifactName: SupervisorWorkspace-PR1A-${version}-win-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Supervisor Workspace PR1A
+  runAfterFinish: false
+  deleteAppDataOnUninstall: false
