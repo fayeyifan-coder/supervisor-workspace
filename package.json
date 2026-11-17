@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc -p tsconfig.main.json && vite build --base ./",
     "test": "tsc -p tsconfig.main.json && node --test test/*.test.cjs",
+    "pack:win:dir": "electron-builder --win --x64 --dir --publish never",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {

@@ -35,3 +35,29 @@ SQLite 使用 MVP 专用 `application_id=0x53574d31` 和 `user_version=1`。检�
 仅在获得正式执行许可后，在本工作副本加载 `Enter-MvpBuild.ps1`。脚本把 npm、Electron、electron-builder、Node 编译缓存和进程临时目录放在 MVP 专用 D 盘位置。源码构建产物留在本工作副本。测试在独立运行临时目录创建合成数据库。桌面数据和测试目录分开。
 
 获得许可后使用锁定的 Node 24.19.0 和 npm 11.17.0，按顺序执行锁定依赖安装、类型检查、测试和生产代码构建。随后另行验收 Windows 桌面启动、新建虚构学生、保存学习记录、退出并重开查看历史。确认备份导出和恢复功能后再安排包含真实验收条件的发布。安装器仍需单独授权。
+
+## M1 便携桌面验收包
+
+同仓库 `mvp/v0.1` 指向 `pr/1a-windows-desktop-shell` 的 PR 在原有四项 Windows CI 步骤通过后生成 unpacked 预览包。到对应的 Actions run 下载 `supervisor-workspace-mvp-win-x64-<run-id>-<attempt>`。保留期为 7 天，下载需要仓库访问权限。预览包保留现有签名配置，不包含安装器。
+
+操作前先确认本机策略明确允许执行下载的预览程序，并复核 C 盘至少 10 GiB 可用。确认 `D:\Codex-Development\Temp\supervisor-workspace-mvp\profile` 不存在或为空，且路径没有重解析或转向。若已有文件，先停止并保留原目录。
+
+解压到全新的 `D:\Codex-Development\Builds\supervisor-workspace-mvp-preview\<run-id>-<attempt>`。保留以下层级。
+
+```text
+build-info.json
+SHA256SUMS.txt
+win-unpacked/
+  SupervisorWorkspace-MVP.exe
+  resources/app.asar
+  locales/
+  Electron 运行文件
+```
+
+启动前先核对 `build-info.json` 中的源提交、run ID、尝试编号、Windows x64 和 Electron 版本。用 `Get-FileHash -Algorithm SHA256` 逐项核对 `SHA256SUMS.txt`，确认 `win-unpacked` 没有缺失或额外文件。清单同时覆盖 `build-info.json`。EXE 依赖同目录的运行资源，启动时保留整个 `win-unpacked`。
+
+1. 双击 `win-unpacked\SupervisorWorkspace-MVP.exe`。确认能进入学生档案界面。创建两名虚构学生，分别保存日期和学科不同的学习记录。记录保存成功提示，核对各自的历史。可用空必填项检查错误反馈。
+2. 正常关闭 MVP 窗口，确认该解压目录的 EXE 进程及其 Electron 子进程退出。重开原 EXE，核对两名学生、各自历史、日期、学科和完成情况。检查有无重复、丢失或串档。
+3. 完全退出后记录 Profile 的主库、初始化标记和现存侧车。SQLite 完整性核对仅在本轮合成库的一致性副本上使用 `PRAGMA integrity_check` 和 `PRAGMA foreign_key_check`。若仍存在 WAL/SHM，保全它们，不单独丢弃侧车或覆盖原库。
+
+运行会在该 Profile 下创建 `data\mvp.sqlite3`、`data\mvp.initialized` 和可能出现的 SQLite WAL/SHM，另有 `chromium`、`logs`、`crash` 子目录。进程包括 Electron 主进程、渲染进程及按需启动的 GPU 或 utility 进程。CI 验证产物结构和字节完整性，桌面启动及保存重开须由本机验收确认。
