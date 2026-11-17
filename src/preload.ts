@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { SaveSample, WorkspaceApi } from "./contracts";
+import type { LessonInput, StudentInput, WorkspaceApi } from "./contracts";
 
-// Keep literals here so this sandboxed preload needs only Electron's built-in module.
+// The sandboxed preload only imports Electron at runtime.
 const api: WorkspaceApi = {
-  read: () => ipcRenderer.invoke("sample-record:read"),
-  save: (input: SaveSample) => ipcRenderer.invoke("sample-record:save", input),
+  students: () => ipcRenderer.invoke("mvp:students"),
+  history: (id: string) => ipcRenderer.invoke("mvp:history", id),
+  createStudent: (input: StudentInput) => ipcRenderer.invoke("mvp:create-student", input),
+  addLesson: (input: LessonInput) => ipcRenderer.invoke("mvp:add-lesson", input),
 };
 contextBridge.exposeInMainWorld("supervisorWorkspace", Object.freeze(api));

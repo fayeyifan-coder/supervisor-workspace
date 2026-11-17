@@ -1,10 +1,14 @@
 const { DatabaseSync } = require("node:sqlite");
+const { WorkspaceDatabase } = require("../build/database.js");
 
-const db = new DatabaseSync(process.argv[2]);
-const now = Date.now();
-db.exec("PRAGMA synchronous = FULL; BEGIN IMMEDIATE");
-db.prepare("INSERT INTO sample_record VALUES (1, ?, 1, ?, ?)").run("虚构已提交值", now, now);
-db.exec("COMMIT; BEGIN IMMEDIATE");
-db.prepare("UPDATE sample_record SET content = ?, revision = 2 WHERE id = 1").run("虚构未提交值");
+const [, , path, marker, payload, uncommittedId] = process.argv;
+const lesson = JSON.parse(payload);
+const store = WorkspaceDatabase.open(path, marker);
+store.addLesson(lesson);
+
+const writer = new DatabaseSync(path);
+writer.exec("BEGIN IMMEDIATE");
+writer.prepare("INSERT INTO learning_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+  .run(uncommittedId, lesson.studentId, lesson.date, "数学", "未提交的虚构任务", "未提交", "", "", Date.now());
 process.stdout.write("committed-and-open\n");
 setInterval(() => {}, 1000);

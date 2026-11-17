@@ -1,6 +1,6 @@
-appId: cn.supervisorworkspace.desktop.pr1a
-productName: Supervisor Workspace PR1A
-executableName: SupervisorWorkspace-PR1A
+appId: cn.supervisorworkspace.desktop.mvp
+productName: Supervisor Workspace MVP
+executableName: SupervisorWorkspace-MVP
 directories:
   output: release
 files:
@@ -13,13 +13,13 @@ win:
   target:
     - nsis
   signAndEditExecutable: false
-  artifactName: SupervisorWorkspace-PR1A-${version}-win-${arch}.${ext}
+  artifactName: SupervisorWorkspace-MVP-${version}-win-${arch}.${ext}
 nsis:
   oneClick: false
   perMachine: false
   allowElevation: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  shortcutName: Supervisor Workspace PR1A
+  shortcutName: Supervisor Workspace MVP
   runAfterFinish: false
   deleteAppDataOnUninstall: false

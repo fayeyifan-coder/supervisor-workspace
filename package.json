@@ -1,8 +1,8 @@
 {
-  "name": "supervisor-workspace-pr1a",
+  "name": "supervisor-workspace-mvp",
   "version": "0.1.0",
   "private": true,
-  "description": "Windows desktop shell and SQLite persistence verification",
+  "description": "Offline Windows workspace for student learning records",
   "author": "Supervisor Workspace",
   "main": "build/main.js",
   "scripts": {

@@ -2,3 +2,5 @@ node_modules/
 build/
 dist/
 release/
+*.sqlite3
+*.sqlite3-*

@@ -2,13 +2,18 @@ name: Windows verification
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, pr/1a-windows-desktop-shell]
 
 permissions:
   contents: read
 
 jobs:
   windows:
+    if: >-
+      github.event.pull_request.base.ref == 'main' ||
+      (github.event.pull_request.base.ref == 'pr/1a-windows-desktop-shell' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'mvp/v0.1')
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
@@ -26,5 +31,9 @@ jobs:
         run: npm run typecheck
       - name: Test database
         run: npm test
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TMPDIR: ${{ runner.temp }}
       - name: Build desktop application
         run: npm run build
