@@ -106,8 +106,10 @@ jobs:
           }
 
           function verifyAsar(archive) {
+            // ASAR extraction uses native separators; keep the validation paths normalized.
+            const extractMember = path => asar.extractFile(archive, join(...path.split("/")));
             const contents = new Set(asar.listPackage(archive).map(path => path.replace(/\\/g, "/").replace(/^\/+/, "")));
-            const appPackage = JSON.parse(asar.extractFile(archive, "package.json").toString("utf8"));
+            const appPackage = JSON.parse(extractMember("package.json").toString("utf8"));
             assert.equal(appPackage.name, "supervisor-workspace-mvp");
             assert.equal(appPackage.main, "build/main.js");
 
@@ -117,7 +119,7 @@ jobs:
             for (const path of contents) {
               assert(allowed.has(path) || assetsPattern.test(path), "Unexpected ASAR member: " + path);
             }
-            const html = asar.extractFile(archive, "dist/index.html").toString("utf8");
+            const html = extractMember("dist/index.html").toString("utf8");
             const assets = [...html.matchAll(/\b(?:src|href)=["']\.\/(assets\/[A-Za-z0-9_.-]+\.(?:js|css))["']/g)]
               .map(match => "dist/" + match[1]);
             assert(assets.some(path => path.endsWith(".js")), "The packaged renderer has no local JS entry");
@@ -126,7 +128,7 @@ jobs:
               ...[...contents].filter(path => assetsPattern.test(path))]);
             for (const path of builtFiles) {
               assert(contents.has(path), "Missing ASAR member: " + path);
-              const packaged = asar.extractFile(archive, path);
+              const packaged = extractMember(path);
               assert(packaged.length > 0 && packaged.equals(readFileSync(path)), "ASAR differs from CI build: " + path);
             }
           }
