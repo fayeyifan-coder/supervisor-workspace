@@ -37,7 +37,15 @@ jobs:
         run: npm run build
       - name: Package and verify the MVP desktop preview
         id: portable
-        if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+        if: >-
+          github.event_name == 'push' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+          ((github.event.pull_request.base.ref == 'pr/1a-windows-desktop-shell' &&
+            github.event.pull_request.head.ref == 'mvp/v0.1') ||
+           (github.event.pull_request.base.ref == 'mvp/v0.1' &&
+            github.event.pull_request.head.ref == 'm2-b/daily-work-log') ||
+           (github.event.pull_request.base.ref == 'm2-b/daily-work-log' &&
+            github.event.pull_request.head.ref == 'm2-b/reliability-proof'))))
         env:
           MVP_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
@@ -207,3 +215,4 @@ jobs:
             ${{ steps.portable.outputs.root }}/build-info.json
           if-no-files-found: error
           retention-days: 7
+
