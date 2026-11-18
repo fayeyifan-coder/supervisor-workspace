@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { channels, type Failure, type Result } from "./contracts";
 import { failure, WorkspaceDatabase } from "./database";
+import { WorkLogDatabase, type WorkStatus } from "./worklog";
 
 const scheme = "supervisor-workspace-mvp";
 const page = `${scheme}://workspace/index.html`;
@@ -11,6 +12,7 @@ const securityPolicy = "default-src 'none'; script-src 'self'; style-src 'self';
 const appId = "cn.supervisorworkspace.desktop.mvp";
 const title = "督学工作台";
 let database: WorkspaceDatabase | undefined;
+let workLog: WorkLogDatabase | undefined;
 
 protocol.registerSchemesAsPrivileged([{ scheme, privileges: { standard: true, secure: true } }]);
 
@@ -69,6 +71,12 @@ async function start(profile: string): Promise<void> {
     const result = failure(error);
     if (result.code === "recovery" || result.code === "busy") startupError = result;
   }
+  try {
+    workLog = WorkLogDatabase.open(join(profile, "data", "worklog.sqlite3"), join(profile, "data", "worklog.initialized"));
+  } catch (error) {
+    const result = failure(error);
+    if (result.code === "recovery" || result.code === "busy") startupError = result;
+  }
 
   const window = new BrowserWindow({
     title,
@@ -110,14 +118,27 @@ async function start(profile: string): Promise<void> {
   ipcMain.handle(channels.history, (event, id: unknown) => invoke(event, store => store.history(id)));
   ipcMain.handle(channels.createStudent, (event, raw: unknown) => invoke(event, store => store.createStudent(raw)));
   ipcMain.handle(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
+  const invokeWork = <T>(event: IpcMainInvokeEvent, operation: (store: WorkLogDatabase) => T): Result<T> => {
+    if (!isTrusted(event, window)) return denied();
+    if (!workLog) return startupError;
+    try { return { ok: true, value: operation(workLog) }; } catch (error) { return failure(error); }
+  };
+  ipcMain.handle(channels.workItems, (event, day: string) => invokeWork(event, store => store.list(day)));
+  ipcMain.handle(channels.searchWorkItems, (event, from: string, to: string, query?: string) =>
+    invokeWork(event, store => store.search(from, to, query)));
+  ipcMain.handle(channels.workHistory, (event, id: string) => invokeWork(event, store => store.history(id)));
+  ipcMain.handle(channels.saveWorkItem, (event, input: unknown) => invokeWork(event, store => store.save(input,
+    studentId => Boolean(database?.students().some(student => student.id === studentId)))));
+  ipcMain.handle(channels.setWorkItemStatus, (event, id: string, status: WorkStatus) =>
+    invokeWork(event, store => store.setStatus(id, status)));
   window.once("ready-to-show", () => window.show());
   await window.loadURL(page);
 }
 
-function prepareProfile(): string {
+function prepareProfile(profileName = "supervisor-workspace-mvp"): string {
   if (process.platform !== "win32") throw new Error("MVP 验收使用本机 D 盘。");
   let path = "D:\\";
-  for (const [index, part] of ["Codex-Development", "Temp", "supervisor-workspace-mvp", "profile"].entries()) {
+  for (const [index, part] of ["Codex-Development", "Temp", profileName, "profile"].entries()) {
     path = join(path, part);
     ensureDirectory(path, index >= 2);
   }
@@ -134,7 +155,8 @@ function ensureDirectory(path: string, create: boolean): void {
 }
 
 try {
-  const profile = prepareProfile();
+  const syntheticProfile = process.env.M2B_SYNTHETIC_TEST === "1" && !app.isPackaged;
+  const profile = prepareProfile(syntheticProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-mvp");
   const userData = join(profile, "chromium");
   app.setPath("userData", userData);
   app.setPath("sessionData", userData);
@@ -153,7 +175,7 @@ try {
       window.focus();
     });
     app.on("window-all-closed", () => app.quit());
-    app.on("will-quit", () => database?.close());
+    app.on("will-quit", () => { workLog?.close(); database?.close(); });
     app.whenReady().then(() => start(profile)).catch(() => {
       dialog.showErrorBox(title, "桌面窗口启动失败。请检查安装是否完整。");
       app.quit();

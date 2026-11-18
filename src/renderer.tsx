@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
+import { WorkLogPanel } from "./WorkLogPanel";
 import "./styles.css";
 
 declare global {
@@ -242,6 +243,7 @@ function App() {
               <HistoryView history={visibleHistory} reload={() => setHistoryRefresh(value => value + 1)} />
             </div>
           </>}
+        {students && <WorkLogPanel students={students} api={api} />}
       </div>
     </div>
   </main>;

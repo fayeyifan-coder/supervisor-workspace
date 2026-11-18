@@ -3,7 +3,14 @@ export const channels = {
   history: "mvp:history",
   createStudent: "mvp:create-student",
   addLesson: "mvp:add-lesson",
+  workItems: "m2b:work-items",
+  searchWorkItems: "m2b:search-work-items",
+  workHistory: "m2b:work-history",
+  saveWorkItem: "m2b:save-work-item",
+  setWorkItemStatus: "m2b:set-work-item-status",
 } as const;
+
+export type { WorkChange, WorkItem, WorkItemInput, WorkStatus } from "./worklog";
 
 export interface StudentInput {
   id: string;
@@ -39,4 +46,9 @@ export interface WorkspaceApi {
   history(studentId: string): Promise<Result<Lesson[]>>;
   createStudent(input: StudentInput): Promise<Result<Student>>;
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
+  workItems(today: string): Promise<Result<import("./worklog").WorkItem[]>>;
+  searchWorkItems(from: string, to: string, query?: string): Promise<Result<import("./worklog").WorkItem[]>>;
+  workHistory(id: string): Promise<Result<import("./worklog").WorkChange[]>>;
+  saveWorkItem(input: import("./worklog").WorkItemInput): Promise<Result<import("./worklog").WorkItem>>;
+  setWorkItemStatus(id: string, status: import("./worklog").WorkStatus): Promise<Result<import("./worklog").WorkItem>>;
 }
