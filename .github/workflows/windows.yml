@@ -1,8 +1,10 @@
 name: Windows verification
 
 on:
+  push:
+    branches: [m2-b/reliability-proof]
   pull_request:
-    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1]
+    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log]
 
 permissions:
   contents: read
@@ -10,19 +12,23 @@ permissions:
 jobs:
   windows:
     if: >-
-      github.event.pull_request.base.ref == 'main' ||
+      github.event_name == 'push' ||
+      (github.event.pull_request.base.ref == 'main') ||
       (github.event.pull_request.base.ref == 'pr/1a-windows-desktop-shell' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
        github.event.pull_request.head.ref == 'mvp/v0.1') ||
       (github.event.pull_request.base.ref == 'mvp/v0.1' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'm2-b/daily-work-log')
+       github.event.pull_request.head.ref == 'm2-b/daily-work-log') ||
+      (github.event.pull_request.base.ref == 'm2-b/daily-work-log' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'm2-b/reliability-proof')
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
@@ -43,19 +49,23 @@ jobs:
       - name: Package and verify the MVP desktop preview
         id: portable
         if: >-
-          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event_name == 'push' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
           ((github.event.pull_request.base.ref == 'pr/1a-windows-desktop-shell' &&
             github.event.pull_request.head.ref == 'mvp/v0.1') ||
            (github.event.pull_request.base.ref == 'mvp/v0.1' &&
-            github.event.pull_request.head.ref == 'm2-b/daily-work-log'))
+            github.event.pull_request.head.ref == 'm2-b/daily-work-log') ||
+           (github.event.pull_request.base.ref == 'm2-b/daily-work-log' &&
+            github.event.pull_request.head.ref == 'm2-b/reliability-proof'))))
         env:
-          MVP_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MVP_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           $sourceCommit = git rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $sourceCommit -cne $env:MVP_HEAD_SHA) {
             throw 'The checked-out source does not match the PR head.'
           }
-          $kind = if ($env:GITHUB_HEAD_REF -eq 'm2-b/daily-work-log') { 'm2b' } else { 'mvp' }
+          $kind = if (($env:GITHUB_HEAD_REF -in @('m2-b/daily-work-log', 'm2-b/reliability-proof')) -or
+            ($env:GITHUB_REF_NAME -eq 'm2-b/reliability-proof')) { 'm2b' } else { 'mvp' }
           $root = Join-Path $env:RUNNER_TEMP "supervisor-$kind-portable-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           if (Test-Path -LiteralPath $root) { throw 'Portable output directory already exists.' }
           New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
@@ -120,7 +130,8 @@ jobs:
             assert.equal(appPackage.main, "build/main.js");
 
             const assetsPattern = /^dist\/assets\/[A-Za-z0-9_.-]+\.(?:js|css)$/;
-            const buildFiles = ["build/main.js", "build/preload.js", "build/contracts.js", "build/database.js", "build/worklog.js"];
+            const buildFiles = ["build/main.js", "build/preload.js", "build/contracts.js", "build/database.js",
+              "build/database-lifecycle.js", "build/worklog.js"];
             const allowed = new Set(["package.json", "build", "dist", "dist/assets", "dist/index.html", ...buildFiles]);
             for (const path of contents) {
               assert(allowed.has(path) || assetsPattern.test(path), "Unexpected ASAR member: " + path);
@@ -208,7 +219,7 @@ jobs:
         if: steps.portable.outcome == 'success'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: supervisor-workspace-${{ github.event.pull_request.head.ref == 'm2-b/daily-work-log' && 'm2b' || 'mvp' }}-win-x64-${{ github.run_id }}-${{ github.run_attempt }}
+          name: supervisor-workspace-${{ (github.event.pull_request.head.ref == 'm2-b/daily-work-log' || github.event.pull_request.head.ref == 'm2-b/reliability-proof' || github.ref_name == 'm2-b/reliability-proof') && 'm2b' || 'mvp' }}-win-x64-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ steps.portable.outputs.root }}/win-unpacked
             ${{ steps.portable.outputs.root }}/SHA256SUMS.txt

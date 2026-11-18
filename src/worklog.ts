@@ -121,6 +121,7 @@ export class WorkLogDatabase {
   }
 
   save(raw: unknown, studentExists: (studentId: string) => boolean): WorkItem {
+    this.assertWritesAllowed();
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("工作事项无效。");
     const input = raw as Partial<WorkItemInput>;
     const itemId = id(input.id);
@@ -136,6 +137,9 @@ export class WorkLogDatabase {
     let committing = false;
     try {
       const prior = this.db.prepare("SELECT * FROM work_items WHERE id=?").get(itemId);
+      if (prior && this.matchesInput(prior, values)) {
+        committing = true; this.db.exec("COMMIT"); return this.toItem(prior);
+      }
       const item: WorkItem = prior ? { ...this.toItem(prior), ...values, updatedAt: now } : {
         ...values, status: "open", createdAt: now, updatedAt: now, completedAt: null,
       };
@@ -153,15 +157,20 @@ export class WorkLogDatabase {
   }
 
   setStatus(rawId: unknown, status: WorkStatus): WorkItem {
+    this.assertWritesAllowed();
     const itemId = id(rawId);
     if (!["open", "done", "cancelled"].includes(status)) invalid("工作状态无效。");
     this.db.exec("BEGIN IMMEDIATE"); let committing = false;
     try {
       const row = this.db.prepare("SELECT * FROM work_items WHERE id=?").get(itemId);
       if (!row) invalid("找不到工作事项。");
+      const prior = this.toItem(row);
+      if (prior.status === status && (status !== "done" || prior.completedAt !== null)) {
+        committing = true; this.db.exec("COMMIT"); return prior;
+      }
       const now = Date.now();
-      const item = { ...this.toItem(row), status, updatedAt: now,
-        completedAt: status === "done" ? (this.toItem(row).completedAt ?? now) : null };
+      const item = { ...prior, status, updatedAt: now,
+        completedAt: status === "done" ? (prior.completedAt ?? now) : null };
       this.db.prepare("UPDATE work_items SET status=?,updated_at=?,completed_at=? WHERE id=?")
         .run(status, now, item.completedAt, itemId);
       this.appendChange(item); committing = true; this.db.exec("COMMIT"); return item;
@@ -175,11 +184,23 @@ export class WorkLogDatabase {
     this.db.prepare("INSERT INTO work_changes VALUES(?,?,?,?)")
       .run(crypto.randomUUID(), item.id, Date.now(), JSON.stringify(item));
   }
+  private matchesInput(row: Record<string, unknown>, input: WorkItemInput): boolean {
+    return row.id === input.id && row.title === input.title && row.work_date === input.workDate &&
+      row.student_id === input.studentId && row.started_at === input.startedAt && row.notes === input.notes &&
+      row.next_step === input.nextStep;
+  }
+  private assertWritesAllowed(): void {
+    if (this.writesBlocked) throw new WorkLogFault("unknown", "工作日志状态待确认，请重开应用后核对记录。");
+  }
   private toItem(row: Record<string, unknown>): WorkItem {
     return { id: row.id as string, title: row.title as string, workDate: row.work_date as string,
       studentId: row.student_id as string | null, startedAt: row.started_at as string, notes: row.notes as string,
       nextStep: row.next_step as string, status: row.status as WorkStatus, createdAt: row.created_at as number,
       updatedAt: row.updated_at as number, completedAt: row.completed_at as number | null };
   }
-  close(): void { if (this.writesBlocked) throw new WorkLogFault("unknown", "工作日志状态待确认。"); this.db.close(); }
+  close(): void {
+    const blocked = this.writesBlocked;
+    this.db.close();
+    if (blocked) throw new WorkLogFault("unknown", "工作日志状态待确认。");
+  }
 }

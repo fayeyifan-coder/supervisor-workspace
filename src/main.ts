@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { channels, type Failure, type Result } from "./contracts";
 import { failure, WorkspaceDatabase } from "./database";
+import { closeStoresIndependently } from "./database-lifecycle";
 import { WorkLogDatabase, type WorkStatus } from "./worklog";
 
 const scheme = "supervisor-workspace-mvp";
@@ -175,7 +176,11 @@ try {
       window.focus();
     });
     app.on("window-all-closed", () => app.quit());
-    app.on("will-quit", () => { workLog?.close(); database?.close(); });
+    app.on("will-quit", () => {
+      for (const error of closeStoresIndependently(() => workLog?.close(), () => database?.close())) {
+        console.error("Database close failed during application exit", error);
+      }
+    });
     app.whenReady().then(() => start(profile)).catch(() => {
       dialog.showErrorBox(title, "桌面窗口启动失败。请检查安装是否完整。");
       app.quit();
