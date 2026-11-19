@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { LessonInput, StudentInput, WorkspaceApi } from "./contracts";
 import type { WorkItemInput, WorkStatus } from "./worklog";
+import type { GrowthSaveInput } from "./growth-profile";
 
 // The sandboxed preload only imports Electron at runtime.
 const api: WorkspaceApi = {
@@ -13,5 +14,7 @@ const api: WorkspaceApi = {
   workHistory: (id: string) => ipcRenderer.invoke("m2b:work-history", id),
   saveWorkItem: (input: WorkItemInput) => ipcRenderer.invoke("m2b:save-work-item", input),
   setWorkItemStatus: (id: string, status: WorkStatus) => ipcRenderer.invoke("m2b:set-work-item-status", id, status),
+  growthProfile: (studentId: string) => ipcRenderer.invoke("m2c:growth-profile", studentId),
+  saveGrowthProfile: (input: GrowthSaveInput) => ipcRenderer.invoke("m2c:save-growth-profile", input),
 };
 contextBridge.exposeInMainWorld("supervisorWorkspace", Object.freeze(api));

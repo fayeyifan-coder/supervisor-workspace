@@ -71,3 +71,11 @@ M2-B 将工作事项保存在同一 profile 下独立的 `data\worklog.sqlite3`�
 **备份缺口：** M2-A 当前备份仅覆盖 M1 SQLite 主库；独立 `worklog.sqlite3`、它的初始化标记及 WAL/SHM 侧车未纳入备份。M2-B 首版不提供工作日志备份/恢复，不能把工作日志视为已受 M2-A 保护。请仅使用合成记录进行本阶段验收。
 
 开发验收可设置 `M2B_SYNTHETIC_TEST=1` 启动未打包应用，让 M1 和日志测试数据库位于独立的 `supervisor-workspace-m2b-test` profile；该开关不会在打包应用中生效。
+
+## M2-C① 学生成长档案
+
+成长档案保存在同一 profile 的 `data\growth.sqlite3`，使用独立 application ID、Schema v1、WAL 和初始化标记。M1 学生 UUID 在主进程核验，M1 年级、学科继续作为权威字段读取，不在成长库中复制。画像和提分目标有版本快照；按日期的学习行为观察只追加，编辑旧画像不会重写已保存观察。保存以唯一请求 ID 幂等处理，并以档案版本拒绝陈旧并发修改。
+
+**备份缺口：** M2-A 备份不覆盖 `growth.sqlite3`、`growth.initialized` 或其 WAL/SHM 侧车。该库没有经过验收的备份与恢复保护；当前只允许使用虚构学生，不能用于真实学生的正式资料。
+
+Windows 本地开发验收可设置 `M2C_SYNTHETIC_TEST=1`；便携包验收可显式设置 `M2C_SYNTHETIC_PACKAGED=1`。两种方式都可通过 `M2C_SYNTHETIC_PROFILE` 选择 1–64 位字母、数字或连字符组成的新名称，使用独立的 `supervisor-workspace-<名称>\profile` 数据目录。正式打包应用默认仍使用正式 Profile；只有显式设置便携验收开关才会切换到合成目录。运行前应确认目标目录不存在。

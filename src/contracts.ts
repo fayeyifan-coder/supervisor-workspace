@@ -8,9 +8,13 @@ export const channels = {
   workHistory: "m2b:work-history",
   saveWorkItem: "m2b:save-work-item",
   setWorkItemStatus: "m2b:set-work-item-status",
+  growthProfile: "m2c:growth-profile",
+  saveGrowthProfile: "m2c:save-growth-profile",
 } as const;
 
 export type { WorkChange, WorkItem, WorkItemInput, WorkStatus } from "./worklog";
+export type { GrowthFields, GrowthGoal, GrowthGoalInput, GrowthHistory, GrowthObservation,
+  GrowthObservationInput, GrowthProfileView, GrowthSaveInput, GrowthSnapshot, GoalStatus } from "./growth-profile";
 
 export interface StudentInput {
   id: string;
@@ -51,4 +55,6 @@ export interface WorkspaceApi {
   workHistory(id: string): Promise<Result<import("./worklog").WorkChange[]>>;
   saveWorkItem(input: import("./worklog").WorkItemInput): Promise<Result<import("./worklog").WorkItem>>;
   setWorkItemStatus(id: string, status: import("./worklog").WorkStatus): Promise<Result<import("./worklog").WorkItem>>;
+  growthProfile(studentId: string): Promise<Result<import("./growth-profile").GrowthProfileView>>;
+  saveGrowthProfile(input: import("./growth-profile").GrowthSaveInput): Promise<Result<import("./growth-profile").GrowthProfileView>>;
 }
