@@ -1,0 +1,8 @@
+{
+  "schema_version": "sw-student-intake-v1",
+  "student_code": "DEMO-002",
+  "student": {
+    "grade": "八年级",
+    "subjects": ["英语"]
+  }
+}

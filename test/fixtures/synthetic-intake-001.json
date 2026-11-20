@@ -1,0 +1,258 @@
+{
+  "schema_version": "sw-student-intake-v1",
+  "student_code": "DEMO-001",
+  "source_documents": [
+    {
+      "doc_id": "DEMO-DOC-1",
+      "title": "虚构登记表",
+      "doc_type": "学生/家长填写登记表",
+      "pages": [1, 2],
+      "date_on_document": "2026-11-23",
+      "legibility": "high",
+      "identity_fields_present": false,
+      "identity_fields_extracted": false,
+      "notes": "所有内容仅为导入演示。"
+    },
+    {
+      "doc_id": "DEMO-DOC-2",
+      "title": "合成教师记录",
+      "doc_type": "教学计划",
+      "pages": [3, 4, 5],
+      "date_on_document": null,
+      "legibility": "medium",
+      "identity_fields_present": false,
+      "identity_fields_extracted": false,
+      "notes": "非真实资料。"
+    }
+  ],
+  "student": {
+    "grade": "七年级",
+    "subjects": ["数学", "语文"],
+    "school": "虚构测试学校",
+    "class_name": null,
+    "registration_date": "2026-11-23",
+    "learning_background": [
+      {
+        "id": "BG-001",
+        "statement": "登记表记录近期练习分数运算。",
+        "source_pages": [1],
+        "evidence": [
+          {
+            "source_page": 1,
+            "source_type": "登记表",
+            "original_text": "近两周练习分数运算。",
+            "confidence": "high",
+            "review_required": false
+          }
+        ],
+        "review_required": false
+      }
+    ]
+  },
+  "profile": {
+    "interests": [
+      {
+        "id": "IN-001",
+        "item": "图形拼图",
+        "source_pages": [1],
+        "evidence": [
+          {
+            "source_page": 1,
+            "source_type": "学生自述",
+            "original_text": "我喜欢图形拼图。",
+            "confidence": "high",
+            "review_required": false
+          }
+        ]
+      }
+    ],
+    "aspirations": [],
+    "learning_habits": [
+      {
+        "id": "LH-001",
+        "statement": "自述习惯在做题后检查。",
+        "source_pages": [2],
+        "evidence": [
+          {
+            "source_page": 2,
+            "source_type": "学生自述",
+            "original_text": "做完会回头检查。",
+            "confidence": "high",
+            "review_required": false
+          }
+        ],
+        "review_required": false
+      }
+    ],
+    "self_reported_difficulties": [
+      {
+        "id": "SD-001",
+        "statement": "自述对异分母通分还不熟。",
+        "source_pages": [2],
+        "evidence": [
+          {
+            "source_page": 2,
+            "source_type": "学生自述",
+            "original_text": "异分母通分还不熟。",
+            "confidence": "high",
+            "review_required": false
+          }
+        ],
+        "review_required": false
+      }
+    ],
+    "teacher_observations": [
+      {
+        "id": "TO-001",
+        "statement": "教师观察到能清楚列出步骤。",
+        "source_pages": [3],
+        "evidence": [
+          {
+            "source_page": 3,
+            "source_type": "教师观察",
+            "original_text": "练习中列出分步计算。",
+            "confidence": "medium",
+            "review_required": true
+          }
+        ],
+        "review_required": true,
+        "note": "记录未注明观察日期。"
+      }
+    ],
+    "strengths": [
+      {
+        "id": "ST-001",
+        "statement": "能清楚列出步骤。",
+        "source_pages": [3],
+        "evidence": [
+          {
+            "source_page": 3,
+            "source_type": "教师观察",
+            "original_text": "分步计算记录清晰。",
+            "confidence": "high",
+            "review_required": false
+          }
+        ],
+        "review_required": false
+      }
+    ],
+    "weaknesses": []
+  },
+  "academic_status": [
+    {
+      "id": "AS-001",
+      "subject": "数学",
+      "current_stage": "分数运算",
+      "mastered": null,
+      "main_gaps": ["异分母分数相加"],
+      "skill_issues": [],
+      "method_difficulties": [],
+      "interventions_taken": [],
+      "planned_modules_next": ["复习约分"],
+      "source_pages": [3],
+      "evidence": [
+        {
+          "source_page": 3,
+          "source_type": "教师观察",
+          "original_text": "本周安排分数运算练习。",
+          "confidence": "medium",
+          "review_required": false
+        }
+      ],
+      "review_required": false
+    }
+  ],
+  "score_records": [
+    {
+      "id": "SC-001",
+      "exam_date": null,
+      "subject": "数学",
+      "exam_name": "合成练习",
+      "score": 72,
+      "full_score": null,
+      "class_rank": null,
+      "grade_rank": null,
+      "source_page": 4,
+      "source_type": "考试记录",
+      "original_text": "练习分数 72。",
+      "confidence": "medium",
+      "review_required": true,
+      "note": "试卷满分未记载。"
+    }
+  ],
+  "score_summaries": [
+    {
+      "id": "SS-001",
+      "subject": "数学",
+      "summary": "只保留合成分数摘录。",
+      "highest": 72,
+      "lowest": 72,
+      "source_pages": [4],
+      "evidence": [
+        {
+          "source_page": 4,
+          "source_type": "考试记录",
+          "original_text": "练习分数 72。",
+          "confidence": "medium",
+          "review_required": true
+        }
+      ],
+      "review_required": true
+    }
+  ],
+  "improvement_goals": [
+    {
+      "id": "IG-001",
+      "subject": "数学",
+      "baseline": null,
+      "target_score": null,
+      "target_display": "70+",
+      "target_capability": "熟练通分",
+      "deadline": null,
+      "focus_modules": ["分数运算"],
+      "interventions": ["跟练"],
+      "source_pages": [5],
+      "evidence": [
+        {
+          "source_page": 5,
+          "source_type": "教学计划",
+          "original_text": "目标 70+，时间再定。",
+          "confidence": "medium",
+          "review_required": true
+        }
+      ],
+      "review_required": true
+    }
+  ],
+  "study_plans": [
+    {
+      "id": "PL-001",
+      "plan_name": "合成分数学习计划",
+      "subjects": ["数学"],
+      "period": { "start": "2026-11-23", "end": null, "period_note": "两周后评估安排。" },
+      "weekly_schedule": [{ "day": "周二", "slot": "课后", "hours": 1 }],
+      "weekly_hours_total": 1,
+      "modules": [{ "month": "2026-11", "weeks": [{ "week": "第1周", "items": ["通分"], "planned_hours": 1 }] }],
+      "planned_hours": { "per_week": 1, "per_month_note": "视安排调整。" },
+      "review_and_assessment": ["课堂练习"],
+      "implementation_status": "待确认",
+      "status_note": "尚未执行。",
+      "source_pages": [5],
+      "evidence": [
+        {
+          "source_page": 5,
+          "source_type": "教学计划",
+          "original_text": "第一周通分练习。",
+          "confidence": "high",
+          "review_required": false
+        }
+      ],
+      "review_required": true
+    }
+  ],
+  "follow_up_suggestions": [{ "id": "FU-001", "suggestion": "请核对试卷满分。", "related_pages": [4] }],
+  "review_warnings": [
+    { "id": "RW-001", "type": "资料缺失", "issue": "缺少目标期限。", "source_pages": [5], "handling": "向教师核对。" }
+  ],
+  "future_section": { "example": "尚无字段映射，保留给人工核对。" }
+}

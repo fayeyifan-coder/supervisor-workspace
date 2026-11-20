@@ -1,12 +1,15 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, type IpcMainInvokeEvent, type Session } from "electron";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { open, readFile } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
 import { channels, type Failure, type Result } from "./contracts";
-import { failure, WorkspaceDatabase } from "./database";
+import { failure, WorkspaceDatabase, WorkspaceFault } from "./database";
 import { closeStoresIndependently } from "./database-lifecycle";
 import { WorkLogDatabase, type WorkStatus } from "./worklog";
 import { GrowthProfileDatabase, GrowthProfileFault, type GrowthSaveInput } from "./growth-profile";
+
+import { IntakeStore, StudentIntakeService, type IntakeConfirm, type IntakeFile, type IntakeTarget } from "./student-intake";
+import { maxIntakeBytes } from "./intake-format";
 
 const scheme = "supervisor-workspace-mvp";
 const page = `${scheme}://workspace/index.html`;
@@ -16,6 +19,7 @@ const title = "督学工作台";
 let database: WorkspaceDatabase | undefined;
 let workLog: WorkLogDatabase | undefined;
 let growthProfile: GrowthProfileDatabase | undefined;
+let intakeStore: IntakeStore | undefined;
 
 protocol.registerSchemesAsPrivileged([{ scheme, privileges: { standard: true, secure: true } }]);
 
@@ -62,6 +66,28 @@ function denied(): Failure {
   return { ok: false, code: "invalid", message: "此窗口无权访问本地记录。" };
 }
 
+async function readIntakeFile(path: string): Promise<string> {
+  if (extname(path).toLowerCase() !== ".json") throw new WorkspaceFault("invalid", "请选择 JSON 文件。");
+  const fd = await open(path, "r");
+  try {
+    const maxBytes = maxIntakeBytes;
+    const stat = await fd.stat();
+    if (!stat.isFile() || stat.size > maxBytes) {
+      throw new WorkspaceFault("invalid", "请选择不超过 256 KiB 的普通 JSON 文件。");
+    }
+    const bytes = Buffer.alloc(maxBytes + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const { bytesRead } = await fd.read(bytes, length, bytes.length - length, length);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > maxBytes) throw new WorkspaceFault("invalid", "文件超过 256 KiB。");
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length)); }
+    catch { throw new WorkspaceFault("invalid", "文件不是有效的 UTF-8 JSON。"); }
+  } finally { await fd.close(); }
+}
+
 async function start(profile: string): Promise<void> {
   app.setAppUserModelId(appId);
   const ui = session.fromPartition("supervisor-workspace-mvp-ui");
@@ -84,6 +110,15 @@ async function start(profile: string): Promise<void> {
   try {
     growthProfile = GrowthProfileDatabase.open(join(profile, "data", "growth.sqlite3"), join(profile, "data", "growth.initialized"));
   } catch (error) { growthStartupError = failure(error); }
+
+  let intake: StudentIntakeService | undefined;
+  let intakeStartupError: Failure = { ok: false, code: "recovery", message: "导入功能需要可用的学生档案和成长档案。" };
+  if (database && growthProfile) {
+    try {
+      intakeStore = IntakeStore.open(join(profile, "data", "student-intake.sqlite3"), join(profile, "data", "student-intake.initialized"));
+      intake = new StudentIntakeService(intakeStore, database, growthProfile);
+    } catch (error) { intakeStartupError = failure(error); }
+  }
 
   const window = new BrowserWindow({
     title,
@@ -155,6 +190,46 @@ async function start(profile: string): Promise<void> {
     const studentId = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Partial<GrowthSaveInput>).studentId : undefined;
     return invokeGrowth(event, studentId, store => store.save(raw, id => Boolean(database?.students().some(student => student.id === id))));
   });
+  function invokeIntake<T>(event: IpcMainInvokeEvent, operation: (service: StudentIntakeService) => T): Result<T> {
+    if (!isTrusted(event, window)) return denied();
+    if (!intake) return intakeStartupError;
+    try { return { ok: true, value: operation(intake) }; } catch (error) { return failure(error); }
+  }
+
+  let pickingIntake = false;
+  ipcMain.handle(channels.pickStudentIntake, async (event): Promise<Result<IntakeFile[]>> => {
+    if (!isTrusted(event, window)) return denied();
+    if (!intake) return intakeStartupError;
+    if (pickingIntake) return { ok: false, code: "busy", message: "正在选择 JSON 文件。" };
+    pickingIntake = true;
+    try {
+      const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+        title: "选择学生资料 JSON", properties: ["openFile", "multiSelections"], filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!isTrusted(event, window)) return denied();
+      if (canceled) return { ok: true, value: [] };
+      if (filePaths.length > 20) return { ok: false, code: "invalid", message: "每批最多选择 20 份 JSON。" };
+      intake.clearFiles();
+      const results: IntakeFile[] = [];
+      for (const path of filePaths) {
+        const name = basename(path);
+        try { results.push(intake.register(name, await readIntakeFile(path))); }
+        catch (error) {
+          results.push({ name, error: error instanceof WorkspaceFault ? error.message : "无法读取所选 JSON 文件。" });
+        }
+      }
+      return { ok: true, value: results };
+    } catch {
+      return { ok: false, code: "failed", message: "无法打开 JSON 文件选择窗口。" };
+    } finally { pickingIntake = false; }
+  });
+  ipcMain.handle(channels.prepareStudentIntake, (event, token: string, target?: IntakeTarget) =>
+    invokeIntake(event, intake => intake.prepare(token, target)));
+  ipcMain.handle(channels.saveStudentIntake, (event, input: IntakeConfirm) =>
+    invokeIntake(event, intake => intake.confirm(input)));
+  ipcMain.handle(channels.studentIntakeHistory, (event, studentId: string) =>
+    invokeIntake(event, intake => intake.history(studentId)));
+
   window.once("ready-to-show", () => window.show());
   await window.loadURL(page);
 }
@@ -206,7 +281,7 @@ try {
     });
     app.on("window-all-closed", () => app.quit());
     app.on("will-quit", () => {
-      for (const error of closeStoresIndependently(() => growthProfile?.close(), () => workLog?.close(), () => database?.close())) {
+      for (const error of closeStoresIndependently(() => intakeStore?.close(), () => growthProfile?.close(), () => workLog?.close(), () => database?.close())) {
         console.error("Database close failed during application exit", error);
       }
     });

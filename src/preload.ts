@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { LessonInput, StudentInput, WorkspaceApi } from "./contracts";
+import type { IntakeConfirm, IntakeTarget, LessonInput, StudentInput, WorkspaceApi } from "./contracts";
 import type { WorkItemInput, WorkStatus } from "./worklog";
 import type { GrowthSaveInput } from "./growth-profile";
 
@@ -14,6 +14,10 @@ const api: WorkspaceApi = {
   workHistory: (id: string) => ipcRenderer.invoke("m2b:work-history", id),
   saveWorkItem: (input: WorkItemInput) => ipcRenderer.invoke("m2b:save-work-item", input),
   setWorkItemStatus: (id: string, status: WorkStatus) => ipcRenderer.invoke("m2b:set-work-item-status", id, status),
+  pickStudentIntake: () => ipcRenderer.invoke("m2c:pick-student-intake"),
+  prepareStudentIntake: (token: string, target?: IntakeTarget) => ipcRenderer.invoke("m2c:prepare-student-intake", token, target),
+  saveStudentIntake: (input: IntakeConfirm) => ipcRenderer.invoke("m2c:save-student-intake", input),
+  studentIntakeHistory: (studentId: string) => ipcRenderer.invoke("m2c:student-intake-history", studentId),
   growthProfile: (studentId: string) => ipcRenderer.invoke("m2c:growth-profile", studentId),
   saveGrowthProfile: (input: GrowthSaveInput) => ipcRenderer.invoke("m2c:save-growth-profile", input),
 };

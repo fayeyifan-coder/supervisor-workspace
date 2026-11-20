@@ -38,7 +38,7 @@ button:disabled { opacity: .58; cursor: default; }
 .student-list span { color: var(--quiet); font-size: 12px; }
 .detail { padding: 22px 24px 30px; min-width: 0; }
 .panel { min-width: 0; padding: 17px; background: var(--paper); border: 1px solid var(--line); border-radius: 7px; }
-.detail > .panel { max-width: 630px; }
+.detail > .panel, .student-content > .panel { max-width: 630px; }
 .profile { padding: 0 0 16px; overflow-wrap: anywhere; }
 .profile h1 { margin: 3px 0 8px; }
 .learning { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); align-items: start; gap: 14px; }
