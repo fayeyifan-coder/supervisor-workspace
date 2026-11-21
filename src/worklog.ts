@@ -18,6 +18,19 @@ const appId = 0x53574231;
 const schemaVersion = 1;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+const worklogDdl = `          CREATE TABLE work_items(
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, work_date TEXT NOT NULL,
+            student_id TEXT, started_at TEXT NOT NULL, notes TEXT NOT NULL, next_step TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('open','done','cancelled')),
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
+          ) STRICT;
+          CREATE INDEX work_items_by_date ON work_items(work_date DESC, updated_at DESC, id DESC);
+          CREATE TABLE work_changes(
+            id TEXT PRIMARY KEY, item_id TEXT NOT NULL REFERENCES work_items(id),
+            changed_at INTEGER NOT NULL, snapshot TEXT NOT NULL
+          ) STRICT;
+`;
+
 export class WorkLogFault extends WorkspaceFault {
   constructor(code: Failure["code"], message: string) { super(code, message); }
 }
@@ -54,6 +67,14 @@ export class WorkLogDatabase {
     if (initialized && (!initialized.isFile() || initialized.isSymbolicLink() || initialized.nlink !== 1)) {
       throw new WorkLogFault("recovery", "工作日志初始化标记无效。");
     }
+    const hasSidecars = ["-wal", "-shm", "-journal"].map(suffix => {
+      const sidecar = lstatSync(path + suffix, { throwIfNoEntry: false });
+      if (!sidecar) return false;
+      if (!sidecar.isFile() || sidecar.isSymbolicLink() || sidecar.nlink !== 1) {
+        throw new WorkLogFault("recovery", "工作日志 SQLite 侧车身份无效。请保留原文件。");
+      }
+      return true;
+    }).some(Boolean);
     if (exists) {
       const fd = openSync(path, "r");
       try {
@@ -64,7 +85,7 @@ export class WorkLogDatabase {
         }
       } finally { closeSync(fd); }
     } else {
-      if (initialized || ["-wal", "-shm", "-journal"].some(suffix => lstatSync(path + suffix, { throwIfNoEntry: false }))) {
+      if (initialized || hasSidecars) {
         throw new WorkLogFault("recovery", "工作日志主库缺失但存在初始化状态，请保留文件。");
       }
       mkdirSync(dirname(path), { recursive: true });
@@ -74,19 +95,7 @@ export class WorkLogDatabase {
     try {
       db.exec("PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL");
       if (!exists) {
-        db.exec(`BEGIN IMMEDIATE;
-          CREATE TABLE work_items(
-            id TEXT PRIMARY KEY, title TEXT NOT NULL, work_date TEXT NOT NULL,
-            student_id TEXT, started_at TEXT NOT NULL, notes TEXT NOT NULL, next_step TEXT NOT NULL,
-            status TEXT NOT NULL CHECK(status IN ('open','done','cancelled')),
-            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
-          ) STRICT;
-          CREATE INDEX work_items_by_date ON work_items(work_date DESC, updated_at DESC, id DESC);
-          CREATE TABLE work_changes(
-            id TEXT PRIMARY KEY, item_id TEXT NOT NULL REFERENCES work_items(id),
-            changed_at INTEGER NOT NULL, snapshot TEXT NOT NULL
-          ) STRICT;
-          PRAGMA application_id=${appId}; PRAGMA user_version=${schemaVersion}; COMMIT;`);
+        db.exec(`BEGIN IMMEDIATE;${worklogDdl}PRAGMA application_id=${appId}; PRAGMA user_version=${schemaVersion}; COMMIT;`);
       } else if (db.prepare("PRAGMA application_id").get()?.application_id !== appId ||
           db.prepare("PRAGMA user_version").get()?.user_version !== schemaVersion ||
           db.prepare("PRAGMA quick_check(1)").get()?.quick_check !== "ok") {
@@ -198,9 +207,19 @@ export class WorkLogDatabase {
       nextStep: row.next_step as string, status: row.status as WorkStatus, createdAt: row.created_at as number,
       updatedAt: row.updated_at as number, completedAt: row.completed_at as number | null };
   }
+  protectionConnection(): DatabaseSync {
+    if (this.writesBlocked || this.db.isTransaction) throw new WorkspaceFault("busy", "本地数据库写入状态仍待确定，无法导出。");
+    return this.db;
+  }
+
   close(): void {
     const blocked = this.writesBlocked;
     this.db.close();
     if (blocked) throw new WorkLogFault("unknown", "工作日志状态待确认。");
   }
 }
+
+export const worklogProtection = {
+  key: "worklog", marker: "worklog-v1\n", applicationId: appId, version: schemaVersion,
+  tables: ["work_items", "work_changes"], ddl: [worklogDdl],
+};
