@@ -13,7 +13,7 @@ import { maxIntakeBytes } from "./intake-format";
 import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSupportedProfileOpen, validateProtection,
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
 import { OperationsDatabase } from "./operations";
-import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
+import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
 const scheme = "supervisor-workspace-mvp";
@@ -369,12 +369,12 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   await window.loadURL(page);
 }
 
-function prepareProfile(profileName = "supervisor-workspace-mvp"): string {
+function prepareProfile(profileName: string, format: ProtectionFormat): string {
   if (process.platform !== "win32") throw new Error("MVP 验收使用本机 D 盘。");
   // Recovery artifacts and managed active copies enter only via the explicit activation route.
   requireSupportedProfileOpen(profileName);
   let path = "D:\\";
-  for (const [index, part] of ["Codex-Development", "Temp", profileName, "profile"].entries()) {
+  for (const [index, part] of ["Codex-Development", "Temp", ...originalProfileSegments(profileName, format)].entries()) {
     path = join(path, part);
     ensureDirectory(path, index >= 2);
   }
@@ -480,7 +480,7 @@ try {
   const profileName = syntheticM2CProfile ? requestedM2CProfile
     : syntheticM2BProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-mvp";
   const format: ProtectionFormat = syntheticM2CProfile && /^sw-r2a-[a-z0-9-]+$/.test(profileName) ? 2 : 1;
-  const profile = prepareProfile(profileName);
+  const profile = prepareProfile(profileName, format);
   const owner = dirname(profile);
   const userData = join(profile, "chromium");
   app.setPath("userData", userData);

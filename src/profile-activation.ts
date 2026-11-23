@@ -127,6 +127,10 @@ export function approveActiveProfile(profile: string, digest: string): void {
   writeFileSync(join(profile, "activation.approved"), digest, { flag: "wx", flush: true });
 }
 
+export function originalProfileSegments(name: string, format: ProtectionFormat): string[] {
+  return format === 2 ? ["sw-r2a-profiles", name, "profile"] : [name, "profile"];
+}
+
 const enrollment = "operations-synthetic.initialized";
 const enrollmentContents = "operations-synthetic-v2\n";
 

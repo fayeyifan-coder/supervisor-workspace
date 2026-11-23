@@ -167,7 +167,7 @@ function verifyHeader(path: string): void {
   } finally { closeSync(fd); }
 }
 
-// R2-A① only opens this store from isolated tests. Desktop start-up does not load it.
+// Desktop startup uses this store only in the isolated five-store synthetic mode.
 export class OperationsDatabase {
   private writesBlocked = false;
 

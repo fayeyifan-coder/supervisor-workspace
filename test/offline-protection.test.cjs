@@ -14,7 +14,7 @@ const { GrowthProfileDatabase } = require("../build/growth-profile.js");
 const { IntakeStore, StudentIntakeService } = require("../build/student-intake.js");
 const { captureProtection, prepareProtectionRestore, validateProtection, verifyProtectionStores, ProtectionFiles } = require("../build/offline-protection.js");
 const { OperationsDatabase } = require("../build/operations.js");
-const { approveActiveProfile, approvedSelection, checkOriginalProtectionMode, readActivation, saveActivation, verifyActiveProfile } = require("../build/profile-activation.js");
+const { approveActiveProfile, approvedSelection, checkOriginalProtectionMode, originalProfileSegments, readActivation, saveActivation, verifyActiveProfile } = require("../build/profile-activation.js");
 
 const exe = join(__dirname, "..", "build", "recovery-io.exe");
 const io = new ProtectionFiles(exe);
@@ -536,4 +536,17 @@ test("an interrupted fifth-image write leaves no ready record and preserves the 
   assert.equal(existsSync(join(target, "data", "student-intake.initialized")), true);
   assert.deepEqual(f.ops.attendancePlan(plan.id), plan);
   validateProtection(captureProtection(f.stores, "0.2.0", 2));
+});
+
+test("a historical four-store executable cannot reach the nested five-store owner with the same profile name", t => {
+  const root = temp(), name = "sw-r2a-downgrade-test";
+  const legacy = join(root, ...originalProfileSegments(name, 1));
+  const five = join(root, ...originalProfileSegments(name, 2));
+  assert.equal(legacy, join(root, name, "profile"));
+  assert.notEqual(five, legacy);
+  mkdirSync(join(five, "data"), { recursive: true });
+  assert.equal(checkOriginalProtectionMode(five, 2, true), true);
+  mkdirSync(join(legacy, "data"), { recursive: true });
+  assert.equal(checkOriginalProtectionMode(legacy, 1), false);
+  assert.throws(() => checkOriginalProtectionMode(five, 1), /无法使用四库模式/);
 });

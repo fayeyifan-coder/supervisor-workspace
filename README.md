@@ -102,7 +102,7 @@ Windows 本地开发验收可设置 `M2C_SYNTHETIC_TEST=1`；便携包验收可�
 
 ## R2-A② 五库合成验收
 
-设置 M2-C 的开发版或便携版合成开关，并把 `M2C_SYNTHETIC_PROFILE` 设为以 `sw-r2a-` 开头的全新名称。此模式会在独立目录登记五库身份并初始化 `operations.sqlite3`。已登记档案缺库时拒绝自动补建；发现第五库文件或五库标记时拒绝以四库模式运行。此候选仅用于合成试用。
+设置 M2-C 的开发版或便携版合成开关，并把 `M2C_SYNTHETIC_PROFILE` 设为以 `sw-r2a-` 开头的全新名称。此模式在 `D:\Codex-Development\Temp\sw-r2a-profiles\<名称>\profile` 登记五库身份并初始化 `operations.sqlite3`。已登记档案缺库时拒绝自动补建；发现第五库文件或五库标记时拒绝以四库模式运行。历史四库程序按同名启动时使用不同的目录层级。此候选仅用于合成试用。
 
 `SWBACK2` 导出在 Electron 主进程同一个同步操作中取得五个库的 SQLite 写入保留锁，再读取已提交记录和 WAL 数据。源库保持独立，未跨库提交的业务事务仍可保留待处理状态。恢复前校验全部数据库身份、初始化标记、Schema、长度、SHA-256、SQLite 完整性与学生关联。
 
