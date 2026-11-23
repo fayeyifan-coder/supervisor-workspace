@@ -8,7 +8,7 @@ function descriptorFor(state: PendingOperationState | undefined) {
   if (state?.kind === "damaged") return state.descriptor;
 }
 
-export function usePendingOperation(api: WorkspaceApi, onConfirmed: (request?: OperationCommand) => void) {
+export function usePendingOperation(api: WorkspaceApi, onConfirmed: (request?: OperationCommand, requestId?: string) => void) {
   const [state, setState] = useState<PendingOperationState>();
   const held = useRef(state);
   const active = useRef(false);
@@ -79,9 +79,8 @@ export function usePendingOperation(api: WorkspaceApi, onConfirmed: (request?: O
       if (!receipt.ok) { setMessage(receipt.message); return; }
       if (receipt.value) {
         if (await acknowledge(requestId)) {
-          setMessage("原请求已保存，正在重新读取记录。");
-          if (command) onConfirmed(command);
-          else onConfirmed();
+          setMessage("原请求已保存。");
+          onConfirmed(command, requestId);
         }
         return;
       }
@@ -98,8 +97,8 @@ export function usePendingOperation(api: WorkspaceApi, onConfirmed: (request?: O
       const result = await dispatch(command);
       if (result.ok) {
         if (await acknowledge(requestId)) {
-          setMessage("原请求已保存，正在重新读取记录。");
-          onConfirmed(command);
+          setMessage("原请求已保存。");
+          onConfirmed(command, requestId);
         }
       } else if ((result.code === "conflict" || result.code === "invalid") && await acknowledge(requestId)) {
         setMessage("原请求未保存。" + result.message);

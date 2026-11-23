@@ -217,8 +217,8 @@ function BlockCard({ block, target, locked, submit, onEdit }: {
   </article>;
 }
 
-export function AttendanceLearningPanel({ api, target, alias, reloadVersion, blocked, submit, onBack }: {
-  api: WorkspaceApi; target: LearningDayInput; alias: string; reloadVersion: number; blocked: boolean;
+export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack }: {
+  api: WorkspaceApi; target: LearningDayInput; alias: string; reloadVersion: number; confirmedRequestId?: string; blocked: boolean;
   submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void;
 }) {
   const [data, setData] = useState<LearningDay>();
@@ -230,6 +230,7 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, blo
   const [draft, setDraft] = useState<BlockDraft>();
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
+  const pendingEditor = useRef<{ command: LearningChange; close: () => void } | undefined>(undefined);
   useEffect(() => {
     let ignore = false;
     const query = { attendanceId: target.attendanceId, studentId: target.studentId };
@@ -237,11 +238,19 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, blo
     api.learningDay(query).then(result => {
       if (ignore) return;
       setLoadedKey(queryKey);
-      if (result.ok) setData(result.value);
-      else setReadError(result.message);
+      if (!result.ok) { setReadError(result.message); return; }
+      setData(result.value);
+      const editor = pendingEditor.current;
+      if (editor && editor.command.requestId === confirmedRequestId &&
+          result.value.blocks.some(block => block.id === editor.command.id && block.revision > editor.command.expectedRevision)) {
+        // Only close the editor whose request succeeded, after its saved revision is visible.
+        pendingEditor.current = undefined;
+        editor.close();
+        setNotice({ error: false, text: "已核对并读取保存后的学习记录。" });
+      }
     }).catch(() => { if (!ignore) setReadError("无法读取到校记录，请重试。"); });
     return () => { ignore = true; };
-  }, [api, queryKey, target.attendanceId, target.studentId]);
+  }, [api, queryKey, target.attendanceId, target.studentId, confirmedRequestId]);
   function reread() { setReload(value => value + 1); }
 
   const plan = data?.attendance;
@@ -251,13 +260,16 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, blo
     running.current = true;
     setBusy(true);
     setNotice(undefined);
+    pendingEditor.current = saved ? { command, close: saved } : undefined;
     try {
       const result = await submit(command);
       if (result.ok) {
+        pendingEditor.current = undefined;
         setNotice({ error: false, text: "已保存。" });
         saved?.();
         reread();
       } else if (result.code !== "unknown") {
+        if (result.code === "conflict" || result.code === "invalid") pendingEditor.current = undefined;
         setNotice({ error: true, text: result.message });
         if (result.code === "conflict") reread();
       }
@@ -296,7 +308,11 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, blo
         {plan && <p className="muted">{shanghaiParts(plan.startAt).date} · {plan.kind === "whole_day" ? "全天到校" : "普通到校"}</p>}</div>
       <button className="secondary" type="button" disabled={busy} onClick={reread}>重新读取本次到校</button>
     </header>
-    {readError && <p className="notice failure" role="alert">{readError}</p>}
+    {readError && <p className="notice failure" role="alert">
+      {readError}{data && " 下方是上次读取的记录，写入已暂停。"}
+    </p>}
+    {data && loadedKey !== queryKey && !readError &&
+      <p className="notice pending" role="status">正在从数据库核对。下方暂时显示上次读取的记录。</p>}
     {!data && !readError && <p className="muted" role="status">正在读取本次到校…</p>}
     {notice && <p className={"notice " + (notice.error ? "failure" : "success")} role={notice.error ? "alert" : "status"}>{notice.text}</p>}
     {data && plan && <>

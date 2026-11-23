@@ -76,12 +76,14 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const submission = useRef<ScheduleSaveInput | undefined>(undefined);
   const [learning, setLearning] = useState<{ attendanceId: string; studentId: string }>();
   const [learningRevision, setLearningRevision] = useState(0);
-  const request = usePendingOperation(api, saved => {
+  const [confirmedLearningRequest, setConfirmedLearningRequest] = useState<string>();
+  const request = usePendingOperation(api, (saved, requestId) => {
     if (saved?.command === "saveAttendancePlan") {
       setWeek(mondayOf(shanghaiParts(saved.startAt).date));
       showDraft(undefined);
     }
     refresh();
+    setConfirmedLearningRequest(requestId);
     setLearningRevision(value => value + 1);
   });
   const [latest, setLatest] = useState<AttendancePlan>();
@@ -221,7 +223,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
         </div>
       </aside>}
     {learning && <AttendanceLearningPanel api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
-      reloadVersion={learningRevision} blocked={request.blocked} submit={request.run}
+      reloadVersion={learningRevision} confirmedRequestId={confirmedLearningRequest}
+      blocked={request.blocked} submit={request.run}
       onBack={() => { setLearning(undefined); refresh(); }} />}
     <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}>
     <header className="schedule-heading">
