@@ -12,6 +12,9 @@ const api: WorkspaceApi = {
   learningDay: (input: LearningDayInput) => ipcRenderer.invoke("r2b:learning-day", input),
   applyLearningChange: (input: LearningChange) => ipcRenderer.invoke("r2b:apply-learning-change", input),
   scheduleReceipt: (input: ScheduleReceiptInput) => ipcRenderer.invoke("r2b:schedule-receipt", input),
+  pendingOperation: () => ipcRenderer.invoke("r2b:pending-operation"),
+  acknowledgeOperation: (requestId: string, reviewed?: boolean) =>
+    ipcRenderer.invoke("r2b:acknowledge-operation", requestId, reviewed),
   students: () => ipcRenderer.invoke("mvp:students"),
   exportProtection: () => ipcRenderer.invoke("m2d:export"),
   restoreProtection: () => ipcRenderer.invoke("m2d:restore"),

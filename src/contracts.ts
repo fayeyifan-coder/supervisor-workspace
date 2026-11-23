@@ -26,6 +26,8 @@ export const channels = {
   learningDay: "r2b:learning-day",
   applyLearningChange: "r2b:apply-learning-change",
   scheduleReceipt: "r2b:schedule-receipt",
+  pendingOperation: "r2b:pending-operation",
+  acknowledgeOperation: "r2b:acknowledge-operation",
 } as const;
 
 export type { WorkChange, WorkItem, WorkItemInput, WorkStatus } from "./worklog";
@@ -106,11 +108,18 @@ export interface ScheduleReceiptInput {
 }
 
 export interface ScheduleReceipt { revision: number; savedAt: number }
+export type OperationCommand = (ScheduleSaveInput & { command: "saveAttendancePlan" }) | LearningChange;
+export type PendingOperationState =
+  | { kind: "empty" }
+  | { kind: "pending"; command: OperationCommand }
+  | { kind: "damaged"; descriptor?: ScheduleReceiptInput };
 
 export interface WorkspaceApi {
   learningDay(input: LearningDayInput): Promise<Result<LearningDay>>;
   applyLearningChange(input: LearningChange): Promise<Result<AttendancePlan | LearningBlock>>;
   scheduleReceipt(input: ScheduleReceiptInput): Promise<Result<ScheduleReceipt | null>>;
+  pendingOperation(): Promise<Result<PendingOperationState>>;
+  acknowledgeOperation(requestId: string, reviewed?: boolean): Promise<Result<null>>;
   scheduleAvailable(): Promise<Result<boolean>>;
   scheduleWeek(input: ScheduleWeekInput): Promise<Result<AttendancePlan[]>>;
   schedulePlan(id: string): Promise<Result<AttendancePlan | null>>;

@@ -2,9 +2,9 @@ name: Windows verification
 
 on:
   push:
-    branches: [m2-b/reliability-proof, m2-c/student-growth-profile, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule]
+    branches: [m2-b/reliability-proof, m2-c/student-growth-profile, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning]
   pull_request:
-    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import, m2-d/offline-data-protection, v0.2/r2-a-operations-protection]
+    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule]
 
 permissions:
   contents: read
@@ -54,7 +54,9 @@ jobs:
                   $env:GITHUB_HEAD_REF -eq 'v0.2/r2-a-operations-protection' -or
                   $env:GITHUB_REF_NAME -eq 'v0.2/r2-a-operations-protection') { 'r2a' } elseif (
                   $env:GITHUB_HEAD_REF -eq 'v0.2/r2-b-weekly-schedule' -or
-                  $env:GITHUB_REF_NAME -eq 'v0.2/r2-b-weekly-schedule') { 'r2b' } else { 'mvp' }
+                  $env:GITHUB_REF_NAME -eq 'v0.2/r2-b-weekly-schedule') { 'r2b' } elseif (
+                    $env:GITHUB_HEAD_REF -eq 'v0.2/r2-b-attendance-learning' -or
+                    $env:GITHUB_REF_NAME -eq 'v0.2/r2-b-attendance-learning') { 'r2b2' } else { 'mvp' }
           $root = Join-Path $env:RUNNER_TEMP "supervisor-$kind-portable-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           if (Test-Path -LiteralPath $root) { throw 'Portable output directory already exists.' }
           New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
@@ -122,7 +124,7 @@ jobs:
             const buildFiles = ["build/main.js", "build/preload.js", "build/contracts.js", "build/database.js",
               "build/database-lifecycle.js", "build/worklog.js", "build/growth-profile.js",
               "build/student-intake.js", "build/intake-format.js", "build/offline-protection.js", "build/profile-activation.js",
-              "build/operations.js", "build/operations-schema.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js"];
+              "build/operations.js", "build/operations-schema.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js", "build/operations-pending.js"];
             const allowed = new Set(["package.json", "build", "dist", "dist/assets", "dist/index.html", ...buildFiles]);
             for (const path of contents) {
               assert(allowed.has(path) || assetsPattern.test(path), "Unexpected ASAR member: " + path);

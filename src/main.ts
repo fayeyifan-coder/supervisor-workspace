@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, type IpcMainInvokeEvent, type Session } from "electron";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { open, readFile } from "node:fs/promises";
@@ -14,8 +13,9 @@ import { maxIntakeBytes } from "./intake-format";
 import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSupportedProfileOpen, validateProtection,
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
 import { OperationsDatabase } from "./operations";
-import { listScheduleWeek, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
+import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
 import { applyLearningChange, readLearningDay, readScheduleReceipt } from "./learning-api";
+import { OperationsPending } from "./operations-pending";
 import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
@@ -151,10 +151,8 @@ function completeStores(format: ProtectionFormat) {
 async function start(owner: string, profile: string, state: ActivationState, opened: ReturnType<typeof openProfile>, format: ProtectionFormat): Promise<void> {
   const { startupError, growthStartupError, intakeStartupError, intake } = opened;
   app.setAppUserModelId(appId);
-  // Persist one submitted command per active synthetic profile for confirmation after a restart.
-  const ui = session.fromPartition(format === 2
-    ? "persist:supervisor-operations-" + createHash("sha256").update(profile).digest("hex")
-    : "supervisor-workspace-mvp-ui");
+  const ui = session.fromPartition("supervisor-workspace-mvp-ui");
+  const operationsPending = new OperationsPending(profile);
   restrictSession(ui);
   const window = new BrowserWindow({
     title,
@@ -196,7 +194,6 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   ipcMain.handle(channels.history, (event, id: unknown) => invoke(event, store => store.history(id)));
   ipcMain.handle(channels.createStudent, (event, raw: unknown) => invoke(event, store => store.createStudent(raw)));
   ipcMain.handle(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
-  if (format === 2) app.once("will-quit", () => ui.flushStorageData());
   function invokeSchedule<T>(event: IpcMainInvokeEvent,
       operation: (store: OperationsDatabase, students: () => ReturnType<WorkspaceDatabase["students"]>) => T): Result<T> {
     if (!isTrusted(event, window)) return denied();
@@ -213,20 +210,39 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     invokeSchedule(event, (store, students) => listScheduleWeek(store, students, raw)));
   ipcMain.handle(channels.schedulePlan, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => readSchedulePlan(store, students, raw)));
+  function performOperation<T>(command: Record<string, unknown>, operation: () => T): T {
+    const requestId = operationsPending.begin(command);
+    try {
+      const result = operation();
+      operationsPending.remember(requestId);
+      return result;
+    } catch (error) {
+      const { code } = failure(error);
+      if (code === "invalid" || code === "conflict") operationsPending.remember(requestId);
+      throw error;
+    }
+  }
   ipcMain.handle(channels.saveSchedulePlan, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => {
-      ui.flushStorageData();
-      return saveSchedulePlan(store, students, raw);
+      const command = { ...scheduleObject(raw), command: "saveAttendancePlan" };
+      return performOperation(command, () => saveSchedulePlan(store, students, command));
     }));
   ipcMain.handle(channels.learningDay, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => readLearningDay(store, students, raw)));
   ipcMain.handle(channels.applyLearningChange, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => {
-      ui.flushStorageData();
-      return applyLearningChange(store, students, raw);
+      const command = scheduleObject(raw);
+      return performOperation(command, () => applyLearningChange(store, students, command));
     }));
   ipcMain.handle(channels.scheduleReceipt, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => readScheduleReceipt(store, students, raw)));
+  ipcMain.handle(channels.pendingOperation, event =>
+    invokeSchedule(event, () => operationsPending.state()));
+  ipcMain.handle(channels.acknowledgeOperation, (event, raw: unknown, reviewed: unknown) =>
+    invokeSchedule(event, (store, students) => {
+      operationsPending.acknowledge(scheduleId(raw), reviewed === true, input => readScheduleReceipt(store, students, input));
+      return null;
+    }));
   const invokeWork = <T>(event: IpcMainInvokeEvent, operation: (store: WorkLogDatabase) => T): Result<T> => {
     if (!isTrusted(event, window)) return denied();
     if (!workLog) return startupError;

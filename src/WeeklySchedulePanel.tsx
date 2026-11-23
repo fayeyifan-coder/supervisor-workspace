@@ -77,7 +77,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const [learning, setLearning] = useState<{ attendanceId: string; studentId: string }>();
   const [learningRevision, setLearningRevision] = useState(0);
   const request = usePendingOperation(api, saved => {
-    if (saved.command === "saveAttendancePlan") {
+    if (saved?.command === "saveAttendancePlan") {
       setWeek(mondayOf(shanghaiParts(saved.startAt).date));
       showDraft(undefined);
     }
@@ -201,14 +201,25 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const exception = draft && outsideHours(draft);
 
   return <>
-    {(request.pending || request.message) && <aside className="schedule-recovery notice pending" aria-label="待核对教务请求">
-      {request.pending && <p>待核对请求 <code>{request.pending.requestId}</code></p>}
-      {request.message && <p role="status">{request.message}</p>}
-      {request.pending && <div className="retry-actions">
-        <button className="secondary" type="button" disabled={request.busy} onClick={() => void request.recover(false)}>查询原请求</button>
-        <button className="secondary" type="button" disabled={request.busy} onClick={() => void request.recover(true)}>重试同一请求</button>
-      </div>}
-    </aside>}
+    {(request.state?.kind === "pending" || request.state?.kind === "damaged" || request.issue || request.message) &&
+      <aside className="schedule-recovery notice pending" aria-label="待核对教务请求">
+        {request.descriptor && <p>待核对请求 <code>{request.descriptor.requestId}</code> · {names.get(request.descriptor.studentId)}</p>}
+        {request.state?.kind === "damaged" && <p role="alert">原请求内容无法恢复，写入已暂停。请在周课表和当日学习面板查看已保存的出勤、学习块与任务结果。</p>}
+        {(request.message || request.issue) && <p role="status">{request.issue || request.message}</p>}
+        <div className="retry-actions">
+          {request.descriptor && <button className="secondary" type="button" disabled={request.busy}
+            onClick={() => void request.recover("read")}>查询原请求</button>}
+          {request.state?.kind === "pending" && <button className="secondary" type="button" disabled={request.busy}
+            onClick={() => void request.recover("retry")}>重试同一请求</button>}
+          {request.state?.kind === "damaged" && request.descriptor && <button className="secondary" type="button" disabled={request.busy}
+            onClick={() => {
+              if (window.confirm("你已在周课表或当日学习面板核对实际记录，并确认结束这个待核对请求吗？"))
+                void request.recover("reviewed");
+            }}>已核对数据库，结束待核对</button>}
+          {request.issue && <button className="secondary" type="button" disabled={request.busy}
+            onClick={() => void request.hydrate()}>重新读取待核对状态</button>}
+        </div>
+      </aside>}
     {learning && <AttendanceLearningPanel api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
       reloadVersion={learningRevision} blocked={request.blocked} submit={request.run}
       onBack={() => { setLearning(undefined); refresh(); }} />}
