@@ -13,6 +13,7 @@ import { maxIntakeBytes } from "./intake-format";
 import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSupportedProfileOpen, validateProtection,
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
 import { OperationsDatabase } from "./operations";
+import { listScheduleWeek, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
 import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
@@ -190,6 +191,24 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   ipcMain.handle(channels.history, (event, id: unknown) => invoke(event, store => store.history(id)));
   ipcMain.handle(channels.createStudent, (event, raw: unknown) => invoke(event, store => store.createStudent(raw)));
   ipcMain.handle(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
+  function invokeSchedule<T>(event: IpcMainInvokeEvent,
+      operation: (store: OperationsDatabase, students: () => ReturnType<WorkspaceDatabase["students"]>) => T): Result<T> {
+    if (!isTrusted(event, window)) return denied();
+    const m1 = database;
+    if (format !== 2 || !operations || !m1) {
+      return { ok: false, code: "recovery", message: "排课只在独立五库合成档案中提供。" };
+    }
+    try { return { ok: true, value: operation(operations, () => m1.students()) }; }
+    catch (error) { return failure(error); }
+  }
+  ipcMain.handle(channels.scheduleAvailable, event => isTrusted(event, window)
+    ? { ok: true, value: format === 2 && Boolean(operations && database) } : denied());
+  ipcMain.handle(channels.scheduleWeek, (event, raw: unknown) =>
+    invokeSchedule(event, (store, students) => listScheduleWeek(store, students, raw)));
+  ipcMain.handle(channels.schedulePlan, (event, raw: unknown) =>
+    invokeSchedule(event, (store, students) => readSchedulePlan(store, students, raw)));
+  ipcMain.handle(channels.saveSchedulePlan, (event, raw: unknown) =>
+    invokeSchedule(event, (store, students) => saveSchedulePlan(store, students, raw)));
   const invokeWork = <T>(event: IpcMainInvokeEvent, operation: (store: WorkLogDatabase) => T): Result<T> => {
     if (!isTrusted(event, window)) return denied();
     if (!workLog) return startupError;

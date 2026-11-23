@@ -19,6 +19,10 @@ export const channels = {
   activationStatus: "m2d:activation-status",
   activateRecovery: "m2d:activate-recovery",
   returnOriginalProfile: "m2d:return-original",
+  scheduleAvailable: "r2b:schedule-available",
+  scheduleWeek: "r2b:schedule-week",
+  schedulePlan: "r2b:schedule-plan",
+  saveSchedulePlan: "r2b:save-schedule-plan",
 } as const;
 
 export type { WorkChange, WorkItem, WorkItemInput, WorkStatus } from "./worklog";
@@ -60,7 +64,17 @@ export type Result<T> = { ok: true; value: T } | Failure;
 import type { ProtectionResult } from "./offline-protection";
 export type { ProtectionResult } from "./offline-protection";
 
+import type { AttendancePlan, SaveAttendancePlanInput } from "./operations";
+export type { AttendancePlan } from "./operations";
+
+export interface ScheduleWeekInput { monday: string; studentId?: string }
+export type ScheduleSaveInput = SaveAttendancePlanInput & { endAt: number; kind: AttendancePlan["kind"] };
+
 export interface WorkspaceApi {
+  scheduleAvailable(): Promise<Result<boolean>>;
+  scheduleWeek(input: ScheduleWeekInput): Promise<Result<AttendancePlan[]>>;
+  schedulePlan(id: string): Promise<Result<AttendancePlan | null>>;
+  saveSchedulePlan(input: ScheduleSaveInput): Promise<Result<AttendancePlan>>;
   exportProtection(): Promise<Result<ProtectionResult | null>>;
   restoreProtection(): Promise<Result<ProtectionResult | null>>;
   activationStatus(): Promise<Result<{ active: string | null; pending: boolean; location: string }>>;

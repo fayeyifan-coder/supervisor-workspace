@@ -4,15 +4,11 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { WorkspaceFault, type WorkspaceDatabase } from "./database";
 import { operationsProtection, verifyOperationsStudentLinks } from "./operations-schema";
+import { minute, openingHours, shanghaiParts } from "./schedule-calendar";
 
 export { operationsProtection, verifyOperationsStudentLinks } from "./operations-schema";
 
-const institution = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Asia/Shanghai", weekday: "short", year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-});
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const minute = 60_000;
 const planColumns = `id, student_id AS studentId, start_at AS startAt, end_at AS endAt, kind, status,
   check_in_at AS checkInAt, check_out_at AS checkOutAt, exception_reason AS exceptionReason,
   revision, created_at AS createdAt, updated_at AS updatedAt`;
@@ -34,6 +30,13 @@ interface ChangeInput {
   id: string;
   studentId: string;
   expectedRevision: number;
+}
+
+export interface SaveAttendancePlanInput extends ChangeInput {
+  startAt: number;
+  endAt?: number;
+  kind?: PlanKind;
+  exception?: { confirmed: true; reason: string };
 }
 
 export interface AttendancePlan {
@@ -117,20 +120,13 @@ function identity(input: ChangeInput): ChangeInput {
   return { id: id(input.id), studentId: id(input.studentId), requestId: id(input.requestId), expectedRevision: input.expectedRevision };
 }
 
-function institutionTime(at: number) {
-  const { weekday, year, month, day, hour, minute: localMinute, second } =
-    Object.fromEntries(institution.formatToParts(at).map(part => [part.type, part.value]));
-  return { weekday, date: year + "-" + month + "-" + day, seconds: Number(hour) * 3600 + Number(localMinute) * 60 + Number(second) };
-}
-
 function planningWindow(start: number, end: number): boolean {
-  const from = institutionTime(start), until = institutionTime(end);
+  const from = shanghaiParts(start), until = shanghaiParts(end);
   if (start >= end || from.date !== until.date || start % minute !== 0 || end % minute !== 0) {
     invalid("计划须为同一机构日期内的正向分钟区间。");
   }
-  if (from.weekday === "Mon") return false;
-  const weekend = from.weekday === "Sat" || from.weekday === "Sun";
-  return from.seconds >= (weekend ? 8 : 16) * 3600 && until.seconds <= (weekend ? 18 : 21) * 3600;
+  const hours = openingHours(from.date);
+  return hours !== null && from.time >= hours.start && until.time <= hours.end;
 }
 
 function plainFile(path: string): boolean {
@@ -229,9 +225,7 @@ export class OperationsDatabase {
       criteria + " ORDER BY start_at,id").all(...params).map(row => ({ ...row })) as unknown as AttendancePlan[];
   }
 
-  saveAttendancePlan(input: ChangeInput & {
-    startAt: number; endAt?: number; kind?: PlanKind; exception?: { confirmed: true; reason: string };
-  }): AttendancePlan {
+  saveAttendancePlan(input: SaveAttendancePlanInput): AttendancePlan {
     const change = identity(input), startAt = timestamp(input.startAt), kind = input.kind ?? "regular";
     if (kind !== "regular" && kind !== "whole_day") invalid("到校类型无效。");
     const endAt = timestamp(input.endAt ?? (kind === "regular" ? startAt + 120 * minute : undefined));
