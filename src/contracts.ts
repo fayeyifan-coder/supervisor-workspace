@@ -23,6 +23,9 @@ export const channels = {
   scheduleWeek: "r2b:schedule-week",
   schedulePlan: "r2b:schedule-plan",
   saveSchedulePlan: "r2b:save-schedule-plan",
+  learningDay: "r2b:learning-day",
+  applyLearningChange: "r2b:apply-learning-change",
+  scheduleReceipt: "r2b:schedule-receipt",
 } as const;
 
 export type { WorkChange, WorkItem, WorkItemInput, WorkStatus } from "./worklog";
@@ -64,13 +67,50 @@ export type Result<T> = { ok: true; value: T } | Failure;
 import type { ProtectionResult } from "./offline-protection";
 export type { ProtectionResult } from "./offline-protection";
 
-import type { AttendancePlan, SaveAttendancePlanInput } from "./operations";
-export type { AttendancePlan } from "./operations";
+import type { AttendancePlan, LearningBlock, LearningTaskInput, SaveAttendancePlanInput } from "./operations";
+export type { AttendancePlan, LearningBlock, LearningTask, LearningTaskInput } from "./operations";
 
 export interface ScheduleWeekInput { monday: string; studentId?: string }
 export type ScheduleSaveInput = SaveAttendancePlanInput & { endAt: number; kind: AttendancePlan["kind"] };
 
+export interface LearningDayInput {
+  attendanceId: string;
+  studentId: string;
+}
+
+export interface LearningDay {
+  attendance: AttendancePlan;
+  blocks: LearningBlock[];
+}
+
+interface LearningChangeInput extends LearningDayInput {
+  id: string;
+  requestId: string;
+  expectedRevision: number;
+}
+
+export type LearningChange = LearningChangeInput & (
+  | { command: "recordAttendance"; action: "confirm" | "checkIn" | "checkOut" | "absent" | "cancel" }
+  | { command: "saveLearningBlock"; plannedStart: number; plannedEnd: number; outsideAttendanceReason?: string; notes?: string }
+  | { command: "saveLearningTasks"; tasks: LearningTaskInput[] }
+  | { command: "recordLearningOutcome"; action: "start" | "finish" | "cancel" }
+  | { command: "recordTaskOutcome"; taskId: string; status: "in_progress" | "done" | "skipped"; resultNotes?: string }
+);
+
+export interface ScheduleReceiptInput {
+  command: "saveAttendancePlan" | LearningChange["command"];
+  requestId: string;
+  id: string;
+  studentId: string;
+  expectedRevision: number;
+}
+
+export interface ScheduleReceipt { revision: number; savedAt: number }
+
 export interface WorkspaceApi {
+  learningDay(input: LearningDayInput): Promise<Result<LearningDay>>;
+  applyLearningChange(input: LearningChange): Promise<Result<AttendancePlan | LearningBlock>>;
+  scheduleReceipt(input: ScheduleReceiptInput): Promise<Result<ScheduleReceipt | null>>;
   scheduleAvailable(): Promise<Result<boolean>>;
   scheduleWeek(input: ScheduleWeekInput): Promise<Result<AttendancePlan[]>>;
   schedulePlan(id: string): Promise<Result<AttendancePlan | null>>;

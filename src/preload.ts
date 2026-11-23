@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { IntakeConfirm, IntakeTarget, LessonInput, ScheduleSaveInput, ScheduleWeekInput, StudentInput, WorkspaceApi } from "./contracts";
+import type { IntakeConfirm, IntakeTarget, LearningChange, LearningDayInput, LessonInput, ScheduleReceiptInput, ScheduleSaveInput, ScheduleWeekInput, StudentInput, WorkspaceApi } from "./contracts";
 import type { WorkItemInput, WorkStatus } from "./worklog";
 import type { GrowthSaveInput } from "./growth-profile";
 
@@ -9,6 +9,9 @@ const api: WorkspaceApi = {
   scheduleWeek: (input: ScheduleWeekInput) => ipcRenderer.invoke("r2b:schedule-week", input),
   schedulePlan: (id: string) => ipcRenderer.invoke("r2b:schedule-plan", id),
   saveSchedulePlan: (input: ScheduleSaveInput) => ipcRenderer.invoke("r2b:save-schedule-plan", input),
+  learningDay: (input: LearningDayInput) => ipcRenderer.invoke("r2b:learning-day", input),
+  applyLearningChange: (input: LearningChange) => ipcRenderer.invoke("r2b:apply-learning-change", input),
+  scheduleReceipt: (input: ScheduleReceiptInput) => ipcRenderer.invoke("r2b:schedule-receipt", input),
   students: () => ipcRenderer.invoke("mvp:students"),
   exportProtection: () => ipcRenderer.invoke("m2d:export"),
   restoreProtection: () => ipcRenderer.invoke("m2d:restore"),

@@ -477,6 +477,17 @@ export class OperationsDatabase {
     }
   }
 
+  receipt(requestId: string, command: string, targetId: string, studentId: string, expectedRevision: number) {
+    // Autocommit is required here, even when an uncertain COMMIT has blocked further writes.
+    if (this.db.isTransaction) throw new WorkspaceFault("busy", "事务尚未结束，请重开后核对回执。");
+    const row = this.db.prepare(`SELECT r.command, c.entity_id, c.student_id, c.revision, r.created_at
+      FROM operation_requests r JOIN operation_changes c USING (request_id) WHERE r.request_id=?`).get(requestId);
+    if (!row) return null;
+    if (row.command !== command || row.entity_id !== targetId || row.student_id !== studentId ||
+        row.revision !== expectedRevision + 1) conflict("请求编号与待核对的教务操作不一致。");
+    return { revision: row.revision, savedAt: Number(row.created_at) };
+  }
+
   protectionConnection(): DatabaseSync {
     if (this.writesBlocked || this.db.isTransaction) throw new WorkspaceFault("busy", "教务库写入状态尚未确认。");
     return this.db;

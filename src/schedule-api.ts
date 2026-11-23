@@ -5,21 +5,21 @@ import { minute, shanghaiParts, weekRange } from "./schedule-calendar";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
-function invalid(message: string): never {
+export function invalid(message: string): never {
   throw new WorkspaceFault("invalid", message);
 }
 
-function id(value: unknown): string {
+export function id(value: unknown): string {
   if (typeof value !== "string" || !uuid.test(value)) invalid("排课记录或学生 UUID 无效。");
   return value;
 }
 
-function object(value: unknown): Record<string, unknown> {
+export function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid("排课请求格式无效。");
   return value as Record<string, unknown>;
 }
 
-function instant(value: unknown): number {
+export function instant(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value % minute !== 0 ||
       value < Date.UTC(1992, 0, 1) - 480 * minute || value >= Date.UTC(9999, 0, 1) - 480 * minute) {
     invalid("排课时间必须是有效的机构日期与分钟。");
@@ -27,9 +27,9 @@ function instant(value: unknown): number {
   return value;
 }
 
-type StudentList = () => Student[];
+export type StudentList = () => Student[];
 
-function requireStudent(value: unknown, students: StudentList): string {
+export function requireStudent(value: unknown, students: StudentList): string {
   const studentId = id(value);
   if (!students().some(student => student.id === studentId)) invalid("关联的学生档案不存在，请重新选择。");
   return studentId;
