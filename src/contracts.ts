@@ -34,8 +34,8 @@ export type { WorkChange, WorkItem, WorkItemInput, WorkStatus } from "./worklog"
 export type { GrowthFields, GrowthGoal, GrowthGoalInput, GrowthHistory, GrowthObservation,
   GrowthObservationInput, GrowthProfileView, GrowthSaveInput, GrowthSnapshot, GoalStatus } from "./growth-profile";
 
-export type { IntakeConfirm, IntakeFile, IntakeHistoryEntry, IntakeOutcome, IntakeReview, IntakeTarget } from "./student-intake";
-import type { IntakeConfirm, IntakeFile, IntakeHistoryEntry, IntakeOutcome, IntakeReview, IntakeTarget } from "./student-intake";
+export type { IntakeConfirm, IntakeFile, IntakeHistorySummary, IntakeOutcome, IntakeReview, IntakeTarget } from "./student-intake";
+import type { IntakeConfirm, IntakeFile, IntakeHistorySummary, IntakeOutcome, IntakeReview, IntakeTarget } from "./student-intake";
 
 export interface StudentInput {
   id: string;
@@ -141,7 +141,7 @@ export interface WorkspaceApi {
   pickStudentIntake(): Promise<Result<IntakeFile[]>>;
   prepareStudentIntake(token: string, target?: IntakeTarget): Promise<Result<IntakeReview>>;
   saveStudentIntake(input: IntakeConfirm): Promise<Result<IntakeOutcome>>;
-  studentIntakeHistory(studentId: string): Promise<Result<IntakeHistoryEntry[]>>;
+  studentIntakeHistory(studentId: string): Promise<Result<IntakeHistorySummary>>;
   growthProfile(studentId: string): Promise<Result<import("./growth-profile").GrowthProfileView>>;
   saveGrowthProfile(input: import("./growth-profile").GrowthSaveInput): Promise<Result<import("./growth-profile").GrowthProfileView>>;
 }

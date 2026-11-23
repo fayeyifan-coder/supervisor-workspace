@@ -1,0 +1,30 @@
+.student-detail { max-width: 980px; min-width: 0; }
+.student-overview-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.student-overview-heading h1 { overflow-wrap: anywhere; }
+.student-overview dl { margin-top: 14px; }
+.student-detail-nav { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 12px 0; border-bottom: 1px solid var(--line); }
+.student-detail-nav button { padding: 5px 10px; background: transparent; color: var(--quiet); border-radius: 4px 4px 0 0; }
+.student-detail-nav button:hover { background: #eaf0e6; color: var(--ink); }
+.student-detail-nav button[aria-pressed="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--green); }
+.student-sources > .muted, .student-sources > .notice { margin-top: 8px; }
+.student-sources .notice button { margin-top: 6px; }
+.student-source-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.student-source-list > li { padding: 12px 0; border-top: 1px solid var(--line); }
+.student-source-list > li:last-child { padding-bottom: 0; }
+.student-source-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 6px; }
+.student-source-status { color: var(--green); font-size: 12px; font-weight: 600; }
+.student-source-status[data-state="pending"], .student-source-status[data-state="review"] { color: #674611; }
+.student-source-list dl div { grid-template-columns: 90px minmax(0, 1fr); }
+.student-source-list time { white-space: normal; }
+.student-planned ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; margin: 8px 0 0; padding: 0; list-style: none; }
+.student-planned li { padding: 9px 0; border-top: 1px solid var(--line); color: var(--quiet); font-size: 14px; }
+.student-detail .growth-current p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.growth-editor { margin-top: 14px; }
+.growth-editor > summary { cursor: pointer; color: var(--green); font-weight: 600; }
+.growth-editor .growth-fields { margin-top: 10px; }
+
+@media (max-width: 650px) {
+  .roster .student-list { max-height: 172px; overflow-y: auto; }
+  .student-detail-nav { gap: 4px; }
+  .student-detail-nav button { padding-inline: 8px; }
+}

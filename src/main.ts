@@ -311,7 +311,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   ipcMain.handle(channels.saveStudentIntake, (event, input: IntakeConfirm) =>
     invokeIntake(event, intake => intake.confirm(input)));
   ipcMain.handle(channels.studentIntakeHistory, (event, studentId: string) =>
-    invokeIntake(event, intake => intake.history(studentId)));
+    invokeIntake(event, intake => intake.historySummary(studentId)));
 
 
   const recoveryFiles = protectionFiles();

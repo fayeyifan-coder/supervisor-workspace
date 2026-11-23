@@ -5,7 +5,8 @@ import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
 import { WeeklySchedulePanel } from "./WeeklySchedulePanel";
 import { DataProtectionPanel } from "./DataProtectionPanel";
-import { StudentIntakeHistory, StudentIntakePanel } from "./StudentIntakePanel";
+import { StudentIntakePanel } from "./StudentIntakePanel";
+import { StudentDetail } from "./StudentDetail";
 import "./styles.css";
 
 declare global {
@@ -14,7 +15,7 @@ declare global {
 
 type Command = { kind: "student"; input: StudentInput } | { kind: "lesson"; input: LessonInput };
 type Notice = { type: "success" | "failure" | "pending"; message: string };
-type History = { studentId: string; rows?: Lesson[]; error?: string };
+type History = { studentId: string; refresh: number; rows?: Lesson[]; error?: string };
 
 function today(): string {
   const date = new Date();
@@ -84,7 +85,7 @@ function HistoryView({ history, reload }: { history?: History; reload: () => voi
   return <section className="panel history" aria-labelledby="learning-history">
     <h2 id="learning-history">学习历史</h2>
     {history?.error ? <div className="notice failure" role="alert">
-      {history.error} <button className="secondary" onClick={reload}>重新读取</button>
+      读取失败。{history.error} <button className="secondary" onClick={reload}>重新读取</button>
     </div> : !history?.rows ? <p role="status" className="muted">正在读取学习历史…</p>
       : history.rows.length === 0 ? <p className="muted">还没有学习记录。保存后可在这里查看。</p>
         : <ol className="lesson-list">{history.rows.map(lesson => <li key={lesson.id}>
@@ -144,12 +145,16 @@ function App() {
     if (!activeId) return;
     const studentId = activeId;
     let current = true;
-    setHistory({ studentId });
     api.history(studentId).then(result => {
       if (!current) return;
-      setHistory(result.ok ? { studentId, rows: result.value } : { studentId, error: result.message });
+      if (!result.ok) { setHistory({ studentId, refresh: historyRefresh, error: result.message }); return; }
+      if (result.value.some(lesson => lesson.studentId !== studentId)) {
+        setHistory({ studentId, refresh: historyRefresh, error: "学习记录与当前学生不一致。" });
+        return;
+      }
+      setHistory({ studentId, refresh: historyRefresh, rows: result.value });
     }).catch(() => {
-      if (current) setHistory({ studentId, error: "无法读取本地历史，请重试。" });
+      if (current) setHistory({ studentId, refresh: historyRefresh, error: "无法读取本地历史，请重试。" });
     });
     return () => { current = false; };
   }, [activeId, api, historyRefresh]);
@@ -215,7 +220,7 @@ function App() {
   }
 
   const active = students?.find(student => student.id === activeId);
-  const visibleHistory = history?.studentId === active?.id ? history : undefined;
+  const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
   const showStudentForm = students && (creating || students.length === 0);
 
@@ -279,25 +284,16 @@ function App() {
           }} />}
         <div className="student-content" hidden={intakeOpen}>
           {showStudentForm ? <StudentForm key={formVersion} disabled={locked} submit={input => void save({ kind: "student", input })} />
-            : active && <>
-              <section className="profile" aria-label="当前学生">
-                <p className="muted">{active.grade} · {active.subjects}</p><h1>{active.alias}</h1>
-                {scheduleEnabled && <button className="secondary" type="button" disabled={locked || growthBusy}
-                  onClick={() => setSchedule({ studentId: active.id })}>查看该学生排课</button>}
-                {(active.goal || active.notes) && <dl>
-                  {active.goal && <div><dt>学习目标</dt><dd>{active.goal}</dd></div>}
-                  {active.notes && <div><dt>备注</dt><dd>{active.notes}</dd></div>}
-                </dl>}
-              </section>
-              {!intakeOpen && <><GrowthProfilePanel key={active.id} student={active} api={api}
-                onDirtyChange={setGrowthDirty} onBusyChange={setGrowthBusy} />
-              <StudentIntakeHistory api={api} studentId={active.id} /></>}
-              <div className="learning">
+            : active && <StudentDetail student={active} api={api} intakeOpen={intakeOpen}
+              actions={scheduleEnabled && <button className="secondary" type="button" disabled={locked || growthBusy}
+                onClick={() => setSchedule({ studentId: active.id })}>查看该学生排课</button>}
+              growth={<GrowthProfilePanel key={active.id} student={active} api={api}
+                onDirtyChange={setGrowthDirty} onBusyChange={setGrowthBusy} />}
+              history={<div className="learning">
                 <LessonForm key={active.id + formVersion} student={active} disabled={locked || !visibleHistory?.rows}
                   submit={input => void save({ kind: "lesson", input })} />
                 <HistoryView history={visibleHistory} reload={() => setHistoryRefresh(value => value + 1)} />
-              </div>
-            </>}
+              </div>} />}
           {students && <WorkLogPanel students={students} api={api} />}
           <DataProtectionPanel api={api} />
         </div>

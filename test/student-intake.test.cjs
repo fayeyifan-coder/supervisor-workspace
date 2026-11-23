@@ -9,7 +9,7 @@ const { test } = require("node:test");
 const { WorkspaceDatabase } = require("../build/database.js");
 const { GrowthProfileDatabase } = require("../build/growth-profile.js");
 const { parseIntake } = require("../build/intake-format.js");
-const { IntakeStore, StudentIntakeService } = require("../build/student-intake.js");
+const { IntakeStore, StudentIntakeService, intakeSourceDigest } = require("../build/student-intake.js");
 
 const fullFixture = readFileSync(join(__dirname, "fixtures", "synthetic-intake-001.json"), "utf8");
 const shortFixture = readFileSync(join(__dirname, "fixtures", "synthetic-intake-002.json"), "utf8");
@@ -187,6 +187,16 @@ test("new import requires explicit confirmation and survives reopen", t => {
   assert.equal(history[0].state, "done");
   assert.deepEqual(history[0].source.source, fullJson());
   assert.deepEqual(f.service.history(unrelated.id), []);
+  assert.deepEqual(f.service.historySummary(student.id), {
+    studentId: student.id,
+    entries: [{
+      digest: intakeSourceDigest(fullJson()), code: "DEMO-001", state: "done", updatedAt: history[0].updatedAt,
+      documentCount: fullJson().source_documents.length,
+      reviewCount: history[0].source.review.filter(item => ["warning", "unknown"].includes(item.category)).length,
+    }],
+  });
+  assert.deepEqual(f.service.historySummary(unrelated.id), { studentId: unrelated.id, entries: [] });
+  assert.throws(() => f.service.historySummary(randomUUID()), validationFault);
 });
 
 test("a matching display alias is never treated as an import identity", t => {

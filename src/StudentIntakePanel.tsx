@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type FormEvent } from "react";
 import type {
-  GrowthFields, IntakeConfirm as Confirm, IntakeFile, IntakeHistoryEntry as HistoryEntry,
+  GrowthFields, IntakeConfirm as Confirm, IntakeFile,
   IntakeReview as Review, IntakeTarget as Target, Student, StudentInput, WorkspaceApi,
 } from "./contracts";
 import type { IntakePreview } from "./intake-format";
@@ -431,36 +431,5 @@ export function StudentIntakePanel({ api, students, student, onImported, onBusyC
           setBusy={setOperationBusy} setQueueState={state => setStates(old => ({ ...old, [selected.token]: state }))}
           markDraft={value => { dirty.current = value; }} onImported={onImported} />)}
     </div>}
-  </section>;
-}
-
-export function StudentIntakeHistory({ api, studentId }: { api: WorkspaceApi; studentId: string }) {
-  const [loaded, setLoaded] = useState<{ studentId: string; entries?: HistoryEntry[]; error?: string }>();
-  const [refresh, setRefresh] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-    setLoaded(undefined);
-    api.studentIntakeHistory(studentId).then(result => {
-      if (!active) return;
-      setLoaded(result.ok ? { studentId, entries: result.value } : { studentId, error: result.message });
-    }).catch(() => {
-      if (active) setLoaded({ studentId, error: "无法读取导入来源。" });
-    });
-    return () => { active = false; };
-  }, [api, studentId, refresh]);
-
-  if (loaded?.studentId !== studentId) return null;
-  const { error, entries } = loaded;
-  if (error) return <div className="notice failure" role="alert">
-    {error} <button type="button" className="secondary" onClick={() => setRefresh(value => value + 1)}>重新读取来源</button>
-  </div>;
-  if (!entries?.length) return null;
-  return <section className="panel intake-history" aria-label="学生导入来源">
-    <h2>学生导入来源</h2>
-    {entries.map((entry, index) => <details className="intake-disclosure" key={entry.updatedAt + "/" + index}>
-      <summary>{entry.source.code} · {intakeStatuses[entry.state]} · {new Date(entry.updatedAt).toLocaleString("zh-CN")}</summary>
-      <SourceReview source={entry.source} />
-    </details>)}
   </section>;
 }
