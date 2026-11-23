@@ -44,6 +44,7 @@ function localStores(t) {
   return {
     get m1() { return m1; },
     get growth() { return growth; },
+    get intake() { return intake; },
     get service() { return service; },
     useGrowth(growthOverride) {
       service = new StudentIntakeService(intake, m1, growthOverride);
@@ -197,6 +198,19 @@ test("new import requires explicit confirmation and survives reopen", t => {
   });
   assert.deepEqual(f.service.historySummary(unrelated.id), { studentId: unrelated.id, entries: [] });
   assert.throws(() => f.service.historySummary(randomUUID()), validationFault);
+});
+
+test("intake history reports an unreadable timestamp without erasing the source", t => {
+  const f = localStores(t);
+  const file = register(f.service);
+  const saved = f.service.confirm(command(file, f.service.prepare(file.token, newTarget)));
+  const digest = intakeSourceDigest(fullJson());
+  const db = f.intake.protectionConnection();
+  db.prepare("UPDATE intake_jobs SET updated_at=? WHERE digest=?").run(8640000000000001, digest);
+  const original = f.service.history(saved.studentId);
+  assert.equal(original[0].updatedAt, 8640000000000001);
+  assert.throws(() => f.service.historySummary(saved.studentId), error => error.code === "recovery");
+  assert.deepEqual(f.service.history(saved.studentId), original);
 });
 
 test("a matching display alias is never treated as an import identity", t => {

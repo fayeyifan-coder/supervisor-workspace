@@ -422,14 +422,17 @@ export class StudentIntakeService {
   }
 
   historySummary(studentId: string): IntakeHistorySummary {
-    const entries = this.history(studentId).map(({ digest, source, state, updatedAt }) => ({
-      digest,
-      code: source.code,
-      state,
-      updatedAt,
-      documentCount: Array.isArray(source.source.source_documents) ? source.source.source_documents.length : 0,
-      reviewCount: source.review.filter(item => item.category === "warning" || item.category === "unknown").length,
-    }));
+    const entries = this.history(studentId).map(({ digest, source, state, updatedAt }) => {
+      if (!Number.isFinite(new Date(updatedAt).getTime())) recovery("导入来源的处理时间无效。请保留原档案以供核对。");
+      return {
+        digest,
+        code: source.code,
+        state,
+        updatedAt,
+        documentCount: Array.isArray(source.source.source_documents) ? source.source.source_documents.length : 0,
+        reviewCount: source.review.filter(item => item.category === "warning" || item.category === "unknown").length,
+      };
+    });
     return { studentId, entries };
   }
 }
