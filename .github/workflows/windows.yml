@@ -2,9 +2,9 @@ name: Windows verification
 
 on:
   push:
-    branches: [m2-b/reliability-proof, m2-c/student-growth-profile, m2-d/offline-data-protection]
+    branches: [m2-b/reliability-proof, m2-c/student-growth-profile, m2-d/offline-data-protection, v0.2/r2-a-operations-protection]
   pull_request:
-    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import]
+    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import, m2-d/offline-data-protection]
 
 permissions:
   contents: read
@@ -50,7 +50,9 @@ jobs:
               ($env:GITHUB_REF_NAME -eq 'm2-c/student-growth-profile')) { 'm2c' } elseif (
                 $env:GITHUB_HEAD_REF -eq 'm2-c/student-json-import') { 'm2c3' } elseif (
                 $env:GITHUB_HEAD_REF -eq 'm2-d/offline-data-protection' -or
-                $env:GITHUB_REF_NAME -eq 'm2-d/offline-data-protection') { 'm2d' } else { 'mvp' }
+                $env:GITHUB_REF_NAME -eq 'm2-d/offline-data-protection') { 'm2d' } elseif (
+                  $env:GITHUB_HEAD_REF -eq 'v0.2/r2-a-operations-protection' -or
+                  $env:GITHUB_REF_NAME -eq 'v0.2/r2-a-operations-protection') { 'r2a' } else { 'mvp' }
           $root = Join-Path $env:RUNNER_TEMP "supervisor-$kind-portable-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           if (Test-Path -LiteralPath $root) { throw 'Portable output directory already exists.' }
           New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null

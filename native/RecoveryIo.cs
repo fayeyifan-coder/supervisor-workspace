@@ -15,14 +15,14 @@ internal static class RecoveryIo {
     const uint WriteAccess = 0x100083;
     const uint DirectoryOptions = 0x200021; // OPEN_REPARSE_POINT | SYNCHRONOUS_IO_NONALERT | DIRECTORY_FILE
     const uint FileOptions = 0x200060;      // OPEN_REPARSE_POINT | SYNCHRONOUS_IO_NONALERT | NON_DIRECTORY_FILE
-    const int MaxPackage = 129 * 1024 * 1024;
+    const int MaxPackage = 161 * 1024 * 1024;
     const int MaxDatabase = 32 * 1024 * 1024;
     const int MaxRecoveryEvidence = 32 * 1024;
     static readonly string[] RestoreFiles = {
-        "mvp.sqlite3", "worklog.sqlite3", "growth.sqlite3", "student-intake.sqlite3"
+        "mvp.sqlite3", "worklog.sqlite3", "growth.sqlite3", "student-intake.sqlite3", "operations.sqlite3"
     };
     static readonly string[] MarkerContents = {
-        "mvp-v1\n", "worklog-v1\n", "growth-profile-v1\n", "student-intake-v1\n"
+        "mvp-v1\n", "worklog-v1\n", "growth-profile-v1\n", "student-intake-v1\n", "operations-v1\n"
     };
 
     [StructLayout(LayoutKind.Sequential)]
@@ -195,7 +195,7 @@ internal static class RecoveryIo {
         }
     }
 
-    static void Restore(string root, string name, bool forActivation) {
+    static void Restore(string root, string name, bool forActivation, int count) {
         Check(Regex.IsMatch(name, forActivation ? @"\Asw-m2d-active-[a-f0-9]{32}\z" : @"\Asw-m2d-restore-[a-f0-9]{32}\z"),
             "Invalid recovery profile name.");
         var reader = new BinaryReader(Console.OpenStandardInput());
@@ -213,7 +213,7 @@ internal static class RecoveryIo {
             var opened = new List<FileStream>();
             var filenames = new List<string>();
             try {
-                for (int i = 0; i < RestoreFiles.Length; i++) {
+                for (int i = 0; i < count; i++) {
                     int size = reader.ReadInt32();
                     Check(size >= 512 && size <= MaxDatabase, "Invalid restored SQLite image length.");
                     string filename = RestoreFiles[i];
@@ -269,7 +269,7 @@ internal static class RecoveryIo {
         Check(names.Count == 0, "Missing recovery entry.");
     }
 
-    static void Inspect(string root, string name) {
+    static void Inspect(string root, string name, int count) {
         Check(Regex.IsMatch(name, @"\Asw-m2d-restore-[a-f0-9]{32}\z"), "Invalid recovery profile name.");
         using (var path = new PinnedPath(root)) {
             path.Add(name, false);
@@ -279,7 +279,7 @@ internal static class RecoveryIo {
             byte[] record = ReadRestored(path.Current, "restore.ready", 1, MaxRecoveryEvidence * 2);
             path.Add("recovery", false);
             var expected = new List<string>();
-            for (int i = 0; i < RestoreFiles.Length; i++) {
+            for (int i = 0; i < count; i++) {
                 expected.Add(RestoreFiles[i]);
                 expected.Add(RestoreFiles[i].Replace(".sqlite3", ".initialized"));
             }
@@ -287,7 +287,7 @@ internal static class RecoveryIo {
             var output = new BinaryWriter(Console.OpenStandardOutput());
             output.Write(record.Length);
             output.Write(record);
-            for (int i = 0; i < RestoreFiles.Length; i++) {
+            for (int i = 0; i < count; i++) {
                 string marker = RestoreFiles[i].Replace(".sqlite3", ".initialized");
                 var bytes = ReadRestored(path.Current, marker, 1, 128);
                 Check(Encoding.ASCII.GetString(bytes) == MarkerContents[i], "Recovery initialization marker differs.");
@@ -303,8 +303,14 @@ internal static class RecoveryIo {
         try {
             if (args.Length == 4 && args[0] == "publish") Publish(args[1], args[2], Int32.Parse(args[3]));
             else if (args.Length == 2 && args[0] == "read") ReadInput(args[1]);
-            else if (args.Length == 3 && (args[0] == "restore" || args[0] == "activate")) Restore(args[1], args[2], args[0] == "activate");
-            else if (args.Length == 3 && args[0] == "inspect") Inspect(args[1], args[2]);
+            else if ((args.Length == 3 || args.Length == 4) &&
+                     (args[0] == "restore" || args[0] == "activate" || args[0] == "inspect")) {
+                string version = args.Length == 3 ? "1" : args[3];
+                Check(version == "1" || version == "2", "Invalid recovery format.");
+                int count = version == "2" ? RestoreFiles.Length : RestoreFiles.Length - 1;
+                if (args[0] == "inspect") Inspect(args[1], args[2], count);
+                else Restore(args[1], args[2], args[0] == "activate", count);
+            }
             else throw new IOException("Invalid recovery command.");
             return 0;
         } catch (Exception error) {

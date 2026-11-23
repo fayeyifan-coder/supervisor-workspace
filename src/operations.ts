@@ -173,7 +173,7 @@ export class OperationsDatabase {
 
   private constructor(private readonly db: DatabaseSync, private readonly m1: Pick<WorkspaceDatabase, "students">) {}
 
-  static open(dataDirectory: string, m1: Pick<WorkspaceDatabase, "students">): OperationsDatabase {
+  static open(dataDirectory: string, m1: Pick<WorkspaceDatabase, "students">, allowInitialize = false): OperationsDatabase {
     const directory = resolve(dataDirectory);
     const entry = lstatSync(directory, { throwIfNoEntry: false });
     if (!entry?.isDirectory() || entry.isSymbolicLink() || realpathSync.native(directory) !== directory) {
@@ -182,7 +182,7 @@ export class OperationsDatabase {
     const path = join(directory, "operations.sqlite3"), marker = join(directory, "operations.initialized");
     const exists = plainFile(path), initialized = plainFile(marker);
     const sidecars = ["-wal", "-shm", "-journal"].map(suffix => plainFile(path + suffix));
-    if (exists !== initialized || (!exists && sidecars.some(Boolean))) {
+    if (exists !== initialized || (!exists && (!allowInitialize || sidecars.some(Boolean)))) {
       recovery("教务库初始化文件不完整，请保留主库、标记和侧车。");
     }
     if (exists) {
@@ -473,6 +473,7 @@ export class OperationsDatabase {
     } catch (error) {
       try {
         if (this.db.isTransaction) this.db.exec("ROLLBACK");
+        else if (committing) this.writesBlocked = true;
       } catch {
         this.writesBlocked = true;
         committing = true;

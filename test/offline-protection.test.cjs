@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
 const { createHash, randomUUID } = require("node:crypto");
 const { once } = require("node:events");
-const { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } = require("node:fs");
+const { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, symlinkSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
@@ -12,8 +12,9 @@ const { WorkspaceDatabase } = require("../build/database.js");
 const { WorkLogDatabase } = require("../build/worklog.js");
 const { GrowthProfileDatabase } = require("../build/growth-profile.js");
 const { IntakeStore, StudentIntakeService } = require("../build/student-intake.js");
-const { captureProtection, validateProtection, verifyProtectionStores, ProtectionFiles } = require("../build/offline-protection.js");
-const { approveActiveProfile, approvedSelection, readActivation, saveActivation, verifyActiveProfile } = require("../build/profile-activation.js");
+const { captureProtection, prepareProtectionRestore, validateProtection, verifyProtectionStores, ProtectionFiles } = require("../build/offline-protection.js");
+const { OperationsDatabase } = require("../build/operations.js");
+const { approveActiveProfile, approvedSelection, checkOriginalProtectionMode, readActivation, saveActivation, verifyActiveProfile } = require("../build/profile-activation.js");
 
 const exe = join(__dirname, "..", "build", "recovery-io.exe");
 const io = new ProtectionFiles(exe);
@@ -346,4 +347,193 @@ test("restoration record binds genuine package manifests and native file identit
   assert.equal(first.packageEvidenceBase64, second.packageEvidenceBase64);
   assert.throws(() => requireSupportedProfileOpen("synthetic-renamed", true), error => error.code === "recovery");
   assert.doesNotThrow(() => requireSupportedProfileOpen("synthetic-existing"));
+});
+
+function fiveFixture(t) {
+  const f = populated(t);
+  const ops = OperationsDatabase.open(f.dir, f.m1, true);
+  t.after(() => ops.close());
+  const stores = [...f.stores, ops];
+  const studentId = f.studentId;
+  const startAt = Date.UTC(2099, 5, 6, 8);
+  const plan = { studentId, id: randomUUID(), requestId: randomUUID(), expectedRevision: 0,
+    startAt, exception: { confirmed: true, reason: "合成时段" } };
+  const create = () => ops.saveAttendancePlan(plan);
+  return { ...f, ops, stores, plan, create };
+}
+
+test("SWBACK2 reads committed operations from pinned WAL and restores the five-store lifecycle", async t => {
+  const f = fiveFixture(t);
+  const reader = new DatabaseSync(join(f.dir, "operations.sqlite3"), { readOnly: true });
+  reader.exec("BEGIN");
+  assert.equal(reader.prepare("SELECT count(*) AS n FROM attendance_plans").get().n, 0);
+  const planned = f.create();
+  let bytes;
+  try {
+    assert(readFileSync(join(f.dir, "operations.sqlite3-wal")).length > 32);
+    assert.equal(f.ops.protectionConnection().prepare("PRAGMA wal_checkpoint(TRUNCATE)").get().busy, 1);
+    assert.equal(reader.prepare("SELECT count(*) AS n FROM attendance_plans").get().n, 0);
+    const block = f.ops.saveLearningBlock({ studentId: planned.studentId, id: randomUUID(), requestId: randomUUID(),
+      expectedRevision: 0, attendancePlanId: planned.id, plannedStart: planned.startAt, plannedEnd: planned.endAt });
+    f.ops.saveLearningTasks({ studentId: block.studentId, id: block.id, expectedRevision: 1,
+      requestId: randomUUID(), tasks: [{ id: randomUUID(), category: "foundation", content: "合成作业" }] });
+    bytes = captureProtection(f.stores, "0.2.0", 2);
+  } finally { reader.close(); }
+  const verified = validateProtection(bytes);
+  assert.equal(bytes.subarray(0, 8).toString(), "SWBACK2\n");
+  const entry = verified.manifest.databases[4];
+  assert.equal(entry.applicationId, 0x53574f31);
+  assert.equal(entry.schemaVersion, 1);
+  assert.equal(entry.integrity, "ok");
+  assert.deepEqual(entry.initialization, { file: "operations.initialized", content: "operations-v1\n" });
+  assert.equal(verified.summary.attendancePlans, 1);
+  assert.equal(verified.summary.learningTasks, 1);
+
+  const owner = temp();
+  const backup = await io.publish(owner, bytes);
+  const restored = await io.restore(owner, await io.read(backup.location));
+  const checked = await io.inspect(owner, restored.profileName, 2);
+  assert.deepEqual(checked.bytes, bytes);
+  const active = await io.restore(owner, checked.bytes, true);
+  const selection = { name: active.profileName, digest: checked.digest };
+  assert.equal(verifyActiveProfile(owner, selection, true, 2), active.location);
+  const data = join(active.location, "data");
+  const open = () => {
+    const profile = openStores(data, t);
+    const ops = OperationsDatabase.open(data, profile.m1);
+    return { ...profile, ops, full: [...profile.stores, ops], close() { try { ops.close(); } finally { profile.close(); } } };
+  };
+  const first = open();
+  try {
+    verifyProtectionStores(first.full, "0.2.0", 2);
+    assert.deepEqual(first.ops.saveAttendancePlan(f.plan), planned);
+    assert.equal(first.work.protectionConnection().prepare("SELECT id FROM work_items").get().id, f.itemId);
+    assert.equal(first.growth.load(f.studentId).studentId, f.studentId);
+    const service = new StudentIntakeService(first.intake, first.m1, first.growth);
+    assert.equal(service.prepare(service.register("synthetic", input[1]).token).pendingId, f.requestId);
+    first.ops.recordAttendance({ studentId: planned.studentId, id: planned.id, expectedRevision: 1,
+      requestId: randomUUID(), action: "confirm" });
+  } finally { first.close(); }
+  approveActiveProfile(active.location, checked.digest);
+  saveActivation(owner, { version: 1, active: selection, pending: null });
+  saveActivation(owner, { version: 1, active: null, pending: null });
+  assert.equal(f.ops.attendancePlan(planned.id).revision, 1);
+  assert.deepEqual(approvedSelection(owner, active.profileName), selection);
+  saveActivation(owner, { version: 1, active: selection, pending: null });
+  assert.equal(verifyActiveProfile(owner, readActivation(owner).active, false, 2), active.location);
+  const reopened = open();
+  try {
+    assert.equal(reopened.ops.attendancePlan(planned.id).status, "confirmed");
+    const again = await io.restore(owner, captureProtection(reopened.full, "0.2.0", 2));
+    assert.equal((await io.inspect(owner, again.profileName, 2)).summary.learningTasks, 1);
+  } finally { reopened.close(); }
+});
+
+test("SWBACK1 upgrades into a new isolated SWBACK2 copy with an empty operations library", async t => {
+  const f = fiveFixture(t);
+  f.create();
+  const v1 = captureProtection(f.stores.slice(0, 4), "0.1.0");
+  const candidate = prepareProtectionRestore(v1, 2);
+  const old = validateProtection(v1);
+  const upgraded = validateProtection(candidate);
+  assert.equal(old.summary.formatVersion, 1);
+  assert.equal(upgraded.summary.upgradedFromFour, true);
+  assert.equal(upgraded.summary.attendancePlans, 0);
+  assert.deepEqual(upgraded.images.slice(0, 4), old.images);
+  assert.throws(() => prepareProtectionRestore(candidate, 1), /五库备份/);
+  const owner = temp(), restored = await io.restore(owner, candidate);
+  assert.equal((await io.inspect(owner, restored.profileName, 2)).summary.learningBlocks, 0);
+  await assert.rejects(io.inspect(owner, restored.profileName, 1), /无法确认/);
+  assert.equal(f.ops.attendancePlan(f.plan.id).revision, 1);
+  assert.throws(() => captureProtection(f.stores, "0.2.0", 1), /清单/);
+  assert.throws(() => captureProtection(f.stores.slice(0, 4), "0.2.0", 2), /清单/);
+});
+
+test("SWBACK2 rejects busy and wrongly linked operations and releases earlier SQLite locks", t => {
+  const f = fiveFixture(t);
+  f.create();
+  const connection = new DatabaseSync(join(f.dir, "operations.sqlite3"));
+  try {
+    connection.exec("BEGIN IMMEDIATE; UPDATE attendance_plans SET updated_at=updated_at+1");
+    assert.throws(() => captureProtection(f.stores, "0.2.0", 2), error => ((error.errcode ?? 0) & 255) === 5);
+    assert(f.stores.slice(0, 4).every(store => !store.protectionConnection().isTransaction));
+    connection.exec("ROLLBACK");
+  } finally { connection.close(); }
+  const db = f.ops.protectionConnection();
+  db.prepare("UPDATE operation_changes SET snapshot_json=json_set(snapshot_json, '$.studentId', ?)").run(f.pending.studentId);
+  assert.throws(() => captureProtection(f.stores, "0.2.0", 2), /历史、学生归属/);
+  db.exec("UPDATE operation_changes SET snapshot_json=(SELECT result_json FROM operation_requests)");
+  db.prepare("UPDATE attendance_plans SET student_id=?").run(randomUUID());
+  assert.throws(() => captureProtection(f.stores, "0.2.0", 2), /找不到对应 M1/);
+});
+
+test("SWBACK2 rejects fifth-store tampering, truncation and unverified recovery sidecars", async t => {
+  const f = fiveFixture(t);
+  f.create();
+  const bytes = captureProtection(f.stores, "0.2.0", 2);
+  const damaged = Buffer.from(bytes);
+  damaged[damaged.length - 40] ^= 1;
+  assert.throws(() => validateProtection(rehash(damaged)), /SHA-256/);
+  const missing = Buffer.from(bytes);
+  missing.write("wrongstore.sqlite3", missing.indexOf(Buffer.from("operations.sqlite3")));
+  assert.throws(() => validateProtection(rehash(missing)), /缺少数据库|清单身份/);
+  assert.throws(() => validateProtection(bytes.subarray(0, -512)), /SHA-256/);
+
+  const owner = temp(), restored = await io.restore(owner, bytes);
+  const checked = await io.inspect(owner, restored.profileName, 2);
+  const active = await io.restore(owner, checked.bytes, true);
+  const selection = { name: active.profileName, digest: checked.digest };
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    const rejected = await io.restore(owner, checked.bytes, true);
+    const path = join(rejected.location, "data", "operations.sqlite3" + suffix);
+    writeFileSync(path, "unverified");
+    assert.throws(() => verifyActiveProfile(owner, { ...selection, name: rejected.profileName }, true, 2), /侧车/);
+    assert.equal(readFileSync(path, "utf8"), "unverified");
+  }
+  const restoredData = join(restored.location, "recovery");
+  const originalFile = join(restoredData, "operations.sqlite3");
+  renameSync(originalFile, join(owner, "held-operations.sqlite3"));
+  assert.throws(() => verifyActiveProfile(owner, selection, true, 1), /选择记录/);
+  await assert.rejects(io.inspect(owner, restored.profileName, 2), /无法确认/);
+  linkSync(join(owner, "held-operations.sqlite3"), originalFile);
+  await assert.rejects(io.inspect(owner, restored.profileName, 2), /无法确认/);
+});
+
+test("the original-profile mode never reenrolls a missing five-store profile or exports four stores", t => {
+  const root = temp(), profile = join(root, "profile"), data = join(profile, "data");
+  mkdirSync(data, { recursive: true });
+  assert.equal(checkOriginalProtectionMode(profile, 2, true), true);
+  assert.throws(() => checkOriginalProtectionMode(profile, 2, true), /文件缺失/);
+  assert.throws(() => checkOriginalProtectionMode(profile, 1), /无法使用四库模式/);
+  assert.deepEqual(readdirSync(data), []);
+  const other = temp(), old = join(other, "profile"), oldData = join(old, "data");
+  mkdirSync(oldData, { recursive: true });
+  const f = openStores(oldData, t);
+  assert.throws(() => checkOriginalProtectionMode(old, 2, true), /全新合成档案/);
+  assert.equal(checkOriginalProtectionMode(old, 1), false);
+  const ops = OperationsDatabase.open(oldData, f.m1, true);
+  t.after(() => ops.close());
+  assert.throws(() => checkOriginalProtectionMode(old, 1), /无法使用四库模式/);
+});
+
+test("an interrupted fifth-image write leaves no ready record and preserves the original stores", t => {
+  const f = fiveFixture(t);
+  const plan = f.create();
+  const verified = validateProtection(captureProtection(f.stores, "0.2.0", 2));
+  const part = bytes => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32LE(bytes.length);
+    return Buffer.concat([length, bytes]);
+  };
+  const input = Buffer.concat([part(Buffer.from("{}")), ...verified.images.map(part)]).subarray(0, -512);
+  const root = temp();
+  const name = "sw-m2d-active-" + randomUUID().replaceAll("-", "");
+  const result = spawnSync(exe, ["activate", root, name, "2"], { input });
+  assert.equal(result.status, 1);
+  const target = join(root, name, "profile");
+  assert.equal(existsSync(join(target, "restore.ready")), false);
+  assert.equal(existsSync(join(target, "data", "operations.initialized")), false);
+  assert.equal(existsSync(join(target, "data", "student-intake.initialized")), true);
+  assert.deepEqual(f.ops.attendancePlan(plan.id), plan);
+  validateProtection(captureProtection(f.stores, "0.2.0", 2));
 });

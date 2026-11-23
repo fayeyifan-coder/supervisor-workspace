@@ -8,10 +8,16 @@ import { intakeProtection, intakeSourceDigest } from "./student-intake";
 import { parseIntake } from "./intake-format";
 import { worklogProtection } from "./worklog";
 
-const layouts = [m1Protection, worklogProtection, growthProtection, intakeProtection] as const;
+import { operationsProtection, verifyOperationsStudentLinks } from "./operations-schema";
+
+const fourLayouts = [m1Protection, worklogProtection, growthProtection, intakeProtection] as const;
+const fiveLayouts = [...fourLayouts, operationsProtection] as const;
+export type ProtectionFormat = 1 | 2;
+const layoutsFor = (version: ProtectionFormat) => version === 2 ? fiveLayouts : fourLayouts;
 const magic = Buffer.from("SWBACK1\n");
+const fiveMagic = Buffer.from("SWBACK2\n");
 const maxDatabase = 32 * 1024 * 1024;
-const maxPackage = 129 * 1024 * 1024;
+const maxPackage = 161 * 1024 * 1024;
 const maxManifest = 16 * 1024;
 const maxRecoveryEvidence = 32 * 1024;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -24,8 +30,14 @@ interface ManifestDatabase {
   length: number;
   sha256: string;
   initialization: { file: string; content: string };
+  integrity?: "ok";
 }
 export interface ProtectionSummary {
+  formatVersion: ProtectionFormat;
+  attendancePlans?: number;
+  learningBlocks?: number;
+  learningTasks?: number;
+  upgradedFromFour?: true;
   createdAt: string;
   applicationVersion: string;
   students: number;
@@ -36,12 +48,13 @@ export interface ProtectionSummary {
 }
 export interface ProtectionResult extends ProtectionSummary { location: string; profileName?: string }
 interface Manifest {
-  formatVersion: 1;
+  formatVersion: ProtectionFormat;
+  upgradedFrom?: string;
   createdAt: string;
   applicationVersion: string;
   databases: ManifestDatabase[];
 }
-type Layout = (typeof layouts)[number];
+type Layout = (typeof fiveLayouts)[number];
 type Store = { protectionConnection(): DatabaseSync };
 
 export function requireSupportedProfileOpen(name: string, hasRestoreRecord = false): void {
@@ -103,9 +116,9 @@ function snapshot(source: DatabaseSync, layout: Layout): Buffer {
 function count(db: DatabaseSync, table: string): number {
   return Number(db.prepare("SELECT count(*) AS n FROM " + table).get()?.n);
 }
-function summary(dbs: DatabaseSync[], manifest: Pick<Manifest, "createdAt" | "applicationVersion">): ProtectionSummary {
-  const [m1, work, growth, intake] = dbs;
-  const students = new Set(m1.prepare("SELECT id FROM students").all().map(x => x.id));
+function summary(dbs: DatabaseSync[], manifest: Pick<Manifest, "createdAt" | "applicationVersion" | "formatVersion" | "upgradedFrom">): ProtectionSummary {
+  const [m1, work, growth, intake, operations] = dbs;
+  const students = new Set(m1.prepare("SELECT id FROM students").all().map(x => String(x.id)));
   for (const id of students) if (typeof id !== "string" || !uuid.test(id)) reject("M1 学生 UUID 无效。");
   const requireStudent = (id: unknown) => {
     if (typeof id !== "string" || !students.has(id)) reject("备份含有找不到 M1 学生的关联。");
@@ -151,19 +164,35 @@ function summary(dbs: DatabaseSync[], manifest: Pick<Manifest, "createdAt" | "ap
     if (row.state !== "done") unfinishedImports++;
   }
   if (imported.size !== count(intake, "intake_bindings")) reject("存在没有导入请求的代号绑定。");
+  if (operations) {
+    verifyOperationsStudentLinks(operations, students);
+    if (manifest.upgradedFrom && operationsProtection.tables.some(table => count(operations, table) !== 0)) {
+      reject("从四库备份升级的教务库必须为空。");
+    }
+  }
   return { createdAt: manifest.createdAt, applicationVersion: manifest.applicationVersion,
+    formatVersion: manifest.formatVersion,
+    ...(manifest.upgradedFrom ? { upgradedFromFour: true as const } : {}),
+    ...(operations ? { attendancePlans: count(operations, "attendance_plans"),
+      learningBlocks: count(operations, "learning_blocks"), learningTasks: count(operations, "learning_tasks") } : {}),
     students: students.size, workItems: count(work, "work_items"), growthProfiles: count(growth, "growth_profiles"),
     intakeBindings: imported.size, unfinishedImports };
 }
 
-function withProtectionConnections<T>(stores: readonly Store[], operation: (connections: DatabaseSync[]) => T): T {
-  if (stores.length !== layouts.length) reject("备份库清单无效。");
+function withProtectionConnections<T>(stores: readonly Store[], format: ProtectionFormat, operation: (connections: DatabaseSync[]) => T): T {
+  if (stores.length !== layoutsFor(format).length) reject("备份库清单无效。");
   const connections = stores.map(store => store.protectionConnection());
+  if (new Set(connections).size !== connections.length) reject("备份库连接重复。");
   const locked: DatabaseSync[] = [];
   try {
     // All application writes run synchronously in the main process. IMMEDIATE also excludes separate SQLite writers.
     for (const connection of connections) {
-      connection.exec("BEGIN IMMEDIATE");
+      if (connection.isTransaction) throw new WorkspaceFault("busy", "数据库正在写入，未生成备份。");
+      try { connection.exec("BEGIN IMMEDIATE"); }
+      catch (error) {
+        if (connection.isTransaction) locked.push(connection);
+        throw error;
+      }
       locked.push(connection);
     }
     return operation(connections);
@@ -176,40 +205,69 @@ function withProtectionConnections<T>(stores: readonly Store[], operation: (conn
   }
 }
 
-export function verifyProtectionStores(stores: readonly Store[], applicationVersion: string): void {
-  withProtectionConnections(stores, connections => {
+export function verifyProtectionStores(stores: readonly Store[], applicationVersion: string, format: ProtectionFormat = 1): void {
+  const layouts = layoutsFor(format);
+  withProtectionConnections(stores, format, connections => {
     connections.forEach((db, index) => checkImage(db, layouts[index]));
-    summary(connections, { createdAt: new Date().toISOString(), applicationVersion });
+    summary(connections, { createdAt: new Date().toISOString(), applicationVersion, formatVersion: format });
   });
 }
 
-export function captureProtection(stores: readonly Store[], applicationVersion: string): Buffer {
+export function captureProtection(stores: readonly Store[], applicationVersion: string, format: ProtectionFormat = 1): Buffer {
   if (!/^[A-Za-z0-9_.+-]{1,64}$/.test(applicationVersion)) reject("备份库清单无效。");
-  const { images, createdAt } = withProtectionConnections(stores, connections => ({
-    createdAt: new Date().toISOString(),
-    images: connections.map((db, index) => snapshot(db, layouts[index])),
-  }));
-  const manifest: Manifest = { formatVersion: 1, createdAt, applicationVersion,
-    databases: layouts.map((layout, index) => ({
-      file: layout.key + ".sqlite3",
-      applicationId: layout.applicationId, schemaVersion: layout.version, schemaSha256: sha(expectedSchema(layout)),
-      length: images[index].length, sha256: sha(images[index]),
-      initialization: { file: layout.key + ".initialized", content: layout.marker },
-    })) };
-  return encodeProtection(manifest, images);
+  const layouts = layoutsFor(format);
+  const { images, createdAt } = withProtectionConnections(stores, format, connections => {
+    const createdAt = new Date().toISOString();
+    const images = connections.map((db, index) => snapshot(db, layouts[index]));
+    if (format === 2) summary(connections, { createdAt, applicationVersion, formatVersion: format });
+    return { images, createdAt };
+  });
+  return encodeProtection({ formatVersion: format, createdAt, applicationVersion,
+    databases: layouts.map((layout, index) => manifestDatabase(layout, images[index], format)) }, images);
+}
+
+function manifestDatabase(layout: Layout, image: Buffer, format: ProtectionFormat): ManifestDatabase {
+  return {
+    file: layout.key + ".sqlite3",
+    applicationId: layout.applicationId, schemaVersion: layout.version, schemaSha256: sha(expectedSchema(layout)),
+    length: image.length, sha256: sha(image),
+    initialization: { file: layout.key + ".initialized", content: layout.marker },
+    ...(format === 2 ? { integrity: "ok" as const } : {}),
+  };
+}
+
+export function prepareProtectionRestore(bytes: Buffer, format: ProtectionFormat): Buffer {
+  const { manifest, images } = validateProtection(bytes);
+  if (manifest.formatVersion === format) return bytes;
+  if (format === 1) reject("五库备份需要支持教务库的隔离环境，未写入任何恢复文件。");
+
+  const db = new DatabaseSync(":memory:", { allowExtension: false, enableForeignKeyConstraints: true });
+  try {
+    for (const ddl of operationsProtection.ddl) db.exec(ddl);
+    db.exec(`PRAGMA application_id=${operationsProtection.applicationId}; PRAGMA user_version=${operationsProtection.version}`);
+    const empty = snapshot(db, operationsProtection);
+    return encodeProtection({
+      ...manifest, formatVersion: 2, upgradedFrom: sha(bytes),
+      databases: [...manifest.databases.map(entry => ({ ...entry, integrity: "ok" as const })),
+        manifestDatabase(operationsProtection, empty, 2)],
+    }, [...images, empty]);
+  } finally { db.close(); }
 }
 
 function encodeProtection(manifest: Manifest, images: Buffer[]): Buffer {
   const json = Buffer.from(JSON.stringify(manifest));
   const length = Buffer.alloc(4);
   length.writeUInt32LE(json.length);
-  const body = Buffer.concat([magic, length, json, ...images]);
+  const body = Buffer.concat([manifest.formatVersion === 2 ? fiveMagic : magic, length, json, ...images]);
   return Buffer.concat([body, Buffer.from(sha(body), "hex")]);
 }
 
 export function validateProtection(packageBytes: Buffer): { summary: ProtectionSummary; images: Buffer[]; manifest: Manifest } {
-  if (packageBytes.length > maxPackage || packageBytes.length < 64 ||
-      !packageBytes.subarray(0, magic.length).equals(magic)) reject("备份包格式或长度无效。");
+  const header = packageBytes.subarray(0, magic.length);
+  const format: ProtectionFormat = header.equals(fiveMagic) ? 2 : 1;
+  if (packageBytes.length > (format === 2 ? maxPackage : 129 * 1024 * 1024) || packageBytes.length < 64 ||
+      (format === 1 && !header.equals(magic))) reject("备份包格式或长度无效。");
+  const layouts = layoutsFor(format);
   const end = packageBytes.length - 32;
   if (sha(packageBytes.subarray(0, end)) !== packageBytes.subarray(end).toString("hex")) reject("备份不完整或总体 SHA-256 不匹配。");
   const manifestLength = packageBytes.readUInt32LE(magic.length);
@@ -222,7 +280,9 @@ export function validateProtection(packageBytes: Buffer): { summary: ProtectionS
     manifest = JSON.parse(decoded) as Manifest;
     if (JSON.stringify(manifest) !== decoded) reject("备份清单包含非规范或重复的内容。");
   } catch { reject("备份清单无法读取。"); }
-  if (!manifest || manifest.formatVersion !== 1 ||
+  if (!manifest || manifest.formatVersion !== format ||
+      (manifest.upgradedFrom !== undefined && (format !== 2 || typeof manifest.upgradedFrom !== "string" ||
+        !/^[a-f0-9]{64}$/.test(manifest.upgradedFrom))) ||
       typeof manifest.applicationVersion !== "string" || !/^[A-Za-z0-9_.+-]{1,64}$/.test(manifest.applicationVersion) ||
       typeof manifest.createdAt !== "string" || !Number.isFinite(Date.parse(manifest.createdAt)) ||
       new Date(manifest.createdAt).toISOString() !== manifest.createdAt ||
@@ -232,6 +292,7 @@ export function validateProtection(packageBytes: Buffer): { summary: ProtectionS
     const entry = manifest.databases[index];
     if (!entry || entry.file !== layout.key + ".sqlite3" || entry.applicationId !== layout.applicationId ||
         entry.schemaVersion !== layout.version || entry.schemaSha256 !== sha(expectedSchema(layout)) ||
+        (format === 2 && entry.integrity !== "ok") ||
         !Number.isInteger(entry.length) || entry.length < 512 || entry.length > maxDatabase || offset + entry.length > end ||
         entry.initialization?.file !== layout.key + ".initialized" || entry.initialization.content !== layout.marker) {
       reject("缺少数据库或清单身份不匹配：" + layout.key);
@@ -298,8 +359,8 @@ export class ProtectionFiles {
 
   async read(path: string): Promise<Buffer> { return this.native(["read", path]); }
 
-  async inspect(parent: string, name: string) {
-    const wire = await this.native(["inspect", parent, name]);
+  async inspect(parent: string, name: string, format: ProtectionFormat = 1) {
+    const wire = await this.native(["inspect", parent, name, String(format)]);
     let offset = 0;
     const part = (max: number): Buffer => {
       if (offset + 4 > wire.length) return reject("恢复副本不完整。");
@@ -314,7 +375,8 @@ export class ProtectionFiles {
     if (record?.format !== "sw-recovery-evidence-v1" || record.profileName !== name ||
         typeof record.packageEvidenceBase64 !== "string") reject("恢复副本缺少有效的完成记录。");
     const evidence = JSON.parse(Buffer.from(record.packageEvidenceBase64, "base64").toString("utf8"));
-    const images = layouts.map(() => part(maxDatabase));
+    if (evidence.manifest?.formatVersion !== format) reject("恢复副本与当前库清单不兼容。");
+    const images = layoutsFor(format).map(() => part(maxDatabase));
     if (offset !== wire.length) reject("恢复副本包含未声明数据。");
     const bytes = encodeProtection(evidence.manifest, images);
     const digest = sha(bytes);
@@ -336,7 +398,7 @@ export class ProtectionFiles {
       length.writeUInt32LE(bytes.length);
       return [length, bytes];
     }));
-    await this.native([forActivation ? "activate" : "restore", parent, name], input);
+    await this.native([forActivation ? "activate" : "restore", parent, name, String(verified.manifest.formatVersion)], input);
     return { ...verified.summary, location: join(parent, name, "profile"), profileName: name };
   }
 }

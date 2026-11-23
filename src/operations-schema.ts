@@ -67,4 +67,22 @@ export function verifyOperationsStudentLinks(database: DatabaseSync, m1StudentId
   if (students.some(row => typeof row.student_id !== "string" || !m1StudentIds.has(row.student_id))) {
     throw new WorkspaceFault("recovery", "教务数据库包含找不到对应 M1 档案的学生记录。");
   }
+
+  const inconsistent = database.prepare(`SELECT 1 FROM operation_changes AS change
+    JOIN operation_requests AS receipt USING (request_id)
+    LEFT JOIN attendance_plans AS plan ON change.entity_kind = 'attendance' AND plan.id = change.entity_id
+    LEFT JOIN learning_blocks AS block ON change.entity_kind = 'block' AND block.id = change.entity_id
+    WHERE change.student_id IS NOT coalesce(plan.student_id, block.student_id)
+      OR change.revision > coalesce(plan.revision, block.revision)
+      OR json_extract(change.snapshot_json, '$.studentId') IS NOT change.student_id
+      OR json_extract(change.snapshot_json, '$.id') IS NOT change.entity_id
+      OR json_extract(change.snapshot_json, '$.revision') IS NOT change.revision
+      OR change.snapshot_json IS NOT receipt.result_json
+    UNION ALL SELECT 1 FROM operation_requests AS receipt
+      LEFT JOIN operation_changes USING (request_id)
+      GROUP BY receipt.request_id HAVING count(operation_changes.request_id) <> 1
+    LIMIT 1`).get();
+  if (inconsistent) {
+    throw new WorkspaceFault("recovery", "教务数据库的历史、学生归属或保存凭据不一致。");
+  }
 }

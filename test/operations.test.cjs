@@ -38,7 +38,7 @@ function fixture(t) {
   });
   return {
     dir, ids, m1, m1File, m1Marker, file: join(dir, "operations.sqlite3"), marker: join(dir, "operations.initialized"),
-    get store() { return store ??= OperationsDatabase.open(dir, m1); },
+    get store() { return store ??= OperationsDatabase.open(dir, m1, true); },
     close() {
       const current = store;
       store = undefined;
@@ -171,7 +171,9 @@ test("request replay survives a lost COMMIT reply and a newer revision", t => {
     if (sql === "COMMIT" && once) { once = false; throw new Error(" lost reply"); }
   });
   assert.throws(() => f.store.saveAttendancePlan(request), failure("unknown"));
-  f.close();
+  assert.throws(() => f.store.saveAttendancePlan(request), failure("recovery"));
+  assert.throws(() => f.store.protectionConnection(), failure("busy"));
+  assert.throws(() => f.close(), failure("unknown"));
   const stored = f.store.attendancePlan(request.id);
   const newer = f.store.saveAttendancePlan({ ...change(stored), startAt: request.startAt + hour });
   assert.equal(newer.revision, 2);
@@ -261,7 +263,7 @@ test("an interrupted initialization and missing or incorrect markers preserve th
       if (sql.startsWith("PRAGMA application_id=")) process.exit(73);
       return exec.call(this, sql);
     };
-    OperationsDatabase.open(process.argv[2], { students: () => [] });
+    OperationsDatabase.open(process.argv[2], { students: () => [] }, true);
   `, require.resolve("../build/operations.js"), f.dir], { encoding: "utf8", timeout: 15_000, windowsHide: true });
   assert.equal(child.status, 73, child.stderr);
   assert(existsSync(f.file));
@@ -280,4 +282,11 @@ test("an interrupted initialization and missing or incorrect markers preserve th
   renameSync(healthy.marker, join(healthy.dir, "kept.marker"));
   assert.throws(() => OperationsDatabase.open(healthy.dir, healthy.m1), failure("recovery"));
   assert(readFileSync(healthy.file).equals(clean));
+});
+
+test("opening an existing operations profile never recreates a missing database and marker", t => {
+  const f = fixture(t);
+  assert.throws(() => OperationsDatabase.open(f.dir, f.m1), failure("recovery"));
+  assert.equal(existsSync(join(f.dir, "operations.sqlite3")), false);
+  assert.equal(existsSync(join(f.dir, "operations.initialized")), false);
 });
