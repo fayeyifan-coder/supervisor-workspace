@@ -325,9 +325,9 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
             const start = shanghaiParts(plan.startAt).time;
             const end = shanghaiParts(plan.endAt).time;
             const alias = names.get(plan.studentId) ?? "待核对学生";
-            return <li key={plan.id}>
-              <button type="button" disabled={busy} className="schedule-card" data-kind={plan.kind} data-exception={Boolean(plan.exceptionReason)}
-                aria-label={alias + " " + start + "–" + end + " " + statuses[plan.status]} onClick={() => {
+            return <li key={plan.id} className="schedule-card-item" data-kind={plan.kind} data-exception={Boolean(plan.exceptionReason)}>
+              <button type="button" disabled={busy} className="schedule-card"
+                aria-label={alias + " " + start + "–" + end + " " + statuses[plan.status] + " · 排课详情"} onClick={() => {
                   if (canDiscard()) showDraft(toDraft(plan));
                 }}>
                 <span className="schedule-card-time">{start}–{end}</span>
@@ -335,13 +335,15 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
                 <span className="schedule-card-meta">{plan.kind === "whole_day" ? "全天" : "普通"} · {statuses[plan.status]}</span>
                 {plan.exceptionReason && <span className="schedule-card-exception">时段例外</span>}
               </button>
-              <button className="schedule-learning-entry" type="button" disabled={busy || request.busy}
-                aria-label={alias + " 到校与任务"} onClick={() => {
-                  if (!canDiscard()) return;
-                  showDraft(undefined);
-                  setLearning({ attendanceId: plan.id, studentId: plan.studentId });
-                  window.scrollTo(0, 0);
-                }}>到校与任务</button>
+              <div className="schedule-card-actions">
+                <button className="primary schedule-learning-entry" type="button" disabled={busy || request.busy}
+                  aria-label={"进入学习 · " + alias + " " + start + "–" + end} onClick={() => {
+                    if (!canDiscard()) return;
+                    showDraft(undefined);
+                    setLearning({ attendanceId: plan.id, studentId: plan.studentId });
+                    window.scrollTo(0, 0);
+                  }}>进入学习</button>
+              </div>
             </li>;
           })}</ul> : <p className="schedule-empty muted">无排课</p>)}
         </section>;
