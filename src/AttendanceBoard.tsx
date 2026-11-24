@@ -8,8 +8,9 @@ const labels: Record<AttendanceBoardStatus, string> = {
   checked_out: "已签退", absent: "缺席", cancelled: "已取消",
 };
 
-export function AttendanceBoard({ api, students, onBack, onLearning }: {
+export function AttendanceBoard({ api, students, onBack, onLearning, onStudent }: {
   api: WorkspaceApi; students: Student[]; onBack: () => void; onLearning: (target: LearningDayInput) => void;
+  onStudent: (studentId: string) => void;
 }) {
   const [refresh, setRefresh] = useState(0);
   const [result, setResult] = useState<Result<AttendanceBoardDay>>();
@@ -52,7 +53,8 @@ export function AttendanceBoard({ api, students, onBack, onLearning }: {
           {entries.length === 0 ? <p className="muted">今天暂无到校安排。</p>
             : <ul className="attendance-board-list">
               {entries.map(({ plan, status }) => <li key={plan.id} className="panel attendance-board-row" data-state={status}>
-                <div><h2>{names.get(plan.studentId) ?? "待核对学生"}</h2>
+                <div><h2><button className="schedule-profile-link" type="button" disabled={!names.has(plan.studentId)}
+                  onClick={() => onStudent(plan.studentId)}>{names.get(plan.studentId) ?? "待核对学生"}</button></h2>
                   <p>{shanghaiParts(plan.startAt).time}–{shanghaiParts(plan.endAt).time} · {plan.kind === "whole_day" ? "全天" : "普通"}</p>
                   {plan.exceptionReason && <p>时段例外：{plan.exceptionReason}</p>}
                 </div>

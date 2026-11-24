@@ -68,12 +68,18 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
   actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode; parentFollowUp?: ReactNode;
   recordPanels: { id: StudentRecordKind; label: string; content: ReactNode }[];
 }) {
+  const planned = [
+    !parentFollowUp && "家长诉求",
+    !recordPanels.some(panel => panel.id === "enrollment") && "到期提醒",
+    !recordPanels.some(panel => panel.id === "score") && "成绩趋势",
+    !recordPanels.some(panel => panel.id === "improvement") && "提分方案",
+  ].filter(Boolean);
   const [selected, setSelected] = useState<(typeof sections)[number]["id"] | "edit" | "parent" | StudentRecordKind>("growth");
 
   return <article className="student-detail" aria-labelledby="student-detail-heading">
     <header className="panel student-overview">
       <div className="student-overview-heading">
-        <h1 id="student-detail-heading">{student.alias}</h1>
+        <h1 id="student-detail-heading" tabIndex={-1}>{student.alias}</h1>
         {actions}
       </div>
       <dl>
@@ -84,7 +90,7 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
       </dl>
     </header>
     <nav className="student-detail-nav" aria-label="学生详情">
-      {sections.map(({ id, label }) => <button key={id} type="button" aria-controls={"student-section-" + id}
+      {sections.filter(({ id }) => id !== "planned" || planned.length > 0).map(({ id, label }) => <button key={id} type="button" aria-controls={"student-section-" + id}
         aria-pressed={selected === id} onClick={() => setSelected(id)}>{label}</button>)}
       {edit && <button type="button" aria-controls="student-section-edit" aria-pressed={selected === "edit"}
         onClick={() => setSelected("edit")}>基础档案编辑</button>}
@@ -103,11 +109,10 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
     {recordPanels.map(panel => <div key={panel.id} id={"student-section-" + panel.id} hidden={selected !== panel.id}>
       {!intakeOpen && panel.content}
     </div>)}
-    <section id="student-section-planned" className="panel student-planned" hidden={selected !== "planned"}
+    {planned.length > 0 && <section id="student-section-planned" className="panel student-planned" hidden={selected !== "planned"}
       aria-labelledby="student-planned-heading">
       <h2 id="student-planned-heading">规划中的功能</h2>
-      <ul>{!parentFollowUp && <li>家长诉求</li>}
-        {[(recordPanels.some(panel => panel.id === "score") ? "" : "成绩趋势"), (recordPanels.some(panel => panel.id === "improvement") ? "" : "提分方案"), ...(!recordPanels.length ? ["到期提醒"] : [])].filter(Boolean).map(label => <li key={label}>{label}</li>)}</ul>
-    </section>
+      <ul>{planned.map(label => <li key={String(label)}>{label}</li>)}</ul>
+    </section>}
   </article>;
 }

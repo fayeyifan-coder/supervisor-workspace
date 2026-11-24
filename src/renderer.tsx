@@ -120,6 +120,8 @@ function App() {
   const [parentFollowUpEnabled, setParentFollowUpEnabled] = useState(false);
   const [schedule, setSchedule] = useState<{ studentId: string; learning?: LearningDayInput }>();
   const [boardOpen, setBoardOpen] = useState(false);
+  const [profileReturn, setProfileReturn] = useState<"schedule" | "board">();
+  const routeScroll = useRef(0);
   const [activeId, setActiveId] = useState<string>();
   const [creating, setCreating] = useState(false);
   const [listError, setListError] = useState("");
@@ -263,6 +265,28 @@ function App() {
     return true;
   }
 
+  const showingWorkspace = Boolean(profileReturn) || (!schedule && !boardOpen);
+
+  function openLinkedStudent(studentId: string, origin: "schedule" | "board"): boolean {
+    if (!students?.some(student => student.id === studentId) || locked || editorBusy || intakeOpen) return false;
+    if ((studentId !== activeId || creating) && !canLeaveStudentDrafts()) return false;
+    routeScroll.current = window.scrollY;
+    setActiveId(studentId);
+    setCreating(false);
+    setNotice(undefined);
+    setProfileReturn(origin);
+    requestAnimationFrame(() => {
+      document.getElementById("student-detail-heading")?.focus({ preventScroll: true });
+      window.scrollTo(0, 0);
+    });
+    return true;
+  }
+
+  function returnToOrigin() {
+    setProfileReturn(undefined);
+    requestAnimationFrame(() => window.scrollTo(0, routeScroll.current));
+  }
+
   return <main className="shell" data-ui>
     <header className="masthead">
       <div className="brand"><span className="brand-mark" aria-hidden="true" /><strong>督学工作台</strong></div>
@@ -276,13 +300,17 @@ function App() {
           onClick={() => setBoardOpen(true)}>今日到校看板</button>}
       </div>
     </header>
-    {schedule && students && <WeeklySchedulePanel api={api} students={students} initialStudentId={schedule.studentId}
-      initialLearning={schedule.learning} onExitLearning={schedule.learning ? () => setSchedule(undefined) : undefined}
-      onBack={() => setSchedule(undefined)} />}
-    {boardOpen && !schedule && students && <AttendanceBoard api={api} students={students}
-      onBack={() => setBoardOpen(false)}
-      onLearning={learning => setSchedule({ studentId: learning.studentId, learning })} />}
-    <div className="workspace" hidden={Boolean(schedule) || boardOpen}>
+    {schedule && students && <div hidden={showingWorkspace}>
+      <WeeklySchedulePanel key={schedule.learning?.attendanceId ?? schedule.studentId} api={api} students={students} initialStudentId={schedule.studentId}
+        initialLearning={schedule.learning} onExitLearning={schedule.learning ? () => setSchedule(undefined) : undefined}
+        onStudent={studentId => openLinkedStudent(studentId, "schedule")} onBack={() => setSchedule(undefined)} />
+    </div>}
+    {boardOpen && !schedule && students && <div hidden={showingWorkspace}>
+      <AttendanceBoard api={api} students={students}
+        onBack={() => setBoardOpen(false)} onStudent={studentId => openLinkedStudent(studentId, "board")}
+        onLearning={learning => setSchedule({ studentId: learning.studentId, learning })} />
+    </div>}
+    <div className="workspace" hidden={!showingWorkspace}>
       <aside className="roster" aria-label="学生档案">
         <div className="roster-heading"><h2>学生档案</h2>
           <button className="secondary" disabled={locked || editorBusy || intakeOpen || !students} onClick={() => {
@@ -324,8 +352,18 @@ function App() {
         <div className="student-content" hidden={intakeOpen}>
           {showStudentForm ? <StudentForm key={formVersion} disabled={locked} submit={input => void save({ kind: "student", input })} />
             : active && <StudentDetail student={active} api={api} intakeOpen={intakeOpen}
-              actions={scheduleEnabled && <button className="secondary" type="button" disabled={locked || editorBusy}
-                onClick={() => setSchedule({ studentId: active.id })}>查看该学生排课</button>}
+              actions={scheduleEnabled && <div className="schedule-heading-actions">
+                {profileReturn && <button className="secondary" type="button" disabled={editorBusy} onClick={returnToOrigin}>
+                  {profileReturn === "board" ? "返回今日到校" : "返回课表"}
+                </button>}
+                <button className="secondary" type="button" disabled={locked || editorBusy}
+                  onClick={() => {
+                    setProfileReturn(undefined);
+                    setBoardOpen(false);
+                    setSchedule({ studentId: active.id });
+                    window.scrollTo(0, 0);
+                  }}>查看该学生排课</button>
+              </div>}
               edit={studentEditEnabled && <StudentEditPanel key={active.id} studentId={active.id} api={api}
                 onDirtyChange={setStudentEditDirty} onBusyChange={setStudentEditBusy}
                 onSaved={() => setListRefresh(value => value + 1)} />}

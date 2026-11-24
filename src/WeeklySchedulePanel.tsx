@@ -60,10 +60,11 @@ function exceptionText(draft: Draft): string {
     : "周一默认停排。";
 }
 
-export function WeeklySchedulePanel({ api, students, initialStudentId, initialLearning, onExitLearning, onBack }: {
+export function WeeklySchedulePanel({ api, students, initialStudentId, initialLearning, onExitLearning, onBack, onStudent }: {
   api: WorkspaceApi; students: Student[]; initialStudentId: string; onBack: () => void;
   initialLearning?: { attendanceId: string; studentId: string };
   onExitLearning?: () => void;
+  onStudent: (studentId: string) => boolean;
 }) {
   const today = shanghaiParts(Date.now()).date;
   const [week, setWeek] = useState(() => mondayOf(today));
@@ -359,6 +360,10 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
                     setLearning({ attendanceId: plan.id, studentId: plan.studentId });
                     window.scrollTo(0, 0);
                   }}>进入学习</button>
+                <button className="schedule-profile-link" type="button" disabled={busy || request.busy || !names.has(plan.studentId)}
+                  aria-label={"查看学生档案 · " + alias} onClick={() => {
+                    if (canDiscard() && onStudent(plan.studentId)) showDraft(undefined);
+                  }}>学生档案</button>
               </div>
             </li>;
           })}</ul> : <p className="schedule-empty muted">无排课</p>)}
