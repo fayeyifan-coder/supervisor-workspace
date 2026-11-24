@@ -61,3 +61,13 @@ win-unpacked/
 3. 完全退出后记录 Profile 的主库、初始化标记和现存侧车。SQLite 完整性核对仅在本轮合成库的一致性副本上使用 `PRAGMA integrity_check` 和 `PRAGMA foreign_key_check`。若仍存在 WAL/SHM，保全它们，不单独丢弃侧车或覆盖原库。
 
 运行会在该 Profile 下创建 `data\mvp.sqlite3`、`data\mvp.initialized` 和可能出现的 SQLite WAL/SHM，另有 `chromium`、`logs`、`crash` 子目录。进程包括 Electron 主进程、渲染进程及按需启动的 GPU 或 utility 进程。CI 验证产物结构和字节完整性，桌面启动及保存重开须由本机验收确认。
+
+## M2-B 每日工作日志（首版）
+
+M2-B 将工作事项保存在同一 profile 下独立的 `data\worklog.sqlite3`，使用独立 application_id、Schema v1、WAL 和初始化标记；不改动 M1 Schema v1。学生关联保存 M1 学生 UUID，并在保存时向 M1 档案核验，不建立跨数据库外键。若日志库首次初始化失败，M1 数据库仍独立存在，日志功能显示恢复错误。
+
+首版包含工作日期、标题、可选学生、执行时间、备注、下一步、待办/完成/取消状态、自动完成时间、按日期与文本查询和修改快照历史。今日列表包含今天及之前仍未完成的事项。所有数据只在本机。
+
+**备份缺口：** M2-A 当前备份仅覆盖 M1 SQLite 主库；独立 `worklog.sqlite3`、它的初始化标记及 WAL/SHM 侧车未纳入备份。M2-B 首版不提供工作日志备份/恢复，不能把工作日志视为已受 M2-A 保护。请仅使用合成记录进行本阶段验收。
+
+开发验收可设置 `M2B_SYNTHETIC_TEST=1` 启动未打包应用，让 M1 和日志测试数据库位于独立的 `supervisor-workspace-m2b-test` profile；该开关不会在打包应用中生效。
