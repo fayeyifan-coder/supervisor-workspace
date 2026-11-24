@@ -1,10 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { IntakeConfirm, IntakeTarget, LessonInput, StudentInput, WorkspaceApi } from "./contracts";
+import type { IntakeConfirm, IntakeTarget, LessonInput, ScheduleSaveInput, ScheduleWeekInput, StudentInput, WorkspaceApi } from "./contracts";
 import type { WorkItemInput, WorkStatus } from "./worklog";
 import type { GrowthSaveInput } from "./growth-profile";
 
 // The sandboxed preload only imports Electron at runtime.
 const api: WorkspaceApi = {
+  scheduleAvailable: () => ipcRenderer.invoke("r2b:schedule-available"),
+  scheduleWeek: (input: ScheduleWeekInput) => ipcRenderer.invoke("r2b:schedule-week", input),
+  schedulePlan: (id: string) => ipcRenderer.invoke("r2b:schedule-plan", id),
+  saveSchedulePlan: (input: ScheduleSaveInput) => ipcRenderer.invoke("r2b:save-schedule-plan", input),
   students: () => ipcRenderer.invoke("mvp:students"),
   exportProtection: () => ipcRenderer.invoke("m2d:export"),
   restoreProtection: () => ipcRenderer.invoke("m2d:restore"),

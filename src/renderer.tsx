@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
+import { WeeklySchedulePanel } from "./WeeklySchedulePanel";
 import { DataProtectionPanel } from "./DataProtectionPanel";
 import { StudentIntakeHistory, StudentIntakePanel } from "./StudentIntakePanel";
 import "./styles.css";
@@ -101,6 +102,8 @@ function HistoryView({ history, reload }: { history?: History; reload: () => voi
 function App() {
   const api = window.supervisorWorkspace;
   const [students, setStudents] = useState<Student[]>();
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [schedule, setSchedule] = useState<{ studentId: string }>();
   const [activeId, setActiveId] = useState<string>();
   const [creating, setCreating] = useState(false);
   const [listError, setListError] = useState("");
@@ -116,6 +119,14 @@ function App() {
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [intakeBusy, setIntakeBusy] = useState(false);
   const inFlight = useRef(false);
+
+  useEffect(() => {
+    let current = true;
+    api.scheduleAvailable().then(result => {
+      if (current && result.ok) setScheduleEnabled(result.value);
+    }).catch(() => {});
+    return () => { current = false; };
+  }, [api]);
 
   useEffect(() => {
     let current = true;
@@ -218,9 +229,16 @@ function App() {
   return <main className="shell" data-ui>
     <header className="masthead">
       <div className="brand"><span className="brand-mark" aria-hidden="true" /><strong>督学工作台</strong></div>
-      <span className="scope">离线验收 · 仅用虚构学生</span>
+      <div className="schedule-heading-actions">
+        <span className="scope">离线验收 · 仅用虚构学生</span>
+        {scheduleEnabled && !schedule && <button className="secondary" type="button"
+          disabled={!students || locked || growthBusy || intakeOpen}
+          onClick={() => setSchedule({ studentId: "" })}>排课周视图</button>}
+      </div>
     </header>
-    <div className="workspace">
+    {schedule && students && <WeeklySchedulePanel api={api} students={students} initialStudentId={schedule.studentId}
+      onBack={() => setSchedule(undefined)} />}
+    <div className="workspace" hidden={Boolean(schedule)}>
       <aside className="roster" aria-label="学生档案">
         <div className="roster-heading"><h2>学生档案</h2>
           <button className="secondary" disabled={locked || growthBusy || intakeOpen || !students} onClick={() => {
@@ -264,6 +282,8 @@ function App() {
             : active && <>
               <section className="profile" aria-label="当前学生">
                 <p className="muted">{active.grade} · {active.subjects}</p><h1>{active.alias}</h1>
+                {scheduleEnabled && <button className="secondary" type="button" disabled={locked || growthBusy}
+                  onClick={() => setSchedule({ studentId: active.id })}>查看该学生排课</button>}
                 {(active.goal || active.notes) && <dl>
                   {active.goal && <div><dt>学习目标</dt><dd>{active.goal}</dd></div>}
                   {active.notes && <div><dt>备注</dt><dd>{active.notes}</dd></div>}
