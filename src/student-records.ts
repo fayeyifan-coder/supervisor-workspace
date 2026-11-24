@@ -51,6 +51,44 @@ export const studentRecordDefinitions = {
       }
     },
   },
+  improvement: {
+    table: "student_improvement_plans", version: 6, label: "提分方案", item: "方案",
+    fields: [
+      { key: "title", label: "方案名称", limit: 100 },
+      { key: "subject", label: "学科", limit: 30 },
+      { key: "startsOn", label: "开始日期", type: "date" },
+      { key: "targetOn", label: "目标日期", type: "date" },
+      { key: "baseline", label: "当前基线与依据", type: "textarea" },
+      { key: "target", label: "目标及衡量方式", type: "textarea" },
+      { key: "practice", label: "训练与复盘安排", type: "textarea" },
+      { key: "status", label: "方案状态", options: ["计划中", "执行中", "已完成", "已停止"] },
+    ],
+    validate(fields) {
+      if (fields.startsOn > fields.targetOn) invalid("目标日期不能早于方案开始日期。");
+    },
+  },
+  training: {
+    table: "student_training_results", version: 6, label: "训练效果", item: "训练结果",
+    fields: [
+      { key: "activity", label: "训练名称", limit: 100 },
+      { key: "planId", label: "方案编号", limit: 36 },
+      { key: "planRevision", label: "当时的方案版本", limit: 16 },
+      { key: "trainedOn", label: "训练日期", type: "date" },
+      { key: "sequence", label: "阶段", options: ["基线", "过程", "复测"] },
+      { key: "score", label: "训练得分（可选）", type: "number", optional: true },
+      { key: "maximum", label: "训练满分（可选）", type: "number", optional: true },
+      { key: "result", label: "效果和观察依据", type: "textarea" },
+      { key: "nextStep", label: "下一步", type: "textarea", optional: true },
+    ],
+    validate(fields) {
+      uuid(fields.planId);
+      if (!/^[1-9][0-9]*$/.test(fields.planRevision) || !Number.isSafeInteger(Number(fields.planRevision))) invalid("方案版本无效。");
+      if (Boolean(fields.score) !== Boolean(fields.maximum) ||
+          (fields.maximum && (Number(fields.maximum) <= 0 || Number(fields.score) > Number(fields.maximum)))) {
+        invalid("可同时留空训练得分与满分。填写时满分须大于零，且得分不能高于满分。");
+      }
+    },
+  },
 } satisfies Record<string, RecordDefinition>;
 
 export type StudentRecordKind = keyof typeof studentRecordDefinitions;
@@ -153,6 +191,14 @@ export function readStudentRecords(db: DatabaseSync, version: number, kind: unkn
   return { studentId, records };
 }
 
+function verifyTrainingPlan(db: DatabaseSync, studentId: string, fields: Record<string, string>): void {
+  const definition = studentRecordDefinitions.improvement;
+  const row = db.prepare(`SELECT ${columns} FROM ${definition.table} WHERE entity_id=? AND revision=?`)
+    .get(fields.planId, Number(fields.planRevision));
+  if (!row || row.studentId !== studentId) invalid("训练结果须关联该学生的已保存方案版本。");
+  if (fields.trainedOn < record(row, definition).fields.startsOn) invalid("训练日期不能早于所选方案版本的开始日期。");
+}
+
 export function saveStudentRecord(db: DatabaseSync, version: number, raw: unknown): StudentRecord {
   const input = object(raw), definition = definitionFor(input.kind, version);
   const id = uuid(input.id), studentId = uuid(input.studentId), requestId = uuid(input.requestId);
@@ -174,10 +220,17 @@ export function saveStudentRecord(db: DatabaseSync, version: number, raw: unknow
       conflict("此请求编号已用于其他学生记录。");
     }
   }
-  const previous = db.prepare(`SELECT student_id, revision FROM ${definition.table}
+  const previous = db.prepare(`SELECT student_id, revision, payload FROM ${definition.table}
     WHERE entity_id=? ORDER BY revision DESC LIMIT 1`).get(id);
   if (previous && previous.student_id !== studentId) invalid("记录与当前学生不一致。");
   if ((previous?.revision ?? 0) !== expected) conflict("记录已更新。请重新核对当前版本。");
+  if (definition === studentRecordDefinitions.training) {
+    if (previous) {
+      const original = fieldsFor(definition, JSON.parse(String(previous.payload)));
+      if (original.planId !== fields.planId || original.planRevision !== fields.planRevision) invalid("已保存的训练结果不能改绑方案。");
+    }
+    verifyTrainingPlan(db, studentId, fields);
+  }
   const revision = expected + 1, savedAt = Date.now();
   db.prepare(`INSERT INTO ${definition.table} VALUES (?,?,?,?,?,?)`).run(requestId, id, studentId, revision, payload, savedAt);
   return { id, studentId, requestId, revision, fields, savedAt };
@@ -192,6 +245,12 @@ export function verifyStudentRecords(db: DatabaseSync, version: number): void {
       if (requests.has(next.requestId) ||
           (last?.id === next.id ? next.studentId !== last.studentId || next.revision !== last.revision + 1 : next.revision !== 1)) {
         invalid("学生记录的归属、版本或请求编号不一致。");
+      }
+      if (definition === studentRecordDefinitions.training) {
+        if (last?.id === next.id && (last.fields.planId !== next.fields.planId || last.fields.planRevision !== next.fields.planRevision)) {
+          invalid("训练结果的方案来源不一致。");
+        }
+        verifyTrainingPlan(db, next.studentId, next.fields);
       }
       requests.add(next.requestId);
       last = next;

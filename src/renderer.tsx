@@ -9,6 +9,7 @@ import { StudentIntakePanel } from "./StudentIntakePanel";
 import { StudentDetail } from "./StudentDetail";
 import { StudentEditPanel } from "./StudentEditPanel";
 import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
+import { TrainingForPlan } from "./TrainingForPlan";
 import { ScoreTrend } from "./ScoreTrend";
 import { StudentRecordsPanel } from "./StudentRecordsPanel";
 import { studentRecordDefinitions, type StudentRecordKind } from "./student-records";
@@ -320,10 +321,12 @@ function App() {
                 onDirtyChange={setStudentEditDirty} onBusyChange={setStudentEditBusy}
                 onSaved={() => setListRefresh(value => value + 1)} />}
               recordPanels={(Object.keys(studentRecordDefinitions) as StudentRecordKind[])
-                .filter(kind => studentRecordDefinitions[kind].version <= studentRecordVersion).map(kind => ({
+                .filter(kind => kind !== "training" && studentRecordDefinitions[kind].version <= studentRecordVersion).map(kind => ({
                   id: kind, label: studentRecordDefinitions[kind].label,
                   content: <StudentRecordsPanel key={active.id + kind} studentId={active.id} kind={kind} api={api}
-                    onActivity={onRecordActivity} overview={kind === "score" ? records => <ScoreTrend records={records} /> : undefined} />,
+                    onActivity={onRecordActivity} overview={kind === "score" ? records => <ScoreTrend records={records} /> : undefined}
+                    after={kind === "improvement" ? plans => <TrainingForPlan api={api} studentId={active.id} plans={plans}
+                      onActivity={onRecordActivity} /> : undefined} />,
                 }))}
               parentFollowUp={parentFollowUpEnabled && <ParentFollowUpPanel key={active.id} studentId={active.id} api={api}
                 onDirtyChange={setParentFollowUpDirty} onBusyChange={setParentFollowUpBusy} />}

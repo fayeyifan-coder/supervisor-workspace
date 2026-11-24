@@ -4,17 +4,20 @@ import { enrollmentStatus, studentRecordDefinitions, type RecordField, type Stud
   type StudentRecordKind, type StudentRecordView } from "./student-records";
 import { shanghaiParts } from "./schedule-calendar";
 
-export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview, children }: {
+export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview, after, fixedFields, filter }: {
   api: WorkspaceApi; studentId: string; kind: StudentRecordKind;
   onActivity: (kind: StudentRecordKind, dirty: boolean, busy: boolean) => void;
   overview?: (records: StudentRecord[]) => ReactNode;
-  children?: (record: StudentRecord) => ReactNode;
+  after?: (records: StudentRecord[]) => ReactNode;
+  fixedFields?: Record<string, string>;
+  filter?: (record: StudentRecord) => boolean;
 }) {
   const definition = studentRecordDefinitions[kind];
   const fields: readonly RecordField[] = definition.fields;
   const [today, setToday] = useState(() => shanghaiParts(Date.now()).date);
   const [refresh, setRefresh] = useState(0);
   const [loaded, setLoaded] = useState<{ refresh: number; result: Result<StudentRecordView> }>();
+  const [recordsForDetails, setRecordsForDetails] = useState<StudentRecord[]>([]);
   const [draft, setDraft] = useState<StudentRecordInput>();
   const [pending, setPending] = useState<StudentRecordInput>();
   const [message, setMessage] = useState("");
@@ -34,7 +37,10 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
       if (!live) return;
       if (result.ok && (result.value.studentId !== studentId || result.value.records.some(row => row.studentId !== studentId))) {
         setLoaded({ refresh, result: { ok: false, code: "recovery", message: "记录与当前学生不一致。" } });
-      } else setLoaded({ refresh, result });
+      } else {
+        if (result.ok) setRecordsForDetails(result.value.records);
+        setLoaded({ refresh, result });
+      }
     }).catch(() => {
       if (live) setLoaded({ refresh, result: { ok: false, code: "failed", message: "读取学生记录失败。" } });
     });
@@ -46,14 +52,15 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
   }, [kind, onActivity, draft, busy, pending]);
 
   const result = loaded?.refresh === refresh ? loaded.result : undefined;
-  const current = result?.ok ? result.value.records.find(row => row.id === draft?.id) : undefined;
+  const records = result?.ok ? result.value.records.filter(row => !filter || filter(row)) : [];
+  const current = records.find(row => row.id === draft?.id);
 
   function start(row?: StudentRecord) {
     setConflict(false);
     setMessage("");
     const defaults = Object.fromEntries(fields.map(field => [field.key, field.options?.[0] ?? (field.type === "date" && !field.optional ? today : "")]));
     setDraft({ kind, studentId, id: row?.id ?? crypto.randomUUID(), requestId: crypto.randomUUID(),
-      expectedRevision: row?.revision ?? 0, fields: row?.fields ?? defaults });
+      expectedRevision: row?.revision ?? 0, fields: row?.fields ?? { ...defaults, ...fixedFields } });
   }
 
   async function save(input: StudentRecordInput) {
@@ -101,16 +108,15 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
         <button type="button" className="secondary" onClick={() => setRefresh(value => value + 1)}>重新读取</button></div>
       : <>
         {overview?.(result.value.records)}
-        {result.value.records.length === 0 && <p className="muted">尚无{definition.item}记录。</p>}
+        {records.length === 0 && <p className="muted">尚无{definition.item}记录。</p>}
         <ul className="student-source-list">
-          {result.value.records.map(row => <li key={row.id}>
+          {records.map(row => <li key={row.id}>
             <div className="student-source-heading"><h3>{row.fields[fields[0].key]}</h3>
               {kind === "enrollment" && <strong className="student-source-status">{enrollmentStatus(row.fields, today)}</strong>}
               <button type="button" className="secondary" disabled={Boolean(draft)} onClick={() => start(row)}>编辑</button>
             </div>
-            <dl>{fields.slice(1).filter(field => row.fields[field.key]).map(field =>
+            <dl>{fields.slice(1).filter(field => row.fields[field.key] && field.key !== "planId").map(field =>
               <div key={field.key}><dt>{field.label}</dt><dd>{row.fields[field.key]}</dd></div>)}</dl>
-            {children?.(row)}
           </li>)}
         </ul>
       </>}
@@ -120,7 +126,7 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
     }}>
       <fieldset disabled={busy || Boolean(pending)}>
         <legend>{draft.expectedRevision ? "编辑" : "新增"}{definition.item}</legend>
-        {fields.map(field => {
+        {fields.filter(field => !fixedFields || !Object.hasOwn(fixedFields, field.key)).map(field => {
           const control = { name: field.key, value: draft.fields[field.key], required: !field.optional };
           function update(event: React.FormEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
             const value = event.currentTarget.value;
@@ -149,5 +155,6 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
         }}>取消编辑</button>
       </div>}
     </form>}
+    {after?.(recordsForDetails)}
   </section>;
 }

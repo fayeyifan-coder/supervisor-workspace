@@ -50,3 +50,5 @@
 .score-trend-plot { overflow-x: auto; }
 .score-trend-plot canvas { display: block; width: 100%; min-width: 480px; max-width: 720px; height: auto; }
 .score-trend-points { padding-inline-start: 24px; margin-block: 6px; font-variant-numeric: tabular-nums; }
+.training-for-plan { margin-top: 24px; border-top: 1px solid #d5dfd8; padding-top: 14px; }
+.training-for-plan > label { display: grid; gap: 6px; max-width: 420px; }

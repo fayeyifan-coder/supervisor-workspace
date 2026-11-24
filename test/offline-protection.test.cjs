@@ -670,6 +670,54 @@ test("M1 v5 preserves enrollment history when migrating and restores valid decim
   assert.deepEqual(recovered.m1.saveStudentRecord(score), saved);
 });
 
+test("M1 v6 preserves scores and binds each training result to the same student's saved plan revision", async t => {
+  const f = populated(t);
+  const initialOps = OperationsDatabase.open(f.dir, f.m1, true);
+  t.after(() => initialOps.close());
+  const v1 = captureProtection([...f.stores, initialOps], "0.1.0", 2);
+  async function openVersion(source, version) {
+    const restored = await io.restore(f.dir, prepareProtectionRestore(source, 2, version), true);
+    const data = join(restored.location, "data");
+    const opened = openStores(data, t, version);
+    const ops = OperationsDatabase.open(data, opened.m1);
+    t.after(() => ops.close());
+    return { m1: opened.m1, pack: () => captureProtection([...opened.stores, ops], "0.1.0", 2, version) };
+  }
+  const synthetic = "2026-11-24", studentId = f.studentId, other = f.pending.studentId;
+  function input(kind, fields, student = studentId) {
+    return { kind, studentId: student, id: randomUUID(), requestId: randomUUID(), expectedRevision: 0, fields };
+  }
+  const v5 = await openVersion(v1, 5);
+  const score = v5.m1.saveStudentRecord(input("score", { assessment: "合成前测", subject: "数学",
+    takenOn: synthetic, category: "日常测验", score: "60", maximum: "100", notes: "" }));
+  const preserved = v5.pack(), original = Buffer.from(preserved);
+  const v6 = await openVersion(preserved, 6);
+  assert.deepEqual(original, preserved);
+  assert.deepEqual(v6.m1.studentRecords("score", studentId).records, [score]);
+  assert.deepEqual(v6.m1.studentRecords("improvement", studentId).records, []);
+  const fields = { title: "合成分数训练", subject: "数学", startsOn: synthetic, targetOn: "2026-12-07",
+    baseline: "合成前测 60/100", target: "三次同类型训练复核", practice: "练习和复盘", status: "执行中" };
+  const draft = input("improvement", fields);
+  const plan = v6.m1.saveStudentRecord(draft);
+  const next = v6.m1.saveStudentRecord({ ...draft, requestId: randomUUID(), expectedRevision: 1,
+    fields: { ...fields, practice: "增加两次复盘" } });
+  const training = input("training", { activity: "合成复测", planId: plan.id, planRevision: "1",
+    trainedOn: "2026-11-25", sequence: "复测", score: "16", maximum: "20", result: "复查步骤已完成", nextStep: "" });
+  assert.throws(() => v6.m1.saveStudentRecord({ ...training, studentId: other }), { code: "invalid" });
+  assert.throws(() => v6.m1.saveStudentRecord({ ...training, fields: { ...training.fields, maximum: "" } }), { code: "invalid" });
+  assert.throws(() => v6.m1.saveStudentRecord({ ...training, fields: { ...training.fields, planRevision: "9" } }), { code: "invalid" });
+  const saved = v6.m1.saveStudentRecord(training);
+  assert.throws(() => v6.m1.saveStudentRecord({ ...training, requestId: randomUUID(), expectedRevision: 1,
+    fields: { ...training.fields, planRevision: "2" } }), { code: "invalid" });
+  const reopened = await openVersion(v6.pack(), 6);
+  assert.deepEqual(reopened.m1.studentRecords("improvement", studentId).records, [next]);
+  assert.deepEqual(reopened.m1.studentRecords("training", studentId).records, [saved]);
+  assert.deepEqual(reopened.m1.saveStudentRecord(training), saved);
+  assert.deepEqual(reopened.m1.studentRecords("training", other).records, []);
+  v6.m1.protectionConnection().prepare("UPDATE student_training_results SET student_id=?").run(other);
+  assert.throws(() => v6.pack(), /关联该学生/);
+});
+
 test("SWBACK2 rejects busy and wrongly linked operations and releases earlier SQLite locks", t => {
   const f = fiveFixture(t);
   f.create();

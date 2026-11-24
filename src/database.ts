@@ -8,8 +8,8 @@ import { WorkspaceFault } from "./workspace-fault";
 export { WorkspaceFault } from "./workspace-fault";
 
 const applicationId = 0x53574d31;
-export const latestM1Version = 5;
-export type M1Version = 1 | 2 | 3 | 4 | 5;
+export const latestM1Version = 6;
+export type M1Version = 1 | 2 | 3 | 4 | 5 | 6;
 export function isM1Version(value: unknown): value is M1Version {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= latestM1Version;
 }

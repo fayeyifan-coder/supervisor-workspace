@@ -107,7 +107,7 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
       aria-labelledby="student-planned-heading">
       <h2 id="student-planned-heading">规划中的功能</h2>
       <ul>{!parentFollowUp && <li>家长诉求</li>}
-        {[(recordPanels.some(panel => panel.id === "score") ? "" : "成绩趋势"), "提分方案", ...(!recordPanels.length ? ["到期提醒"] : [])].filter(Boolean).map(label => <li key={label}>{label}</li>)}</ul>
+        {[(recordPanels.some(panel => panel.id === "score") ? "" : "成绩趋势"), (recordPanels.some(panel => panel.id === "improvement") ? "" : "提分方案"), ...(!recordPanels.length ? ["到期提醒"] : [])].filter(Boolean).map(label => <li key={label}>{label}</li>)}</ul>
     </section>
   </article>;
 }
