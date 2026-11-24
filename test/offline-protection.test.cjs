@@ -739,6 +739,123 @@ test("M1 v6 preserves scores and binds each training result to the same student'
   assert.throws(() => v6.pack(), /关联该学生/);
 });
 
+test("all supported source versions restore into isolated v6 with every prior business table identical", async t => {
+  const f = fiveFixture(t);
+  f.m1.addLesson({ id: randomUUID(), studentId: f.studentId, date: "2026-11-24", subject: "数学",
+    task: "合成任务", completion: "合成记录", assessment: "", nextStep: "" });
+  const four = captureProtection(f.stores.slice(0, 4), "0.1.0", 1);
+  const plan = f.create();
+  const block = f.ops.saveLearningBlock({ studentId: plan.studentId, id: randomUUID(), requestId: randomUUID(),
+    expectedRevision: 0, attendancePlanId: plan.id, plannedStart: plan.startAt, plannedEnd: plan.endAt });
+  f.ops.saveLearningTasks({ studentId: block.studentId, id: block.id, expectedRevision: 1,
+    requestId: randomUUID(), tasks: [{ id: randomUUID(), category: "foundation", content: "合成作业" }] });
+  const five = captureProtection(f.stores, "0.1.0", 2);
+  const openProfile = async (bytes, version) => {
+    const active = await io.restore(f.dir, bytes, true);
+    const verified = await io.inspect(f.dir, active.profileName, 2, version, "activation");
+    const selection = { name: active.profileName, digest: verified.digest };
+    const root = verifyActiveProfile(f.dir, selection, true, 2, version);
+    const data = join(root, "data");
+    const profiles = openStores(data, t, version);
+    const ops = OperationsDatabase.open(data, profiles.m1);
+    t.after(() => ops.close());
+    verifyProtectionStores([...profiles.stores, ops], "0.1.0", 2, version);
+    approveActiveProfile(root, selection.digest);
+    assert.equal(verifyActiveProfile(f.dir, selection, false, 2, version), root);
+    return { ...profiles, root, data, selection, backup: () => captureProtection([...profiles.stores, ops], "0.1.0", 2, version) };
+  };
+
+  const sources = [four, five];
+  const protectedFiles = [];
+  function recordOriginalFiles(data, bytes) {
+    for (const item of validateProtection(bytes).manifest.databases) {
+      for (const name of [item.file, item.initialization.file, item.file + "-wal"]) {
+        const path = join(data, name);
+        if (existsSync(path)) protectedFiles.push([path, readFileSync(path)]);
+      }
+    }
+  }
+  recordOriginalFiles(f.dir, five);
+  const id = f.studentId;
+  const write = (m1, kind, fields) => m1.saveStudentRecord({
+    kind, fields, id: randomUUID(), requestId: randomUUID(), studentId: id, expectedRevision: 0 });
+  const date = "2026-11-24";
+  let source = five;
+  for (const version of [2, 3, 4, 5, 6]) {
+    const active = await openProfile(prepareProtectionRestore(source, 2, version), version);
+    const m1 = active.m1;
+    switch (version) {
+      case 2: {
+        const { id: _id, createdAt: _createdAt, ...base } = m1.studentEditView(id).student;
+        m1.saveStudentEdit({ studentId: id, requestId: randomUUID(), expectedRevision: 0, fields: { ...base, notes: "合成历史与待核对" } });
+        break;
+      }
+      case 3: {
+        const concern = m1.createParentConcern({ studentId: id, requestId: randomUUID(), reportedOn: date,
+          role: "guardian", category: "habits", concern: "合成诉求", nextOn: "" });
+        m1.appendParentFollowUp({ studentId: id, requestId: randomUUID(), concernId: concern.requestId,
+          expectedRevision: 0, followedOn: date, status: "in_progress", note: "合成跟进", nextOn: "" });
+        break;
+      }
+      case 4:
+        write(m1, "enrollment", { course: "合成报名", registeredOn: date, startsOn: date,
+          endsOn: "2026-12-24", status: "有效", notes: "" });
+        break;
+      case 5:
+        write(m1, "score", { assessment: "合成测验", subject: "数学", takenOn: date,
+          category: "日常测验", score: "40", maximum: "50", notes: "" });
+        break;
+      case 6: {
+        const plan = write(m1, "improvement", { title: "合成提分方案", subject: "数学", startsOn: date,
+          targetOn: "2026-12-24", baseline: "合成前测", target: "合成目标", practice: "合成训练", status: "执行中" });
+        write(m1, "training", { activity: "合成复测", planId: plan.id, planRevision: "1", trainedOn: date,
+          sequence: "复测", score: "42", maximum: "50", result: "合成结果", nextStep: "" });
+        break;
+      }
+    }
+    assert(readFileSync(join(active.data, "mvp.sqlite3-wal")).length > 32);
+    source = active.backup();
+    sources.push(source);
+    recordOriginalFiles(active.data, source);
+  }
+
+  const tables = db => Object.fromEntries(db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all().map(({ name }) => [name, db.prepare('SELECT * FROM "' + name + '" ORDER BY rowid').all()]));
+  const compare = (snapshot, opened) => {
+    const before = tables(snapshot), after = tables(opened);
+    for (const [name, rows] of Object.entries(after)) assert.deepEqual(rows, before[name] ?? [], name);
+    for (const name of Object.keys(before)) assert(name in after, name);
+    return Object.keys(after);
+  };
+  for (const bytes of sources) {
+    const copy = Buffer.from(bytes);
+    const old = validateProtection(bytes);
+    const upgraded = prepareProtectionRestore(bytes, 2, 6);
+    assert.deepEqual(bytes, copy);
+    assert.equal(validateProtection(upgraded).summary.m1Version, 6);
+    assert.deepEqual(validateProtection(upgraded).images.slice(1, old.images.length), old.images.slice(1));
+    const restored = await openProfile(upgraded, 6);
+    assert.equal(readFileSync(join(restored.data, "mvp.initialized"), "utf8"), "mvp-v6\n");
+    for (const prior of [1, 2, 3, 4, 5]) {
+      assert.throws(() => WorkspaceDatabase.open(join(restored.data, "mvp.sqlite3"), join(restored.data, "mvp.initialized"), prior), /版本或身份/);
+      assert.throws(() => prepareProtectionRestore(upgraded, 2, prior), /不能降级/);
+    }
+    const all = old.images.map((image, index) => {
+      const db = new DatabaseSync(":memory:");
+      try {
+        db.deserialize(Buffer.from(image));
+        const opened = new DatabaseSync(join(restored.data, old.manifest.databases[index].file), { readOnly: true });
+        try { return compare(db, opened); } finally { opened.close(); }
+      } finally { db.close(); }
+    }).flat();
+    if (old.summary.m1Version === 6) {
+      assert.equal(all.length, 24);
+      assert.deepEqual(restored.backup().subarray(0, 8), Buffer.from("SWBACK2\n"));
+    }
+  }
+  for (const [path, before] of protectedFiles) assert.deepEqual(readFileSync(path), before, path);
+});
+
 test("SWBACK2 rejects busy and wrongly linked operations and releases earlier SQLite locks", t => {
   const f = fiveFixture(t);
   f.create();
@@ -809,7 +926,8 @@ test("the original-profile mode never reenrolls a missing five-store profile or 
 test("an interrupted fifth-image write leaves no ready record and preserves the original stores", t => {
   const f = fiveFixture(t);
   const plan = f.create();
-  const verified = validateProtection(captureProtection(f.stores, "0.2.0", 2));
+  const source = captureProtection(f.stores, "0.2.0", 2);
+  const verified = validateProtection(prepareProtectionRestore(source, 2, 6));
   const part = bytes => {
     const length = Buffer.alloc(4);
     length.writeUInt32LE(bytes.length);
@@ -818,7 +936,7 @@ test("an interrupted fifth-image write leaves no ready record and preserves the 
   const input = Buffer.concat([part(Buffer.from("{}")), ...verified.images.map(part)]).subarray(0, -512);
   const root = temp();
   const name = "sw-m2d-active-" + randomUUID().replaceAll("-", "");
-  const result = spawnSync(exe, ["activate", root, name, "2"], { input });
+  const result = spawnSync(exe, ["activate", root, name, "2", "6"], { input });
   assert.equal(result.status, 1);
   const target = join(root, name, "profile");
   assert.equal(existsSync(join(target, "restore.ready")), false);
