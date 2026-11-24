@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { m1Protection, WorkspaceFault } from "./database";
+import { m1Protection, m1ProtectionLayout, WorkspaceFault, type M1Version } from "./database";
 import { growthProtection } from "./growth-profile";
 import { worklogProtection } from "./worklog";
 import { intakeProtection } from "./student-intake";
@@ -86,7 +86,7 @@ export function saveActivation(owner: string, state: ActivationState): void {
   }
   publishSelectionFile(owner, path, JSON.stringify(state));
 }
-export function verifyActiveProfile(root: string, active: Selection, firstOpen: boolean, format: ProtectionFormat = 1): string {
+export function verifyActiveProfile(root: string, active: Selection, firstOpen: boolean, format: ProtectionFormat = 1, m1Version: M1Version = 1): string {
   if (!selection(active, activeName)) return invalid("活动恢复档案编号无效。");
   const container = join(root, active.name);
   const profile = join(container, "profile");
@@ -101,13 +101,13 @@ export function verifyActiveProfile(root: string, active: Selection, firstOpen: 
   const record = JSON.parse(readFileSync(marker, "utf8"));
   const evidence = JSON.parse(Buffer.from(record.packageEvidenceBase64, "base64").toString("utf8"));
   if (record.format !== "sw-recovery-evidence-v1" || record.profileName !== active.name || evidence.packageSha256 !== active.digest ||
-      evidence.manifest?.formatVersion !== format) {
+      evidence.manifest?.formatVersion !== format || evidence.manifest?.databases?.[0]?.schemaVersion !== m1Version) {
     invalid("活动恢复档案与选择记录不符。");
   }
   if (firstOpen && readdirSync(profile).some(name => name !== "data" && name !== "restore.ready")) {
     invalid("新恢复档案含未验证的文件。");
   }
-  verifyProfileData(profile, firstOpen, format);
+  verifyProfileData(profile, firstOpen, format, m1Version);
   if (!firstOpen && approvedSelection(root, active.name).digest !== active.digest) {
     invalid("活动恢复档案未经验证，或与激活记录不符。");
   }
@@ -128,13 +128,29 @@ export function approveActiveProfile(profile: string, digest: string): void {
 }
 
 export function originalProfileSegments(name: string, format: ProtectionFormat): string[] {
+  if (format === 2 && studentServicesVersion(name)) return ["sw-student-services-profiles", name, "profile"];
+  if (format === 2 && isParentFollowUpProfile(name)) return ["sw-parent-profiles", name, "profile"];
+  if (format === 2 && isStudentEditProfile(name)) return ["sw-r3b-profiles", name, "profile"];
   return format === 2 ? ["sw-r2a-profiles", name, "profile"] : [name, "profile"];
+}
+
+export function isStudentEditProfile(name: string): boolean {
+  return /^sw-r3b-[a-z0-9-]+$/.test(name);
+}
+export function isParentFollowUpProfile(name: string): boolean {
+  return /^sw-parent-[a-z0-9-]+$/.test(name);
+}
+
+export function studentServicesVersion(name: string): 4 | 5 | 6 | undefined {
+  if (/^sw-services-v6-[a-z0-9-]+$/.test(name)) return 6;
+  if (/^sw-services-v5-[a-z0-9-]+$/.test(name)) return 5;
+  if (/^sw-services-[a-z0-9-]+$/.test(name)) return 4;
 }
 
 const enrollment = "operations-synthetic.initialized";
 const enrollmentContents = "operations-synthetic-v2\n";
 
-export function checkOriginalProtectionMode(profile: string, format: ProtectionFormat, allowNew = false): boolean {
+export function checkOriginalProtectionMode(profile: string, format: ProtectionFormat, allowNew = false, m1Version: M1Version = 1): boolean {
   const data = join(profile, "data");
   const marker = join(dirname(profile), enrollment);
   const hasEnrollment = plainFile(marker, 128, true);
@@ -145,17 +161,20 @@ export function checkOriginalProtectionMode(profile: string, format: ProtectionF
     }
     return false;
   }
+  const expectedEnrollment = m1Version >= 4 ? "student-services-synthetic-v" + m1Version + "\n"
+    : m1Version === 3 ? "parent-followup-synthetic-v3\n"
+    : m1Version === 2 ? "student-edit-synthetic-v2\n" : enrollmentContents;
   if (hasEnrollment) {
-    if (readFileSync(marker, "utf8") !== enrollmentContents) invalid("五库合成档案标记无效。");
-    verifyProfileData(profile, false, format);
+    if (readFileSync(marker, "utf8") !== expectedEnrollment) invalid("五库合成档案标记无效。");
+    verifyProfileData(profile, false, format, m1Version);
     return false;
   }
   if (!allowNew || names.length !== 0) invalid("五库模式只能初始化全新合成档案。请使用独立恢复升级旧四库备份。");
-  writeFileSync(marker, enrollmentContents, { flag: "wx", flush: true });
+  writeFileSync(marker, expectedEnrollment, { flag: "wx", flush: true });
   return true;
 }
 
-export function verifyProfileData(profile: string, firstOpen = false, format: ProtectionFormat = 1): void {
+export function verifyProfileData(profile: string, firstOpen = false, format: ProtectionFormat = 1, m1Version: M1Version = 1): void {
   const data = join(profile, "data");
   const entry = lstatSync(data, { throwIfNoEntry: false });
   if (!entry?.isDirectory() || entry.isSymbolicLink() || realpathSync.native(data) !== data) {
@@ -167,7 +186,8 @@ export function verifyProfileData(profile: string, firstOpen = false, format: Pr
     const metadata = key + ".initialized";
     plainFile(join(data, main));
     plainFile(join(data, metadata), 128);
-    if (readFileSync(join(data, metadata), "utf8") !== marker) invalid("数据库初始化标记不匹配。");
+    const expectedMarker = key === "mvp" ? m1ProtectionLayout(m1Version).marker : marker;
+    if (readFileSync(join(data, metadata), "utf8") !== expectedMarker) invalid("数据库初始化标记不匹配。");
     names.delete(main);
     names.delete(metadata);
     if (!firstOpen) {

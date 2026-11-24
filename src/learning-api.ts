@@ -1,7 +1,7 @@
-import type { LearningDay, LearningTaskInput } from "./contracts";
+import type { AttendanceBoardDay, AttendanceBoardStatus, AttendancePlan, LearningDay, LearningTaskInput } from "./contracts";
 import type { OperationsDatabase } from "./operations";
 import { id, instant, invalid, object, requireStudent, type StudentList } from "./schedule-api";
-import { shanghaiParts } from "./schedule-calendar";
+import { shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
 
 const learningCommands = ["recordAttendance", "saveLearningBlock", "saveLearningTasks",
   "recordLearningOutcome", "recordTaskOutcome"] as const;
@@ -31,6 +31,27 @@ export function readLearningDay(store: OperationsDatabase, students: StudentList
   store.protectionConnection();
   const attendance = requireAttendance(store, request.attendanceId, requireStudent(request.studentId, students));
   return { attendance, blocks: store.learningBlocksForAttendance(attendance.id) };
+}
+
+function boardStatus(plan: AttendancePlan, now: number, activeLearning: () => boolean): AttendanceBoardStatus {
+  if (plan.status === "cancelled" || plan.status === "absent") return plan.status;
+  if (plan.checkOutAt !== null) return "checked_out";
+  if (plan.checkInAt !== null) return activeLearning() ? "learning" : "checked_in";
+  return now >= plan.startAt ? "unchecked" : "upcoming";
+}
+
+export function readAttendanceBoard(store: OperationsDatabase, students: StudentList, now = Date.now()): AttendanceBoardDay {
+  const date = shanghaiParts(now).date;
+  const from = shanghaiMinute(date, "00:00");
+  const to = shanghaiMinute(shiftDate(date, 1), "00:00");
+  if (from === null || to === null) invalid("无法确定上海机构日期。");
+  store.protectionConnection();
+  const studentIds = new Set(students().map(student => student.id));
+  const entries = store.listAttendancePlans(from, to).map(plan => {
+    if (!studentIds.has(plan.studentId)) invalid("今日到校记录与学生档案不一致。");
+    return { plan, status: boardStatus(plan, now, () => store.hasLearningInProgress(plan.id)) };
+  });
+  return { date, entries };
 }
 
 function optionalText(value: unknown, max: number): string | undefined {

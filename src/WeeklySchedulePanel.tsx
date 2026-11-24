@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { AttendancePlan, Failure, ScheduleSaveInput, Student, WorkspaceApi } from "./contracts";
-import { minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange } from "./schedule-calendar";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
+import type { AttendancePlan, Failure, LearningDayInput, ScheduleSaveInput, Student, WorkspaceApi } from "./contracts";
+import { attendanceCounts, minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange } from "./schedule-calendar";
 import { AttendanceLearningPanel } from "./AttendanceLearningPanel";
 import { usePendingOperation } from "./use-pending-operation";
 import "./weekly-schedule.css";
@@ -9,6 +9,7 @@ const dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "�
 const statuses: Record<AttendancePlan["status"], string> = {
   planned: "待确认", confirmed: "已确认", attended: "已到校", absent: "缺席", cancelled: "已取消",
 };
+const attendanceLabel = (plan: AttendancePlan) => plan.checkOutAt === null ? statuses[plan.status] : "已签退";
 
 interface Draft {
   id: string;
@@ -60,12 +61,19 @@ function exceptionText(draft: Draft): string {
     : "周一默认停排。";
 }
 
-export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }: {
-  api: WorkspaceApi; students: Student[]; initialStudentId: string; onBack: () => void;
+export function WeeklySchedulePanel({ api, students, studentId, setStudentId, learning, learningFromBoard,
+  onLearning, onExitLearning, learningLeaveGuard, onStudent, summary }: {
+  api: WorkspaceApi; students: Student[]; studentId: string; setStudentId: (id: string) => void;
+  learning?: LearningDayInput; learningFromBoard: boolean;
+  onLearning: (target: LearningDayInput, trigger: HTMLButtonElement) => void;
+  onExitLearning: () => void; learningLeaveGuard: Ref<() => boolean>;
+  onStudent: (studentId: string, trigger: HTMLButtonElement) => boolean;
+  summary: ReactNode;
 }) {
   const today = shanghaiParts(Date.now()).date;
   const [week, setWeek] = useState(() => mondayOf(today));
-  const [studentId, setStudentId] = useState(initialStudentId);
+  const [day, setDay] = useState(today);
+  const [mode, setMode] = useState<"week" | "day">("day");
   const [queryRevision, setQueryRevision] = useState(0);
   const [listing, setListing] = useState<{ key: string; rows?: AttendancePlan[]; error?: string }>();
   const [draft, setDraft] = useState<Draft>();
@@ -74,12 +82,11 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const submission = useRef<ScheduleSaveInput | undefined>(undefined);
-  const [learning, setLearning] = useState<{ attendanceId: string; studentId: string }>();
   const [learningRevision, setLearningRevision] = useState(0);
   const [confirmedLearningRequest, setConfirmedLearningRequest] = useState<string>();
   const request = usePendingOperation(api, (saved, requestId) => {
     if (saved?.command === "saveAttendancePlan") {
-      setWeek(mondayOf(shanghaiParts(saved.startAt).date));
+      selectDay(shanghaiParts(saved.startAt).date);
       showDraft(undefined);
     }
     refresh();
@@ -88,7 +95,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   });
   const [latest, setLatest] = useState<AttendancePlan>();
   const formRef = useRef<HTMLFormElement>(null);
-  const queryKey = week + "/" + studentId + "/" + queryRevision;
+  // Refresh the same list in place so the originating course button can receive focus.
+  const queryKey = week + "/" + studentId;
   const current = listing?.key === queryKey ? listing : undefined;
 
   useEffect(() => {
@@ -99,7 +107,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
       if (mounted) setListing({ key: queryKey, error: "无法读取本周排课，请重试。" });
     });
     return () => { mounted = false; };
-  }, [api, queryKey, studentId, week]);
+  }, [api, queryKey, queryRevision, studentId, week, learning]);
 
   function refresh() { setQueryRevision(value => value + 1); }
 
@@ -119,7 +127,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
 
   function newDraft() {
     if (!canDiscard()) return;
-    const date = nextDefaultDate(week);
+    const desired = shanghaiMinute(day, defaults(day, "regular").start);
+    const date = mode === "day" && desired !== null && desired > Date.now() ? day : nextDefaultDate(week);
     showDraft({ id: crypto.randomUUID(), studentId: studentId || students[0]?.id || "", date,
       ...defaults(date, "regular"), kind: "regular", confirmed: false, reason: "" });
   }
@@ -168,7 +177,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
     try {
       const result = await request.run({ ...command, command: "saveAttendancePlan" });
       if (result.ok) {
-        setWeek(mondayOf(shanghaiParts(command.startAt).date));
+        selectDay(shanghaiParts(command.startAt).date);
         if (studentId && studentId !== result.value.studentId) setStudentId(result.value.studentId);
         showDraft(undefined);
         setNotice({ kind: "success", message: "排课已保存。" });
@@ -189,9 +198,12 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
     }
   }
 
-  function moveWeek(delta: number) {
-    const date = shiftDate(week, delta);
-    if (weekRange(date)) setWeek(date);
+  function selectDay(date: string) {
+    if (shanghaiMinute(date, "00:00") === null) return;
+    const monday = mondayOf(date);
+    if (!weekRange(monday)) return;
+    setDay(date);
+    setWeek(monday);
   }
 
   const names = new Map(students.map(student => [student.id, student.alias]));
@@ -199,6 +211,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const plansByDay = new Map(days.map(date => [date, [] as AttendancePlan[]]));
   for (const plan of current?.rows ?? []) plansByDay.get(shanghaiParts(plan.startAt).date)?.push(plan);
   const hasMonday = Boolean(plansByDay.get(week)?.length);
+  const shownDays = mode === "day" ? [day] : hasMonday ? days : days.slice(1);
+  const listed = attendanceCounts(shownDays.flatMap(date => plansByDay.get(date) ?? []));
   const readOnly = Boolean(draft?.original && !canEdit(draft.original));
   const exception = draft && outsideHours(draft);
 
@@ -222,26 +236,33 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
             onClick={() => void request.hydrate()}>重新读取待核对状态</button>}
         </div>
       </aside>}
-    {learning && <AttendanceLearningPanel api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
+    {learning && <AttendanceLearningPanel key={learning.attendanceId} api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
       reloadVersion={learningRevision} confirmedRequestId={confirmedLearningRequest}
       blocked={request.blocked} submit={request.run}
-      onBack={() => { setLearning(undefined); refresh(); }} />}
+      leaveGuard={learningLeaveGuard} backLabel={learningFromBoard ? "返回今日到校" : undefined}
+      onBack={onExitLearning} />}
     <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}>
     <header className="schedule-heading">
       <div>
-        <button className="schedule-back" type="button" onClick={() => { if (canDiscard()) onBack(); }}>返回学生档案</button>
-        <h1 id="schedule-title">排课周视图</h1>
+        <h1 id="schedule-title" tabIndex={-1}>全局总课表</h1>
         <p className="muted">机构时间（上海） · 周一默认停排</p>
       </div>
       <button type="button" className="primary schedule-primary" disabled={!students.length || busy || request.blocked} onClick={newDraft}>新建单次排课</button>
     </header>
+    {summary}
     <div className="schedule-toolbar">
       <div className="schedule-period">
-        <strong aria-live="polite">{week.replaceAll("-", ".")} – {days[6].replaceAll("-", ".")}</strong>
+        <div className="schedule-buttons" aria-label="课表视图">
+          <button className="secondary" type="button" aria-pressed={mode === "week"} onClick={() => setMode("week")}>周视图</button>
+          <button className="secondary" type="button" aria-pressed={mode === "day"} onClick={() => setMode("day")}>日视图</button>
+        </div>
+        {mode === "week"
+          ? <strong aria-live="polite">{week.replaceAll("-", ".")} – {days[6].replaceAll("-", ".")}</strong>
+          : <label>课表日期<input type="date" value={day} onChange={event => selectDay(event.target.value)} /></label>}
         <div className="schedule-buttons">
-          <button className="secondary" type="button" onClick={() => moveWeek(-7)}>上一周</button>
-          <button className="secondary" type="button" onClick={() => setWeek(mondayOf(today))}>本周</button>
-          <button className="secondary" type="button" onClick={() => moveWeek(7)}>下一周</button>
+          <button className="secondary" type="button" onClick={() => selectDay(shiftDate(day, mode === "week" ? -7 : -1))}>{mode === "week" ? "上一周" : "前一天"}</button>
+          <button className="secondary" type="button" onClick={() => selectDay(today)}>{mode === "week" ? "本周" : "今天"}</button>
+          <button className="secondary" type="button" onClick={() => selectDay(shiftDate(day, mode === "week" ? 7 : 1))}>{mode === "week" ? "下一周" : "后一天"}</button>
         </div>
       </div>
       <label className="schedule-filter">筛选学生
@@ -257,11 +278,11 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
     {draft && <form className="panel schedule-form" ref={formRef} onSubmit={event => void save(event)} aria-label="排课表单">
       <div className="schedule-form-heading">
         <h2>{readOnly ? "排课详情" : draft.original ? "修改单次排课" : "新建单次排课"}</h2>
-        {draft.original && <span className="muted">{statuses[draft.original.status]}</span>}
+        {draft.original && <span className="muted">{attendanceLabel(draft.original)}</span>}
       </div>
       {readOnly && <p className="muted">已开始或已结束的排课只供查看。</p>}
       {latest && <div className="notice pending" role="alert">
-        <p>当前版本已变更。最新安排为 {shanghaiParts(latest.startAt).date} {shanghaiParts(latest.startAt).time}–{shanghaiParts(latest.endAt).time}，{latest.kind === "whole_day" ? "全天" : "普通"}，{statuses[latest.status]}。</p>
+        <p>当前版本已变更。最新安排为 {shanghaiParts(latest.startAt).date} {shanghaiParts(latest.startAt).time}–{shanghaiParts(latest.endAt).time}，{latest.kind === "whole_day" ? "全天" : "普通"}，{attendanceLabel(latest)}。</p>
         <p>最新时段外例外原因：{latest.exceptionReason ?? "无"}</p>
         {canEdit(latest) ? <button className="secondary" type="button" onClick={() => {
           updateDraft({ original: latest, confirmed: false });
@@ -310,8 +331,11 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
     {current?.error && <div className="notice failure" role="alert">
       {current.error} <button type="button" className="secondary" onClick={refresh}>重新读取</button>
     </div>}
-    <div className={"schedule-days" + (hasMonday ? " schedule-days-extra" : "")}>
-      {(hasMonday ? days : days.slice(1)).map(date => {
+    {current?.rows && <p className="muted schedule-counts" aria-live="polite">
+      排课 {listed.students} 人 · {listed.visits} 人次（含取消）
+    </p>}
+    <div className={"schedule-days" + (mode === "day" ? " schedule-single-day" : hasMonday ? " schedule-days-extra" : "")}>
+      {shownDays.map(date => {
         const day = weekday(date);
         const hours = openingHours(date);
         const plans = plansByDay.get(date)!;
@@ -319,7 +343,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
           aria-label={dayNames[day] + " " + date}>
           <header className="schedule-day-heading" aria-current={date === today ? "date" : undefined}>
             <h2>{dayNames[day]} <time dateTime={date}>{date.slice(5).replace("-", "/")}</time></h2>
-            <p>{hours ? hours.start + "–" + hours.end : "仅显示例外"}</p>
+            <p>{hours ? hours.start + "–" + hours.end : "周一默认停排 · 仅显示例外"}</p>
           </header>
           {current?.rows && (plans.length ? <ul className="schedule-card-list">{plans.map(plan => {
             const start = shanghaiParts(plan.startAt).time;
@@ -327,22 +351,25 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
             const alias = names.get(plan.studentId) ?? "待核对学生";
             return <li key={plan.id} className="schedule-card-item" data-kind={plan.kind} data-exception={Boolean(plan.exceptionReason)}>
               <button type="button" disabled={busy} className="schedule-card"
-                aria-label={alias + " " + start + "–" + end + " " + statuses[plan.status] + " · 排课详情"} onClick={() => {
+                aria-label={alias + " " + start + "–" + end + " " + attendanceLabel(plan) + " · 排课详情"} onClick={() => {
                   if (canDiscard()) showDraft(toDraft(plan));
                 }}>
                 <span className="schedule-card-time">{start}–{end}</span>
                 <strong>{alias}</strong>
-                <span className="schedule-card-meta">{plan.kind === "whole_day" ? "全天" : "普通"} · {statuses[plan.status]}</span>
+                <span className="schedule-card-meta">{plan.kind === "whole_day" ? "全天" : "普通"} · {attendanceLabel(plan)}</span>
                 {plan.exceptionReason && <span className="schedule-card-exception">时段例外</span>}
               </button>
               <div className="schedule-card-actions">
                 <button className="primary schedule-learning-entry" type="button" disabled={busy || request.busy}
-                  aria-label={"进入学习 · " + alias + " " + start + "–" + end} onClick={() => {
+                  aria-label={"进入学习 · " + alias + " " + start + "–" + end} onClick={event => {
                     if (!canDiscard()) return;
                     showDraft(undefined);
-                    setLearning({ attendanceId: plan.id, studentId: plan.studentId });
-                    window.scrollTo(0, 0);
+                    onLearning({ attendanceId: plan.id, studentId: plan.studentId }, event.currentTarget);
                   }}>进入学习</button>
+                <button className="schedule-profile-link" type="button" disabled={busy || request.busy || !names.has(plan.studentId)}
+                  aria-label={"查看学生档案 · " + alias} onClick={event => {
+                    if (canDiscard() && onStudent(plan.studentId, event.currentTarget)) showDraft(undefined);
+                  }}>学生档案</button>
               </div>
             </li>;
           })}</ul> : <p className="schedule-empty muted">无排课</p>)}

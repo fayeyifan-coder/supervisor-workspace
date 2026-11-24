@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { IntakeConfirm, IntakeTarget, LearningChange, LearningDayInput, LessonInput, ScheduleReceiptInput, ScheduleSaveInput, ScheduleWeekInput, StudentInput, WorkspaceApi } from "./contracts";
+import type { IntakeConfirm, IntakeTarget, LearningChange, LearningDayInput, LessonInput, ScheduleReceiptInput, ScheduleSaveInput, ScheduleWeekInput, StudentEditInput, StudentInput, WorkspaceApi } from "./contracts";
 import type { WorkItemInput, WorkStatus } from "./worklog";
 import type { GrowthSaveInput } from "./growth-profile";
 
@@ -7,6 +7,7 @@ import type { GrowthSaveInput } from "./growth-profile";
 const api: WorkspaceApi = {
   scheduleAvailable: () => ipcRenderer.invoke("r2b:schedule-available"),
   scheduleWeek: (input: ScheduleWeekInput) => ipcRenderer.invoke("r2b:schedule-week", input),
+  attendanceBoard: () => ipcRenderer.invoke("r2b:attendance-board"),
   schedulePlan: (id: string) => ipcRenderer.invoke("r2b:schedule-plan", id),
   saveSchedulePlan: (input: ScheduleSaveInput) => ipcRenderer.invoke("r2b:save-schedule-plan", input),
   learningDay: (input: LearningDayInput) => ipcRenderer.invoke("r2b:learning-day", input),
@@ -23,6 +24,19 @@ const api: WorkspaceApi = {
   returnOriginalProfile: () => ipcRenderer.invoke("m2d:return-original"),
   history: (id: string) => ipcRenderer.invoke("mvp:history", id),
   createStudent: (input: StudentInput) => ipcRenderer.invoke("mvp:create-student", input),
+  studentEditAvailable: () => ipcRenderer.invoke("mvp:student-edit-available"),
+  studentEdit: (id: string) => ipcRenderer.invoke("mvp:student-edit", id),
+  saveStudentEdit: (input: StudentEditInput) => ipcRenderer.invoke("mvp:save-student-edit", input),
+  finishStudentEdit: input => ipcRenderer.invoke("mvp:finish-student-edit", input),
+  parentFollowUpAvailable: () => ipcRenderer.invoke("mvp:parent-follow-up-available"),
+  parentFollowUp: id => ipcRenderer.invoke("mvp:parent-follow-up", id),
+  createParentConcern: input => ipcRenderer.invoke("mvp:create-parent-concern", input),
+  appendParentFollowUp: input => ipcRenderer.invoke("mvp:append-parent-follow-up", input),
+  studentWriteState: () => ipcRenderer.invoke("mvp:student-write-state"),
+  resolveStudentWrite: (action, requestId) => ipcRenderer.invoke("mvp:resolve-student-write", action, requestId),
+  studentRecordVersion: () => ipcRenderer.invoke("mvp:student-record-version"),
+  studentRecords: (kind, id) => ipcRenderer.invoke("mvp:student-records", kind, id),
+  saveStudentRecord: input => ipcRenderer.invoke("mvp:save-student-record", input),
   addLesson: (input: LessonInput) => ipcRenderer.invoke("mvp:add-lesson", input),
   workItems: (day: string) => ipcRenderer.invoke("m2b:work-items", day),
   searchWorkItems: (from: string, to: string, query?: string) => ipcRenderer.invoke("m2b:search-work-items", from, to, query),

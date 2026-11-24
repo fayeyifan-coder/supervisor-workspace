@@ -1,5 +1,13 @@
 export const minute = 60_000;
 const day = 1_440 * minute;
+
+export function attendanceCounts(plans: readonly { studentId: string }[]): { students: number; visits: number } {
+  return { students: new Set(plans.map(plan => plan.studentId)).size, visits: plans.length };
+}
+
+export function isLateArrival(plan: { startAt: number; checkInAt: number | null }): boolean {
+  return plan.checkInAt !== null && Math.floor(plan.checkInAt / minute) > Math.floor(plan.startAt / minute);
+}
 const institution = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
   hour: "2-digit", minute: "2-digit", hourCycle: "h23",

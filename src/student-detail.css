@@ -22,9 +22,33 @@
 .growth-editor { margin-top: 14px; }
 .growth-editor > summary { cursor: pointer; color: var(--green); font-weight: 600; }
 .growth-editor .growth-fields { margin-top: 10px; }
+.student-edit .notice { margin-top: 12px; }
+.student-edit code { overflow-wrap: anywhere; }
+.student-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.student-edit-actions .primary, .student-edit .retry-actions .primary { margin-top: 0; }
+.student-edit-history { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+.student-edit-history ol { margin: 6px 0 0; padding: 0; list-style: none; }
+.student-edit-history li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.student-edit-history summary { color: var(--green); cursor: pointer; }
+.student-edit-comparison { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 12px; }
+.student-edit-comparison h4 { margin: 8px 0; }
+.parent-follow-up > .notice, .parent-follow-up-form { margin-top: 12px; }
+.parent-follow-up-form { padding-top: 12px; border-top: 1px solid var(--line); }
+.parent-concern-list, .parent-follow-up-history { margin: 10px 0 0; padding: 0; list-style: none; }
+.parent-concern-list > li, .parent-follow-up-history > li { padding: 12px 0; border-top: 1px solid var(--line); }
+.parent-concern-list .secondary { margin-top: 10px; }
+.parent-concern-text { margin-top: 5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.parent-follow-up code { overflow-wrap: anywhere; }
 
 @media (max-width: 650px) {
   .roster .student-list { max-height: 172px; overflow-y: auto; }
   .student-detail-nav { gap: 4px; }
   .student-detail-nav button { padding-inline: 8px; }
 }
+.score-trend { border: 1px solid #d5dfd8; border-radius: 8px; padding: 12px; margin: 12px 0; }
+.score-trend label { display: inline-grid; gap: 6px; }
+.score-trend-plot { overflow-x: auto; }
+.score-trend-plot canvas { display: block; width: 100%; min-width: 480px; max-width: 720px; height: auto; }
+.score-trend-points { padding-inline-start: 24px; margin-block: 6px; font-variant-numeric: tabular-nums; }
+.training-for-plan { margin-top: 24px; border-top: 1px solid #d5dfd8; padding-top: 14px; }
+.training-for-plan > label { display: grid; gap: 6px; max-width: 420px; }

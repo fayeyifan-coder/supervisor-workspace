@@ -1,5 +1,11 @@
 .workspace[hidden] { display: none; }
 .schedule-heading-actions { display: flex; align-items: center; gap: 12px; }
+.masthead:has(.workspace-navigation button) { position: sticky; top: 0; z-index: 2; background: #f3f5ef; }
+.workspace-navigation { justify-content: end; flex-wrap: wrap; gap: 6px; }
+.workspace-navigation [aria-current="page"] { background: #e3ebe0; border-color: #899c8c; }
+@media (max-width: 720px) {
+  .workspace-navigation .scope { display: none; }
+}
 .schedule-page { padding: 25px 24px 32px; }
 .schedule-heading, .schedule-toolbar, .schedule-form-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; }
 .schedule-heading { padding-bottom: 16px; border-bottom: 1px solid var(--line); }
@@ -52,4 +58,12 @@
   .schedule-toolbar { align-items: stretch; flex-direction: column; }
   .schedule-filter { width: 100%; }
   .schedule-heading-actions { flex-wrap: wrap; justify-content: end; gap: 4px; }
+}
+.schedule-days.schedule-single-day { grid-template-columns: minmax(0, 1fr); }
+.schedule-single-day .schedule-card-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+.schedule-period > label { display: grid; gap: 4px; }
+.schedule-card-actions .schedule-profile-link { width: 100%; min-height: 27px; }
+.schedule-profile-link {
+  padding: 2px 3px; background: transparent; color: var(--green); font: inherit;
+  text-decoration: underline; text-underline-offset: 3px; text-align: start; overflow-wrap: anywhere;
 }

@@ -49,7 +49,7 @@ function fixture(t) {
   });
   return {
     path, marker,
-    open() { store = WorkspaceDatabase.open(path, marker); return store; },
+    open(version = 1) { store = WorkspaceDatabase.open(path, marker, version); return store; },
     close() { store?.close(); store = undefined; },
   };
 }
@@ -181,3 +181,14 @@ test("interrupted first initialization preserves the incomplete file for recover
   assert.throws(() => f.open(), { code: "recovery" });
   assert.deepEqual(readFileSync(f.path), original);
 });
+
+for (const phase of ["schema", "before-marker"]) {
+  test("interrupted v6 initialization preserves the original file at " + phase, { timeout: 12000 }, async t => {
+    const f = fixture(t);
+    await interrupt(t, "interrupt-initialization.cjs", [f.path, f.marker, "6", phase], "initialization-open");
+    const original = readFileSync(f.path);
+    assert.equal(existsSync(f.marker), false);
+    assert.throws(() => f.open(6), { code: "recovery" });
+    assert.deepEqual(readFileSync(f.path), original);
+  });
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import type { AttendancePlan, LearningBlock, LearningChange, LearningDay, LearningDayInput, LearningTask,
   LearningTaskInput, Result, WorkspaceApi } from "./contracts";
 import { shanghaiMinute, shanghaiParts } from "./schedule-calendar";
@@ -180,11 +180,12 @@ function TaskRow({ task, block, target, locked, submit }: {
   </li>;
 }
 
-function BlockCard({ block, target, locked, submit, onEdit }: {
-  block: LearningBlock; target: LearningDayInput; locked: boolean; submit: Submit; onEdit: () => void;
+function BlockCard({ block, target, locked, checkedOut, submit, onEdit }: {
+  block: LearningBlock; target: LearningDayInput; locked: boolean; checkedOut: boolean; submit: Submit; onEdit: () => void;
 }) {
   const [taskForm, setTaskForm] = useState(false);
   const waiting = block.status === "planned";
+  const hasActiveTask = block.tasks.some(task => task.status === "in_progress");
   const progress = block.tasks.filter(task => task.status === "done" || task.status === "skipped").length;
   function update(action: BlockAction) {
     if (action === "cancel" && !window.confirm("确认取消这个学习块？")) return;
@@ -202,14 +203,16 @@ function BlockCard({ block, target, locked, submit, onEdit }: {
     </dl>}
     <div className="learning-actions">
       {waiting && <>
-        <button className="primary" type="button" disabled={locked || taskForm} onClick={() => update("start")}>开始学习块</button>
+        <button className="primary" type="button" disabled={locked || taskForm || checkedOut} onClick={() => update("start")}>开始学习块</button>
         <button className="secondary" type="button" disabled={locked} onClick={onEdit}>调整学习块</button>
         <button className="secondary" type="button" disabled={locked || taskForm} onClick={() => setTaskForm(true)}>编辑任务计划</button>
         <button className="secondary" type="button" disabled={locked || taskForm} onClick={() => update("cancel")}>取消学习块</button>
       </>}
-      {block.status === "in_progress" && <button className="primary" type="button" disabled={locked}
+      {block.status === "in_progress" && <button className="primary" type="button" disabled={locked || hasActiveTask}
         onClick={() => update("finish")}>结束学习块</button>}
     </div>
+    {waiting && checkedOut && <p className="muted">本次到校已签退，不能开始学习块。</p>}
+    {block.status === "in_progress" && hasActiveTask && <p className="muted">请先完成或跳过进行中的任务，再结束学习块。</p>}
     {block.tasks.length ? <ol className="learning-task-list">{block.tasks.map(task =>
       <TaskRow key={task.id} task={task} block={block} target={target} locked={locked} submit={submit} />)}</ol>
       : <p className="muted learning-no-tasks">这个学习块还没有任务。</p>}
@@ -217,9 +220,10 @@ function BlockCard({ block, target, locked, submit, onEdit }: {
   </article>;
 }
 
-export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack }: {
+export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, leaveGuard, backLabel = "返回课表" }: {
   api: WorkspaceApi; target: LearningDayInput; alias: string; reloadVersion: number; confirmedRequestId?: string; blocked: boolean;
-  submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void;
+  submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void; backLabel?: string;
+  leaveGuard: Ref<() => boolean>;
 }) {
   const [data, setData] = useState<LearningDay>();
   const [reload, setReload] = useState(0);
@@ -231,6 +235,10 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
   const pendingEditor = useRef<{ command: LearningChange; close: () => void } | undefined>(undefined);
+  function canLeave() {
+    return !running.current && (!draft || window.confirm("确认离开学习块表单？"));
+  }
+  useImperativeHandle(leaveGuard, () => canLeave);
   useEffect(() => {
     let ignore = false;
     const query = { attendanceId: target.attendanceId, studentId: target.studentId };
@@ -295,16 +303,15 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
   const waiting = plan && (plan.status === "planned" || plan.status === "confirmed");
   const started = plan && plan.startAt <= Date.now();
   const hasStartedBlock = data?.blocks.some(block => block.actualStart !== null);
+  const hasActiveBlock = data?.blocks.some(block => block.status === "in_progress");
   const hasLiveBlock = data?.blocks.some(block => block.status !== "cancelled");
   const mayAddBlock = plan && plan.status !== "absent" && plan.status !== "cancelled";
   const hasActions = waiting || (plan?.status === "attended" && plan.checkOutAt === null);
 
   return <section className="schedule-page learning-day" aria-labelledby="learning-day-title">
     <header className="schedule-heading">
-      <div><button className="schedule-back" type="button" disabled={busy} onClick={() => {
-        if (!draft || window.confirm("确认离开学习块表单？")) onBack();
-      }}>返回排课周视图</button>
-        <h1 id="learning-day-title">{alias} · 当日学习</h1>
+      <div><button className="schedule-back" type="button" disabled={busy} onClick={() => { if (canLeave()) onBack(); }}>{backLabel}</button>
+        <h1 id="learning-day-title" tabIndex={-1}>{alias} · 当日学习</h1>
         {plan && <p className="muted">{shanghaiParts(plan.startAt).date} · {plan.kind === "whole_day" ? "全天到校" : "普通到校"}</p>}</div>
       <button className="secondary" type="button" disabled={busy} onClick={reread}>重新读取本次到校</button>
     </header>
@@ -336,10 +343,14 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
               onClick={() => attendance("cancel")}>取消到校</button>}
           </>}
           {plan.status === "attended" && plan.checkOutAt === null && <button type="button" className="primary"
-            disabled={locked} onClick={() => attendance("checkOut")}>签退</button>}
+            disabled={locked || hasActiveBlock} onClick={() => attendance("checkOut")}>签退</button>}
         </div>}
-        {waiting && started && hasStartedBlock && <p className="muted">已有实际学习记录，此次安排不能标记缺席。</p>}
+        {waiting && hasStartedBlock && <p className="notice pending" role="status">
+          本次未签到，已有实际学习记录。请核对到校情况，确认已到后点击「签到」。本次无法标记缺席。
+        </p>}
         {waiting && !started && hasLiveBlock && <p className="muted">取消到校前，须先核对关联学习块。</p>}
+        {plan.status === "attended" && plan.checkOutAt === null && hasActiveBlock &&
+          <p className="muted">请先结束进行中的学习块，再签退。</p>}
         {!hasActions && <p className="muted">本次出勤已结案，保留原记录供核对。</p>}
       </section>
       <div className="learning-task-head learning-blocks-head">
@@ -351,7 +362,7 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
         locked={locked} onDraft={setDraft} onSave={saveBlock} onClose={() => setDraft(undefined)} />}
       {!data.blocks.length && !draft && <p className="muted">这次到校还没有学习块。</p>}
       <div className="learning-block-list">{data.blocks.map(block => <BlockCard key={block.id} block={block} target={target}
-        locked={locked} submit={(command, saved) => void save(command, saved)} onEdit={() => {
+        checkedOut={plan.checkOutAt !== null} locked={locked} submit={(command, saved) => void save(command, saved)} onEdit={() => {
           if (!draft || window.confirm("确认关闭当前学习块表单？")) setDraft(blockDraft(plan, block));
         }} />)}</div>
     </>}

@@ -6,7 +6,7 @@ const { join } = require("node:path");
 const { test } = require("node:test");
 const { WorkspaceDatabase } = require("../build/database.js");
 const { OperationsDatabase } = require("../build/operations.js");
-const { applyLearningChange, readLearningDay, readScheduleReceipt } = require("../build/learning-api.js");
+const { applyLearningChange, readAttendanceBoard, readLearningDay, readScheduleReceipt } = require("../build/learning-api.js");
 const { saveSchedulePlan } = require("../build/schedule-api.js");
 const { mondayOf, shanghaiMinute, shanghaiParts, shiftDate } = require("../build/schedule-calendar.js");
 
@@ -32,6 +32,7 @@ function fixture(t) {
   const setClock = when => clock.mock.mockImplementation(() => when);
   return {
     ids, at, plan, setClock, save,
+    board: () => readAttendanceBoard(db, students),
     apply: request => applyLearningChange(db, students, request),
     receipt: request => readScheduleReceipt(db, students, request),
     read: plan => readLearningDay(db, students, { attendanceId: plan.id, studentId: plan.studentId }),
@@ -65,6 +66,72 @@ test("learning IPC constrains each write and read to the selected attendance and
   assert.throws(() => f.apply(command(b, a, { command: "recordAttendance", action: "checkIn" })), isCode("invalid"));
   assert.deepEqual(f.read(b).blocks, []);
   assert.equal(f.read(a).blocks.length, 1);
+});
+
+test("checked-out attendance cannot retain or start an active learning block", t => {
+  const f = fixture(t);
+  let plan = f.plan(f.ids[0]);
+  let learning = f.apply(block(f, plan));
+  const next = f.apply(block(f, plan, "10:00", "11:00"));
+  f.setClock(f.at("08:05"));
+  plan = f.apply(command(plan, plan, { command: "recordAttendance", action: "checkIn" }));
+  learning = f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "start" }));
+  f.setClock(f.at("08:20"));
+  assert.throws(() => f.apply(command(plan, plan, { command: "recordAttendance", action: "checkOut" })), isCode("conflict"));
+  assert.equal(f.board().entries[0].status, "learning");
+  f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "finish" }));
+  assert.equal(f.board().entries[0].status, "checked_in");
+  plan = f.apply(command(plan, plan, { command: "recordAttendance", action: "checkOut" }));
+  assert.throws(() => f.apply(command(plan, next, { command: "recordLearningOutcome", action: "start" })), isCode("conflict"));
+  assert.equal(f.board().entries[0].status, "checked_out");
+  assert.equal(f.read(plan).blocks[1].status, "planned");
+});
+
+test("a completed learning block cannot leave a task in progress", t => {
+  const f = fixture(t);
+  const plan = f.plan(f.ids[0]);
+  const task = { id: randomUUID(), category: "home_school", content: "合成作业复查" };
+  let learning = f.apply(block(f, plan));
+  learning = f.apply(command(plan, learning, { command: "saveLearningTasks", tasks: [task] }));
+  f.setClock(f.at("08:05"));
+  learning = f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "start" }));
+  learning = f.apply(command(plan, learning, { command: "recordTaskOutcome", taskId: task.id, status: "in_progress" }));
+  f.setClock(f.at("08:20"));
+  assert.throws(() => f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "finish" })), isCode("conflict"));
+  learning = f.apply(command(plan, learning, { command: "recordTaskOutcome", taskId: task.id, status: "done", resultNotes: "合成完成结果" }));
+  learning = f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "finish" }));
+  assert.equal(learning.tasks[0].resultNotes, "合成完成结果");
+  assert.equal(learning.status, "done");
+});
+
+test("today's board counts explicit attendance and learning states at Shanghai boundaries", t => {
+  const f = fixture(t);
+  let first = f.plan(f.ids[0], "08:00", "11:00");
+  const second = f.plan(f.ids[1], "08:00", "11:00");
+  const later = f.plan(f.ids[1], "11:00", "15:00");
+  f.apply(command(later, later, { command: "recordAttendance", action: "cancel" }));
+  f.setClock(f.at("07:59"));
+  function status(plan) { return f.board().entries.find(entry => entry.plan.id === plan.id)?.status; }
+  assert.equal(status(first), "upcoming");
+  assert.equal(status(later), "cancelled");
+  f.setClock(f.at("08:00"));
+  assert.equal(status(first), "unchecked");
+  first = f.apply(command(first, first, { command: "recordAttendance", action: "checkIn" }));
+  assert.equal(status(first), "checked_in");
+  assert.equal(status(second), "unchecked");
+  f.apply(command(second, second, { command: "recordAttendance", action: "absent" }));
+  assert.equal(status(second), "absent");
+  let practice = f.apply(block(f, first));
+  practice = f.apply(command(first, practice, { command: "recordLearningOutcome", action: "start" }));
+  assert.equal(status(first), "learning");
+  f.setClock(f.at("08:10"));
+  f.apply(command(first, practice, { command: "recordLearningOutcome", action: "finish" }));
+  f.apply(command(first, first, { command: "recordAttendance", action: "checkOut" }));
+  assert.equal(status(first), "checked_out");
+  f.reopen();
+  assert.equal(status(first), "checked_out");
+  f.setClock(f.at("00:00") + 86400000);
+  assert.deepEqual(f.board().entries, []);
 });
 
 test("attendance, parallel learning blocks and three task results persist and reject illegal updates", t => {

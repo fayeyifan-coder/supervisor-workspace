@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { IntakeHistorySummary, Result, Student, WorkspaceApi } from "./contracts";
+import type { StudentRecordKind } from "./student-records";
 import "./student-detail.css";
 
 const sections = [
@@ -62,16 +63,23 @@ function ImportSources({ api, student }: { api: WorkspaceApi; student: Student }
   </section>;
 }
 
-export function StudentDetail({ student, api, intakeOpen, actions, growth, history }: {
+export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, recordPanels }: {
   student: Student; api: WorkspaceApi; intakeOpen: boolean;
-  actions: ReactNode; growth: ReactNode; history: ReactNode;
+  actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode; parentFollowUp?: ReactNode;
+  recordPanels: { id: StudentRecordKind; label: string; content: ReactNode }[];
 }) {
-  const [selected, setSelected] = useState<(typeof sections)[number]["id"]>("growth");
+  const planned = [
+    !parentFollowUp && "家长诉求",
+    !recordPanels.some(panel => panel.id === "enrollment") && "到期提醒",
+    !recordPanels.some(panel => panel.id === "score") && "成绩趋势",
+    !recordPanels.some(panel => panel.id === "improvement") && "提分方案",
+  ].filter(Boolean);
+  const [selected, setSelected] = useState<(typeof sections)[number]["id"] | "edit" | "parent" | StudentRecordKind>("growth");
 
   return <article className="student-detail" aria-labelledby="student-detail-heading">
     <header className="panel student-overview">
       <div className="student-overview-heading">
-        <h1 id="student-detail-heading">{student.alias}</h1>
+        <h1 id="student-detail-heading" tabIndex={-1}>{student.alias}</h1>
         {actions}
       </div>
       <dl>
@@ -82,18 +90,29 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
       </dl>
     </header>
     <nav className="student-detail-nav" aria-label="学生详情">
-      {sections.map(({ id, label }) => <button key={id} type="button" aria-controls={"student-section-" + id}
+      {sections.filter(({ id }) => id !== "planned" || planned.length > 0).map(({ id, label }) => <button key={id} type="button" aria-controls={"student-section-" + id}
         aria-pressed={selected === id} onClick={() => setSelected(id)}>{label}</button>)}
+      {edit && <button type="button" aria-controls="student-section-edit" aria-pressed={selected === "edit"}
+        onClick={() => setSelected("edit")}>基础档案编辑</button>}
+      {parentFollowUp && <button type="button" aria-controls="student-section-parent" aria-pressed={selected === "parent"}
+        onClick={() => setSelected("parent")}>家长诉求</button>}
+      {recordPanels.map(panel => <button key={panel.id} type="button" aria-controls={"student-section-" + panel.id}
+        aria-pressed={selected === panel.id} onClick={() => setSelected(panel.id)}>{panel.label}</button>)}
     </nav>
     <div id="student-section-growth" hidden={selected !== "growth"}>{!intakeOpen && growth}</div>
     <div id="student-section-history" hidden={selected !== "history"}>{history}</div>
     <div id="student-section-sources" hidden={selected !== "sources"}>
       {!intakeOpen && <ImportSources key={student.id} api={api} student={student} />}
     </div>
-    <section id="student-section-planned" className="panel student-planned" hidden={selected !== "planned"}
+    {edit && <div id="student-section-edit" hidden={selected !== "edit"}>{!intakeOpen && edit}</div>}
+    {parentFollowUp && <div id="student-section-parent" hidden={selected !== "parent"}>{!intakeOpen && parentFollowUp}</div>}
+    {recordPanels.map(panel => <div key={panel.id} id={"student-section-" + panel.id} hidden={selected !== panel.id}>
+      {!intakeOpen && panel.content}
+    </div>)}
+    {planned.length > 0 && <section id="student-section-planned" className="panel student-planned" hidden={selected !== "planned"}
       aria-labelledby="student-planned-heading">
       <h2 id="student-planned-heading">规划中的功能</h2>
-      <ul>{["家长诉求", "成绩趋势", "提分方案", "到期提醒"].map(label => <li key={label}>{label}</li>)}</ul>
-    </section>
+      <ul>{planned.map(label => <li key={String(label)}>{label}</li>)}</ul>
+    </section>}
   </article>;
 }

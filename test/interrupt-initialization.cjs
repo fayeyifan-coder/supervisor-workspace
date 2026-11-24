@@ -4,15 +4,16 @@ const { DatabaseSync } = require("node:sqlite");
 const { WorkspaceDatabase } = require("../build/database.js");
 
 const execute = DatabaseSync.prototype.exec;
+const phase = process.argv[5] ?? "schema";
 DatabaseSync.prototype.exec = function (sql) {
   const result = execute.call(this, sql);
-  if (sql.startsWith("CREATE TABLE students")) {
-    assert.equal(this.isTransaction, true);
+  if ((phase === "schema" && sql.startsWith("CREATE TABLE students")) || (phase === "before-marker" && sql === "COMMIT")) {
+    assert.equal(this.isTransaction, phase === "schema");
     writeSync(1, "initialization-open\n");
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
   }
   return result;
 };
 
-WorkspaceDatabase.open(process.argv[2], process.argv[3]).close();
+WorkspaceDatabase.open(process.argv[2], process.argv[3], Number(process.argv[4] ?? "1")).close();
 throw new Error("Initialization failed to reach the interruption point");

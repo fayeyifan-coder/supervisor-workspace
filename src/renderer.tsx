@@ -1,12 +1,20 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import type { Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
+import type { LearningDayInput, Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
+import { AttendanceBoard, AttendanceOverview, useTodayAttendance } from "./AttendanceBoard";
 import { WeeklySchedulePanel } from "./WeeklySchedulePanel";
 import { DataProtectionPanel } from "./DataProtectionPanel";
 import { StudentIntakePanel } from "./StudentIntakePanel";
 import { StudentDetail } from "./StudentDetail";
+import { StudentEditPanel } from "./StudentEditPanel";
+import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
+import { TrainingForPlan } from "./TrainingForPlan";
+import { ScoreTrend } from "./ScoreTrend";
+import { StudentWriteRecoveryPanel, type StudentWriteResolution } from "./StudentWriteRecoveryPanel";
+import { StudentRecordsPanel } from "./StudentRecordsPanel";
+import { studentRecordDefinitions, type StudentRecordKind } from "./student-records";
 import "./styles.css";
 
 declare global {
@@ -103,8 +111,25 @@ function HistoryView({ history, reload }: { history?: History; reload: () => voi
 function App() {
   const api = window.supervisorWorkspace;
   const [students, setStudents] = useState<Student[]>();
-  const [scheduleEnabled, setScheduleEnabled] = useState(false);
-  const [schedule, setSchedule] = useState<{ studentId: string }>();
+  const [scheduleEnabled, setScheduleEnabled] = useState<boolean>();
+  const [page, setPage] = useState<"schedule" | "board" | "students">("schedule");
+  const [studentFilter, setStudentFilter] = useState("");
+  const [learning, setLearning] = useState<LearningDayInput>();
+  const learningLeaveGuard = useRef<() => boolean>(null);
+  const attendance = useTodayAttendance(api, scheduleEnabled === true);
+  const [studentEditEnabled, setStudentEditEnabled] = useState(false);
+  const [studentWriteRefresh, setStudentWriteRefresh] = useState(0);
+  const [writeResolution, setWriteResolution] = useState<StudentWriteResolution>();
+  const refreshStudentWrites = useCallback(() => setStudentWriteRefresh(value => value + 1), []);
+  const [studentRecordVersion, setStudentRecordVersion] = useState(0);
+  const [recordActivity, setRecordActivity] = useState<Partial<Record<StudentRecordKind, { dirty: boolean; busy: boolean }>>>({});
+  const onRecordActivity = useCallback((kind: StudentRecordKind, dirty: boolean, busy: boolean) => {
+    setRecordActivity(old => old[kind]?.dirty === dirty && old[kind]?.busy === busy ? old : { ...old, [kind]: { dirty, busy } });
+  }, []);
+  const [parentFollowUpEnabled, setParentFollowUpEnabled] = useState(false);
+  const [profileReturn, setProfileReturn] = useState<"schedule" | "board">();
+  const entry = useRef<{ trigger: HTMLButtonElement; scroll: number }>(null);
+  const scheduleNav = useRef<HTMLButtonElement>(null);
   const [activeId, setActiveId] = useState<string>();
   const [creating, setCreating] = useState(false);
   const [listError, setListError] = useState("");
@@ -117,6 +142,10 @@ function App() {
   const [notice, setNotice] = useState<Notice>();
   const [growthDirty, setGrowthDirty] = useState(false);
   const [growthBusy, setGrowthBusy] = useState(false);
+  const [studentEditDirty, setStudentEditDirty] = useState(false);
+  const [studentEditBusy, setStudentEditBusy] = useState(false);
+  const [parentFollowUpDirty, setParentFollowUpDirty] = useState(false);
+  const [parentFollowUpBusy, setParentFollowUpBusy] = useState(false);
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [intakeBusy, setIntakeBusy] = useState(false);
   const inFlight = useRef(false);
@@ -124,7 +153,16 @@ function App() {
   useEffect(() => {
     let current = true;
     api.scheduleAvailable().then(result => {
-      if (current && result.ok) setScheduleEnabled(result.value);
+      if (current) setScheduleEnabled(result.ok && result.value);
+    }).catch(() => { if (current) setScheduleEnabled(false); });
+    api.studentEditAvailable().then(result => {
+      if (current && result.ok) setStudentEditEnabled(result.value);
+    }).catch(() => {});
+    api.studentRecordVersion().then(result => {
+      if (current && result.ok) setStudentRecordVersion(result.value);
+    }).catch(() => {});
+    api.parentFollowUpAvailable().then(result => {
+      if (current && result.ok) setParentFollowUpEnabled(result.value);
     }).catch(() => {});
     return () => { current = false; };
   }, [api]);
@@ -222,47 +260,141 @@ function App() {
   const active = students?.find(student => student.id === activeId);
   const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
+  const editorBusy = growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
   const showStudentForm = students && (creating || students.length === 0);
 
-  function canLeaveGrowth(): boolean {
-    if (growthBusy) return false;
-    if (growthDirty && !window.confirm("成长档案有未保存修改，确定离开并放弃吗？")) return false;
+  function canLeaveStudentDrafts(): boolean {
+    if (editorBusy) return false;
+    if ((growthDirty || studentEditDirty || parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty)) &&
+        !window.confirm("学生档案有未保存输入，确定离开并放弃吗？")) return false;
     setGrowthDirty(false);
+    setStudentEditDirty(false);
+    setParentFollowUpDirty(false);
     return true;
+  }
+
+  const showingWorkspace = scheduleEnabled === false || page === "students";
+
+  function restoreEntry() {
+    const origin = entry.current;
+    entry.current = null;
+    requestAnimationFrame(() => {
+      window.scrollTo(0, origin?.scroll ?? 0);
+      const control = origin?.trigger;
+      (control?.isConnected && !control.disabled && control.getClientRects().length ? control : scheduleNav.current)
+        ?.focus({ preventScroll: true });
+    });
+  }
+
+  function openLearning(target: LearningDayInput, trigger: HTMLButtonElement) {
+    entry.current = { trigger, scroll: window.scrollY };
+    setLearning(target);
+    requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+      document.getElementById("learning-day-title")?.focus({ preventScroll: true });
+    });
+  }
+
+  function closeLearning() {
+    setLearning(undefined);
+    attendance.reload();
+    restoreEntry();
+  }
+
+  function openLinkedStudent(studentId: string, origin: "schedule" | "board", trigger: HTMLButtonElement): boolean {
+    if (!students?.some(student => student.id === studentId) || locked || editorBusy || intakeOpen) return false;
+    if ((studentId !== activeId || creating) && !canLeaveStudentDrafts()) return false;
+    entry.current = { trigger, scroll: window.scrollY };
+    setActiveId(studentId);
+    setCreating(false);
+    setNotice(undefined);
+    setProfileReturn(origin);
+    setPage("students");
+    requestAnimationFrame(() => {
+      document.getElementById("student-detail-heading")?.focus({ preventScroll: true });
+      window.scrollTo(0, 0);
+    });
+    return true;
+  }
+
+  function returnToOrigin() {
+    if (!profileReturn) return;
+    setPage(profileReturn);
+    setProfileReturn(undefined);
+    restoreEntry();
+  }
+
+  function navigate(next: typeof page) {
+    if (learning) {
+      if (!learningLeaveGuard.current?.()) return;
+      if (page === next) { closeLearning(); return; }
+      setLearning(undefined);
+      attendance.reload();
+    } else if (next === page) {
+      return;
+    }
+    if (next === profileReturn) { returnToOrigin(); return; }
+    entry.current = null;
+    setProfileReturn(undefined);
+    setPage(next);
+    requestAnimationFrame(() => window.scrollTo(0, 0));
   }
 
   return <main className="shell" data-ui>
     <header className="masthead">
       <div className="brand"><span className="brand-mark" aria-hidden="true" /><strong>督学工作台</strong></div>
-      <div className="schedule-heading-actions">
+      <nav className="schedule-heading-actions workspace-navigation" aria-label="工作台">
         <span className="scope">离线验收 · 仅用虚构学生</span>
-        {scheduleEnabled && !schedule && <button className="secondary" type="button"
-          disabled={!students || locked || growthBusy || intakeOpen}
-          onClick={() => setSchedule({ studentId: "" })}>排课周视图</button>}
-      </div>
+        {scheduleEnabled && <>
+          <button className="secondary" type="button" ref={scheduleNav} aria-current={page === "schedule" && !learning ? "page" : undefined}
+            disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("schedule")}>全局总课表</button>
+          <button className="secondary" type="button" aria-current={page === "board" && !learning ? "page" : undefined}
+            disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("board")}>今日到校看板</button>
+          <button className="secondary" type="button" aria-current={showingWorkspace ? "page" : undefined}
+            disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("students")}>学生档案</button>
+        </>}
+      </nav>
     </header>
-    {schedule && students && <WeeklySchedulePanel api={api} students={students} initialStudentId={schedule.studentId}
-      onBack={() => setSchedule(undefined)} />}
-    <div className="workspace" hidden={Boolean(schedule)}>
+    {parentFollowUpEnabled && students && <StudentWriteRecoveryPanel api={api} students={students}
+      refresh={studentWriteRefresh} onResolved={setWriteResolution} />}
+    {!showingWorkspace && (!students || scheduleEnabled === undefined) &&
+      <p className="schedule-page" role="status">{listError || "正在读取课表…"}</p>}
+    {!showingWorkspace && !students && listError && <button type="button" className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取档案</button>}
+    {scheduleEnabled && students && <div hidden={page !== "schedule" && !learning}>
+      <WeeklySchedulePanel api={api} students={students} studentId={studentFilter} setStudentId={setStudentFilter}
+        learning={learning} learningFromBoard={page === "board"} onLearning={openLearning} onExitLearning={closeLearning}
+        learningLeaveGuard={learningLeaveGuard} onStudent={(id, trigger) => openLinkedStudent(id, "schedule", trigger)}
+        summary={<section className="schedule-attendance" aria-labelledby="schedule-attendance-title">
+          <h2 id="schedule-attendance-title">今日到校{attendance.result?.ok && <> · <time dateTime={attendance.result.value.date}>{attendance.result.value.date}</time></>}</h2>
+          {!attendance.result ? <p role="status" className="muted">正在读取今日到校…</p>
+            : attendance.result.ok ? <AttendanceOverview day={attendance.result.value} compact />
+            : <p role="alert">{attendance.result.message}</p>}
+        </section>} />
+    </div>}
+    {scheduleEnabled && students && <div hidden={page !== "board" || Boolean(learning)}>
+      <AttendanceBoard result={attendance.result} reload={attendance.reload} students={students}
+        onStudent={(id, trigger) => openLinkedStudent(id, "board", trigger)} onLearning={openLearning} />
+    </div>}
+    <div className="workspace" hidden={!showingWorkspace}>
       <aside className="roster" aria-label="学生档案">
         <div className="roster-heading"><h2>学生档案</h2>
-          <button className="secondary" disabled={locked || growthBusy || intakeOpen || !students} onClick={() => {
-            if (!canLeaveGrowth()) return;
+          <button className="secondary" disabled={locked || editorBusy || intakeOpen || !students} onClick={() => {
+            if (!canLeaveStudentDrafts()) return;
             setCreating(true); setNotice(undefined);
           }}>新建学生</button>
         </div>
-        <button className="secondary intake-entry" type="button" disabled={locked || growthBusy || intakeOpen || !students}
+        <button className="secondary intake-entry" type="button" disabled={locked || editorBusy || intakeOpen || !students}
           onClick={() => {
-            if (!canLeaveGrowth()) return;
+            if (!canLeaveStudentDrafts()) return;
             setIntakeOpen(true); setNotice(undefined);
           }}>导入学生 JSON</button>
         {!listError && !students && <p role="status" className="muted">正在读取档案…</p>}
         {listError && <div className="notice failure" role="alert">{listError} <button className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取</button></div>}
         {students?.length === 0 && <p className="muted">还没有学生档案。</p>}
         <ul className="student-list">{students?.map(student => <li key={student.id}>
-          <button disabled={locked || growthBusy || intakeOpen} aria-pressed={!creating && student.id === activeId} onClick={() => {
+          <button disabled={locked || editorBusy || intakeOpen} aria-pressed={!creating && student.id === activeId} onClick={() => {
             if (student.id === activeId && !creating) return;
-            if (!canLeaveGrowth()) return;
+            if (!canLeaveStudentDrafts()) return;
             setActiveId(student.id); setCreating(false); setNotice(undefined);
           }}><strong>{student.alias}</strong><span>{student.grade} · {student.subjects}</span></button>
         </li>)}</ul>
@@ -285,8 +417,34 @@ function App() {
         <div className="student-content" hidden={intakeOpen}>
           {showStudentForm ? <StudentForm key={formVersion} disabled={locked} submit={input => void save({ kind: "student", input })} />
             : active && <StudentDetail student={active} api={api} intakeOpen={intakeOpen}
-              actions={scheduleEnabled && <button className="secondary" type="button" disabled={locked || growthBusy}
-                onClick={() => setSchedule({ studentId: active.id })}>查看该学生排课</button>}
+              actions={scheduleEnabled && <div className="schedule-heading-actions">
+                {profileReturn && <button className="secondary" type="button" disabled={editorBusy} onClick={returnToOrigin}>
+                  {profileReturn === "board" ? "返回今日到校" : "返回课表"}
+                </button>}
+                <button className="secondary" type="button" disabled={locked || editorBusy}
+                  onClick={() => {
+                    entry.current = null;
+                    setProfileReturn(undefined);
+                    setStudentFilter(active.id);
+                    setPage("schedule");
+                    window.scrollTo(0, 0);
+                  }}>查看该学生排课</button>
+              </div>}
+              edit={studentEditEnabled && <StudentEditPanel key={active.id} studentId={active.id} api={api}
+                onDirtyChange={setStudentEditDirty} onBusyChange={setStudentEditBusy}
+                onSaved={() => setListRefresh(value => value + 1)} />}
+              recordPanels={(Object.keys(studentRecordDefinitions) as StudentRecordKind[])
+                .filter(kind => kind !== "training" && studentRecordDefinitions[kind].version <= studentRecordVersion).map(kind => ({
+                  id: kind, label: studentRecordDefinitions[kind].label,
+                  content: <StudentRecordsPanel key={active.id + kind} studentId={active.id} kind={kind} api={api}
+                    onActivity={onRecordActivity} onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} overview={kind === "score" ? records => <ScoreTrend records={records} /> : undefined}
+                    after={kind === "improvement" ? plans => plans.length > 0 &&
+                      <TrainingForPlan api={api} studentId={active.id} plans={plans} onActivity={onRecordActivity}
+                        onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} /> : undefined} />,
+                }))}
+              parentFollowUp={parentFollowUpEnabled && <ParentFollowUpPanel key={active.id} studentId={active.id} api={api}
+                onDirtyChange={setParentFollowUpDirty} onBusyChange={setParentFollowUpBusy}
+                onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} />}
               growth={<GrowthProfilePanel key={active.id} student={active} api={api}
                 onDirtyChange={setGrowthDirty} onBusyChange={setGrowthBusy} />}
               history={<div className="learning">

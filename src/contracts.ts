@@ -2,6 +2,19 @@ export const channels = {
   students: "mvp:students",
   history: "mvp:history",
   createStudent: "mvp:create-student",
+  studentEditAvailable: "mvp:student-edit-available",
+  studentEdit: "mvp:student-edit",
+  saveStudentEdit: "mvp:save-student-edit",
+  finishStudentEdit: "mvp:finish-student-edit",
+  parentFollowUpAvailable: "mvp:parent-follow-up-available",
+  parentFollowUp: "mvp:parent-follow-up",
+  createParentConcern: "mvp:create-parent-concern",
+  appendParentFollowUp: "mvp:append-parent-follow-up",
+  studentRecordVersion: "mvp:student-record-version",
+  studentRecords: "mvp:student-records",
+  saveStudentRecord: "mvp:save-student-record",
+  studentWriteState: "mvp:student-write-state",
+  resolveStudentWrite: "mvp:resolve-student-write",
   addLesson: "mvp:add-lesson",
   workItems: "m2b:work-items",
   searchWorkItems: "m2b:search-work-items",
@@ -22,6 +35,7 @@ export const channels = {
   scheduleAvailable: "r2b:schedule-available",
   scheduleWeek: "r2b:schedule-week",
   schedulePlan: "r2b:schedule-plan",
+  attendanceBoard: "r2b:attendance-board",
   saveSchedulePlan: "r2b:save-schedule-plan",
   learningDay: "r2b:learning-day",
   applyLearningChange: "r2b:apply-learning-change",
@@ -58,6 +72,38 @@ export interface LessonInput {
 }
 
 export type Student = StudentInput & { createdAt: number };
+export type StudentEditFields = Omit<StudentInput, "id">;
+export interface StudentEditInput {
+  studentId: string;
+  requestId: string;
+  expectedRevision: number;
+  fields: StudentEditFields;
+}
+export interface StudentEditRecord {
+  requestId: string;
+  revision: number;
+  changedAt: number;
+  before: StudentEditFields;
+  after: StudentEditFields;
+}
+export interface StudentEditView {
+  student: Student;
+  revision: number;
+  history: StudentEditRecord[];
+  pending: StudentEditInput | null;
+}
+import type { ParentConcern, ParentConcernInput, ParentFollowUp, ParentFollowUpInput, ParentFollowUpView } from "./parent-follow-up";
+export type { ParentConcern, ParentConcernInput, ParentFollowUp, ParentFollowUpInput, ParentFollowUpView } from "./parent-follow-up";
+import type { StudentRecord, StudentRecordInput, StudentRecordKind, StudentRecordView } from "./student-records";
+export type StudentWriteCommand =
+  | { kind: "concern"; input: ParentConcernInput }
+  | { kind: "followUp"; input: ParentFollowUpInput }
+  | { kind: "record"; input: StudentRecordInput };
+export type StudentWriteState =
+  | { kind: "empty" }
+  | { kind: "damaged"; requestId?: string }
+  | { kind: "pending"; command: StudentWriteCommand; outcome: "saved" | "notSaved" | "unknown" };
+export type StudentWriteAction = "retry" | "confirm" | "discard" | "archive";
 export type Lesson = LessonInput & { createdAt: number };
 export type Failure = {
   ok: false;
@@ -78,6 +124,12 @@ export type ScheduleSaveInput = SaveAttendancePlanInput & { endAt: number; kind:
 export interface LearningDayInput {
   attendanceId: string;
   studentId: string;
+}
+
+export type AttendanceBoardStatus = "upcoming" | "unchecked" | "checked_in" | "learning" | "checked_out" | "absent" | "cancelled";
+export interface AttendanceBoardDay {
+  date: string;
+  entries: { plan: AttendancePlan; status: AttendanceBoardStatus }[];
 }
 
 export interface LearningDay {
@@ -122,6 +174,7 @@ export interface WorkspaceApi {
   acknowledgeOperation(requestId: string, reviewed?: boolean): Promise<Result<null>>;
   scheduleAvailable(): Promise<Result<boolean>>;
   scheduleWeek(input: ScheduleWeekInput): Promise<Result<AttendancePlan[]>>;
+  attendanceBoard(): Promise<Result<AttendanceBoardDay>>;
   schedulePlan(id: string): Promise<Result<AttendancePlan | null>>;
   saveSchedulePlan(input: ScheduleSaveInput): Promise<Result<AttendancePlan>>;
   exportProtection(): Promise<Result<ProtectionResult | null>>;
@@ -132,6 +185,19 @@ export interface WorkspaceApi {
   students(): Promise<Result<Student[]>>;
   history(studentId: string): Promise<Result<Lesson[]>>;
   createStudent(input: StudentInput): Promise<Result<Student>>;
+  studentEditAvailable(): Promise<Result<boolean>>;
+  studentEdit(studentId: string): Promise<Result<StudentEditView>>;
+  saveStudentEdit(input: StudentEditInput): Promise<Result<StudentEditRecord>>;
+  finishStudentEdit(input: Pick<StudentEditInput, "studentId" | "requestId"> & { discard?: boolean }): Promise<Result<null>>;
+  parentFollowUpAvailable(): Promise<Result<boolean>>;
+  parentFollowUp(studentId: string): Promise<Result<ParentFollowUpView>>;
+  createParentConcern(input: ParentConcernInput): Promise<Result<ParentConcern>>;
+  appendParentFollowUp(input: ParentFollowUpInput): Promise<Result<ParentFollowUp>>;
+  studentWriteState(): Promise<Result<StudentWriteState>>;
+  resolveStudentWrite(action: StudentWriteAction, requestId?: string): Promise<Result<null>>;
+  studentRecordVersion(): Promise<Result<number>>;
+  studentRecords(kind: StudentRecordKind, studentId: string): Promise<Result<StudentRecordView>>;
+  saveStudentRecord(input: StudentRecordInput): Promise<Result<StudentRecord>>;
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
   workItems(today: string): Promise<Result<import("./worklog").WorkItem[]>>;
   searchWorkItems(from: string, to: string, query?: string): Promise<Result<import("./worklog").WorkItem[]>>;

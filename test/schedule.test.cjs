@@ -7,7 +7,8 @@ const { test } = require("node:test");
 const { WorkspaceDatabase } = require("../build/database.js");
 const { OperationsDatabase } = require("../build/operations.js");
 const { listScheduleWeek, readSchedulePlan, saveSchedulePlan } = require("../build/schedule-api.js");
-const { mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekRange } = require("../build/schedule-calendar.js");
+const { attendanceCounts, isLateArrival, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekRange } = require("../build/schedule-calendar.js");
+const { enrollmentStatus } = require("../build/student-records.js");
 
 const isCode = code => error => error.code === code;
 const future = (() => {
@@ -37,6 +38,31 @@ function input(studentId, date = shiftDate(future, 1), start = "16:00", end = "1
   return { id: randomUUID(), requestId: randomUUID(), studentId, expectedRevision: 0, kind: "regular",
     startAt: shanghaiMinute(date, start), endAt: shanghaiMinute(date, end), ...other };
 }
+
+test("shared attendance summary counts distinct students separately from visits", t => {
+  const f = fixture(t);
+  const first = f.save(input(f.ids[0]));
+  f.save(input(f.ids[0], shiftDate(future, 1), "18:00", "20:00"));
+  f.save(input(f.ids[1]));
+  assert.deepEqual(attendanceCounts(f.list({ monday: future })), { students: 2, visits: 3 });
+  assert.deepEqual(attendanceCounts(f.list({ monday: future, studentId: f.ids[0] })), { students: 1, visits: 2 });
+  assert.equal(isLateArrival(first), false);
+  assert.equal(isLateArrival({ ...first, checkInAt: first.startAt + 59_999 }), false);
+  assert.equal(isLateArrival({ ...first, checkInAt: first.startAt + 60_000 }), true);
+});
+
+test("renewed enrollment records keep their own period as Shanghai crosses midnight", () => {
+  const older = { startsOn: "2026-11-01", endsOn: "2026-11-24", status: "有效" };
+  const renewal = { startsOn: "2026-11-25", endsOn: "2026-12-24", status: "有效" };
+  const midnight = shanghaiMinute("2026-11-25", "00:00");
+  const last = shanghaiParts(midnight - 1).date, next = shanghaiParts(midnight).date;
+  assert.equal(enrollmentStatus(older, last), "今日到期");
+  assert.equal(enrollmentStatus(renewal, last), "尚未生效");
+  assert.equal(enrollmentStatus(older, next), "已到期");
+  assert.equal(enrollmentStatus(renewal, next), "有效期内");
+  assert.equal(enrollmentStatus(renewal, "2026-12-10"), "还有 14 天到期");
+  assert.equal(enrollmentStatus({ ...renewal, status: "已取消" }, "2026-12-10"), "已取消");
+});
 
 test("Shanghai week boundaries are independent of system timezone and include real calendar dates only", t => {
   const tz = process.env.TZ;
