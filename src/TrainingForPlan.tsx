@@ -7,7 +7,7 @@ export function TrainingForPlan({ api, studentId, plans, onActivity }: {
   api: WorkspaceApi; studentId: string; plans: StudentRecord[];
   onActivity: (kind: StudentRecordKind, dirty: boolean, busy: boolean) => void;
 }) {
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(() => plans[0].id);
   const [working, setWorking] = useState({ dirty: false, busy: false });
   const updateActivity = useCallback((kind: StudentRecordKind, dirty: boolean, busy: boolean) => {
     setWorking(value => value.dirty === dirty && value.busy === busy ? value : { dirty, busy });

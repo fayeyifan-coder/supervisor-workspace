@@ -372,8 +372,8 @@ function App() {
                   id: kind, label: studentRecordDefinitions[kind].label,
                   content: <StudentRecordsPanel key={active.id + kind} studentId={active.id} kind={kind} api={api}
                     onActivity={onRecordActivity} overview={kind === "score" ? records => <ScoreTrend records={records} /> : undefined}
-                    after={kind === "improvement" ? plans => <TrainingForPlan api={api} studentId={active.id} plans={plans}
-                      onActivity={onRecordActivity} /> : undefined} />,
+                    after={kind === "improvement" ? plans => plans.length > 0 &&
+                      <TrainingForPlan api={api} studentId={active.id} plans={plans} onActivity={onRecordActivity} /> : undefined} />,
                 }))}
               parentFollowUp={parentFollowUpEnabled && <ParentFollowUpPanel key={active.id} studentId={active.id} api={api}
                 onDirtyChange={setParentFollowUpDirty} onBusyChange={setParentFollowUpBusy} />}
