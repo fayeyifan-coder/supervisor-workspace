@@ -57,9 +57,11 @@ export function DataProtectionPanel({ api }: { api: WorkspaceApi }) {
     {pending && <p className="worklog-notice" role="status">已确认下次启动切换。请保存编辑、正常关闭，再重新打开工作台。</p>}
     {failure && <p className="notice failure" role="alert">{failure}</p>}
     {result && <div className="notice success" role="status">
-      <p>{result.profileName ? "独立恢复副本已写入并核对。" : "四库备份已写入并核对。"}</p>
+      <p>{result.profileName ? "独立恢复副本已写入并核对。" : result.formatVersion === 2 ? "五库备份已写入并核对。" : "四库备份已写入并核对。"}</p>
       <p>{result.location}</p>
       <p>学生 {result.students} 名 · 工作事项 {result.workItems} 条 · 成长档案 {result.growthProfiles} 份 · 导入绑定 {result.intakeBindings} 个 · 待处理导入 {result.unfinishedImports} 笔</p>
+      {result.formatVersion === 2 && <p>到校安排 {result.attendancePlans} 条 · 学习块 {result.learningBlocks} 个 · 学习任务 {result.learningTasks} 项</p>}
+      {result.upgradedFromFour && <p>已从历史四库备份生成独立副本，教务库为空。</p>}
       {result.profileName && <p>请保留副本及备份包。需要使用副本时，选择其中的 restore.ready 并确认激活。</p>}
     </div>}
   </section>;

@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { m1Protection, WorkspaceFault } from "./database";
 import { growthProtection } from "./growth-profile";
 import { worklogProtection } from "./worklog";
 import { intakeProtection } from "./student-intake";
+import { operationsProtection } from "./operations-schema";
+import type { ProtectionFormat } from "./offline-protection";
 
 export const recoveryName = /^sw-m2d-restore-[a-f0-9]{32}$/;
 export const activeName = /^sw-m2d-active-[a-f0-9]{32}$/;
@@ -84,7 +86,7 @@ export function saveActivation(owner: string, state: ActivationState): void {
   }
   publishSelectionFile(owner, path, JSON.stringify(state));
 }
-export function verifyActiveProfile(root: string, active: Selection, firstOpen: boolean): string {
+export function verifyActiveProfile(root: string, active: Selection, firstOpen: boolean, format: ProtectionFormat = 1): string {
   if (!selection(active, activeName)) return invalid("活动恢复档案编号无效。");
   const container = join(root, active.name);
   const profile = join(container, "profile");
@@ -98,13 +100,14 @@ export function verifyActiveProfile(root: string, active: Selection, firstOpen: 
   plainFile(marker, 64 * 1024);
   const record = JSON.parse(readFileSync(marker, "utf8"));
   const evidence = JSON.parse(Buffer.from(record.packageEvidenceBase64, "base64").toString("utf8"));
-  if (record.format !== "sw-recovery-evidence-v1" || record.profileName !== active.name || evidence.packageSha256 !== active.digest) {
+  if (record.format !== "sw-recovery-evidence-v1" || record.profileName !== active.name || evidence.packageSha256 !== active.digest ||
+      evidence.manifest?.formatVersion !== format) {
     invalid("活动恢复档案与选择记录不符。");
   }
   if (firstOpen && readdirSync(profile).some(name => name !== "data" && name !== "restore.ready")) {
     invalid("新恢复档案含未验证的文件。");
   }
-  verifyProfileData(profile, firstOpen);
+  verifyProfileData(profile, firstOpen, format);
   if (!firstOpen && approvedSelection(root, active.name).digest !== active.digest) {
     invalid("活动恢复档案未经验证，或与激活记录不符。");
   }
@@ -124,14 +127,42 @@ export function approveActiveProfile(profile: string, digest: string): void {
   writeFileSync(join(profile, "activation.approved"), digest, { flag: "wx", flush: true });
 }
 
-export function verifyProfileData(profile: string, firstOpen = false): void {
+export function originalProfileSegments(name: string, format: ProtectionFormat): string[] {
+  return format === 2 ? ["sw-r2a-profiles", name, "profile"] : [name, "profile"];
+}
+
+const enrollment = "operations-synthetic.initialized";
+const enrollmentContents = "operations-synthetic-v2\n";
+
+export function checkOriginalProtectionMode(profile: string, format: ProtectionFormat, allowNew = false): boolean {
+  const data = join(profile, "data");
+  const marker = join(dirname(profile), enrollment);
+  const hasEnrollment = plainFile(marker, 128, true);
+  const names = readdirSync(data);
+  if (format === 1) {
+    if (hasEnrollment || names.some(name => /^operations(?:\.sqlite3(?:-|$)|\.initialized$)/i.test(name))) {
+      invalid("检测到教务数据或五库档案标记，无法使用四库模式。");
+    }
+    return false;
+  }
+  if (hasEnrollment) {
+    if (readFileSync(marker, "utf8") !== enrollmentContents) invalid("五库合成档案标记无效。");
+    verifyProfileData(profile, false, format);
+    return false;
+  }
+  if (!allowNew || names.length !== 0) invalid("五库模式只能初始化全新合成档案。请使用独立恢复升级旧四库备份。");
+  writeFileSync(marker, enrollmentContents, { flag: "wx", flush: true });
+  return true;
+}
+
+export function verifyProfileData(profile: string, firstOpen = false, format: ProtectionFormat = 1): void {
   const data = join(profile, "data");
   const entry = lstatSync(data, { throwIfNoEntry: false });
   if (!entry?.isDirectory() || entry.isSymbolicLink() || realpathSync.native(data) !== data) {
     invalid("数据库目录缺失或路径异常。请保留现场。");
   }
   const names = new Set(readdirSync(data));
-  for (const { key, marker } of stores) {
+  for (const { key, marker } of format === 2 ? [...stores, operationsProtection] : stores) {
     const main = key + ".sqlite3";
     const metadata = key + ".initialized";
     plainFile(join(data, main));
