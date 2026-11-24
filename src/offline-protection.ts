@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { m1Protection, m1EditProtection, verifyStudentEdits, WorkspaceFault, type M1Version } from "./database";
+import { m1Protection, m1ProtectionLayout, verifyStudentEdits, WorkspaceFault, type M1Version } from "./database";
+import { verifyParentFollowUp } from "./parent-follow-up";
 import { growthProtection } from "./growth-profile";
 import { intakeProtection, intakeSourceDigest } from "./student-intake";
 import { parseIntake } from "./intake-format";
@@ -14,9 +15,9 @@ const fourLayouts = [m1Protection, worklogProtection, growthProtection, intakePr
 const fiveLayouts = [...fourLayouts, operationsProtection] as const;
 export type ProtectionFormat = 1 | 2;
 function layoutsFor(format: ProtectionFormat, m1Version: M1Version = 1) {
-  if (m1Version === 2) {
+  if (m1Version >= 2) {
     if (format !== 2) reject("新版学生档案只支持五库备份。");
-    return [m1EditProtection, worklogProtection, growthProtection, intakeProtection, operationsProtection];
+    return [m1ProtectionLayout(m1Version), worklogProtection, growthProtection, intakeProtection, operationsProtection];
   }
   return format === 2 ? fiveLayouts : fourLayouts;
 }
@@ -59,6 +60,7 @@ interface Manifest {
   formatVersion: ProtectionFormat;
   upgradedFrom?: string;
   m1UpgradedFrom?: string;
+  m1SourceVersion?: 1 | 2;
   createdAt: string;
   applicationVersion: string;
   databases: ManifestDatabase[];
@@ -94,7 +96,8 @@ function checkImage(db: DatabaseSync, layout: Layout): void {
   if (integrity !== "ok" || db.prepare("PRAGMA foreign_key_check").get()) {
     reject("数据库完整性或外键校验失败：" + layout.key);
   }
-  if (layout.key === "mvp" && layout.version === 2) verifyStudentEdits(db);
+  if (layout.key === "mvp" && layout.version >= 2) verifyStudentEdits(db);
+  if (layout.key === "mvp" && layout.version === 3) verifyParentFollowUp(db);
 }
 
 function snapshot(source: DatabaseSync, layout: Layout): Buffer {
@@ -180,11 +183,18 @@ function summary(dbs: DatabaseSync[], manifest: Omit<Manifest, "databases">): Pr
       reject("从四库备份升级的教务库必须为空。");
     }
   }
-  if (manifest.m1UpgradedFrom && (count(m1, "student_edits") !== 0 || count(m1, "student_edit_pending") !== 0)) {
+  const m1Version = m1.prepare("PRAGMA user_version").get()?.user_version;
+  if (m1Version !== 1 && m1Version !== 2 && m1Version !== 3) reject("学生档案版本不受支持。");
+  if (manifest.m1UpgradedFrom && (m1Version === 2 || manifest.m1SourceVersion === 1) &&
+      (count(m1, "student_edits") !== 0 || count(m1, "student_edit_pending") !== 0)) {
     reject("从 M1 v1 升级的编辑历史与待核对请求必须为空。");
   }
+  if (manifest.m1UpgradedFrom && m1Version === 3 &&
+      (count(m1, "parent_concerns") !== 0 || count(m1, "parent_followups") !== 0)) {
+    reject("旧学生档案升级后的家长诉求和跟进必须为空。");
+  }
   return { createdAt: manifest.createdAt, applicationVersion: manifest.applicationVersion,
-    formatVersion: manifest.formatVersion, m1Version: m1.prepare("PRAGMA user_version").get()?.user_version === 2 ? 2 : 1,
+    formatVersion: manifest.formatVersion, m1Version,
     ...(manifest.m1UpgradedFrom ? { upgradedM1: true as const } : {}),
     ...(manifest.upgradedFrom ? { upgradedFromFour: true as const } : {}),
     ...(operations ? { attendancePlans: count(operations, "attendance_plans"),
@@ -261,17 +271,19 @@ export function prepareProtectionRestore(bytes: Buffer, format: ProtectionFormat
     databases: manifest.databases.map(entry => ({ ...entry, integrity: "ok" })) };
   const nextImages = [...images];
   const sourceDigest = sha(bytes);
-  if (sourceVersion === 1 && m1Version === 2) {
+  if ((sourceVersion === 1 || sourceVersion === 2) && sourceVersion < m1Version) {
+    const target = m1ProtectionLayout(m1Version);
     const m1 = new DatabaseSync(":memory:", { allowExtension: false, enableForeignKeyConstraints: true });
     try {
       m1.exec("PRAGMA trusted_schema=OFF");
       m1.deserialize(Buffer.from(images[0]));
-      for (const ddl of m1EditProtection.ddl.slice(m1Protection.ddl.length)) m1.exec(ddl);
-      m1.exec("PRAGMA user_version=2");
-      const upgraded = snapshot(m1, m1EditProtection);
+      for (const ddl of target.ddl.slice(m1ProtectionLayout(sourceVersion).ddl.length)) m1.exec(ddl);
+      m1.exec("PRAGMA user_version=" + m1Version);
+      const upgraded = snapshot(m1, target);
       nextImages[0] = upgraded;
-      nextManifest.databases[0] = manifestDatabase(m1EditProtection, upgraded, 2);
+      nextManifest.databases[0] = manifestDatabase(target, upgraded, 2);
       nextManifest.m1UpgradedFrom = sourceDigest;
+      if (m1Version === 3) nextManifest.m1SourceVersion = sourceVersion;
     } finally { m1.close(); }
   }
 
@@ -324,9 +336,12 @@ export function validateProtection(packageBytes: Buffer): { summary: ProtectionS
       new Date(manifest.createdAt).toISOString() !== manifest.createdAt ||
       !Array.isArray(manifest.databases) || manifest.databases.length !== layoutsFor(format).length) reject("备份清单版本或时间无效。");
   const m1Version = manifest.databases[0]?.schemaVersion;
-  if (m1Version !== 1 && m1Version !== 2) reject("备份中的学生档案版本不受支持。");
-  if (manifest.m1UpgradedFrom !== undefined && (m1Version !== 2 || typeof manifest.m1UpgradedFrom !== "string" ||
+  if (m1Version !== 1 && m1Version !== 2 && m1Version !== 3) reject("备份中的学生档案版本不受支持。");
+  if (manifest.m1UpgradedFrom !== undefined && (m1Version < 2 || typeof manifest.m1UpgradedFrom !== "string" ||
       !/^[a-f0-9]{64}$/.test(manifest.m1UpgradedFrom))) reject("新版学生档案的来源摘要无效。");
+  if ((m1Version === 3 && manifest.m1UpgradedFrom !== undefined
+    ? manifest.m1SourceVersion !== 1 && manifest.m1SourceVersion !== 2
+    : manifest.m1SourceVersion !== undefined)) reject("新版学生档案的来源版本无效。");
   const layouts = layoutsFor(format, m1Version);
   let offset = start + manifestLength;
   const images = layouts.map((layout, index) => {

@@ -2,9 +2,12 @@ import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, writ
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Failure, Lesson, LessonInput, Student, StudentEditFields, StudentEditInput, StudentEditRecord, StudentEditView, StudentInput } from "./contracts";
+import { appendParentFollowUp, createParentConcern, parentSchema, readParentFollowUp, verifyParentFollowUp } from "./parent-follow-up";
+import { WorkspaceFault } from "./workspace-fault";
+export { WorkspaceFault } from "./workspace-fault";
 
 const applicationId = 0x53574d31;
-export type M1Version = 1 | 2;
+export type M1Version = 1 | 2 | 3;
 const schema = [
   ["students", "table", `CREATE TABLE students (
     id TEXT PRIMARY KEY, alias TEXT NOT NULL, grade TEXT NOT NULL, subjects TEXT NOT NULL,
@@ -30,16 +33,11 @@ const editSchema = [
     payload TEXT NOT NULL
   ) STRICT`],
 ] as const;
-const schemaFor = (version: M1Version) => version === 2 ? [...schema, ...editSchema] : schema;
+const schemaFor = (version: M1Version) => version === 3 ? [...schema, ...editSchema, ...parentSchema]
+  : version === 2 ? [...schema, ...editSchema] : schema;
 const markerFor = (version: M1Version) => "mvp-v" + version + "\n";
 const studentColumns = "id, alias, grade, subjects, goal, notes, created_at AS createdAt";
 const lessonColumns = "id, student_id AS studentId, study_date AS date, subject, task, completion, assessment, next_step AS nextStep, created_at AS createdAt";
-
-export class WorkspaceFault extends Error {
-  constructor(readonly code: Failure["code"], message: string) {
-    super(message);
-  }
-}
 
 export function failure(error: unknown): Failure {
   if (error instanceof WorkspaceFault) return { ok: false, code: error.code, message: error.message };
@@ -82,8 +80,9 @@ function checkDatabase(db: DatabaseSync, version: M1Version): void {
   const definitions = db.prepare("SELECT name, type, sql FROM main.sqlite_schema").all();
   const canonical = (ddl: string) => ddl.replace(/\s+/g, " ");
   const automatic = ["sqlite_autoindex_students_1", "sqlite_autoindex_learning_records_1"];
-  if (version === 2) automatic.push("sqlite_autoindex_student_edits_1", "sqlite_autoindex_student_edits_2",
+  if (version >= 2) automatic.push("sqlite_autoindex_student_edits_1", "sqlite_autoindex_student_edits_2",
     "sqlite_autoindex_student_edit_pending_1", "sqlite_autoindex_student_edit_pending_2");
+  if (version === 3) automatic.push("sqlite_autoindex_parent_concerns_1", "sqlite_autoindex_parent_followups_1", "sqlite_autoindex_parent_followups_2");
   const expected = schemaFor(version);
   const explicitMatch = expected.every(([name, type, ddl]) => definitions.some(object =>
     object.name === name && object.type === type && typeof object.sql === "string" && canonical(object.sql) === canonical(ddl)));
@@ -92,7 +91,8 @@ function checkDatabase(db: DatabaseSync, version: M1Version): void {
   if (definitions.length !== expected.length + automatic.length || !explicitMatch || !implicitMatch ||
       db.prepare("PRAGMA quick_check(1)").get()?.quick_check !== "ok" ||
       db.prepare("PRAGMA foreign_key_check").get()) recover("MVP 数据库结构或完整性检查失败。请保留本地目录。");
-  if (version === 2) verifyStudentEdits(db);
+  if (version >= 2) verifyStudentEdits(db);
+  if (version === 3) verifyParentFollowUp(db);
 }
 
 function inputObject(raw: unknown): Record<string, unknown> {
@@ -203,7 +203,7 @@ export class WorkspaceDatabase {
     const sidecars = ["-wal", "-shm", "-journal"].map(suffix => existsFile(path + suffix));
     if (exists) {
       checkHeader(path, version);
-      if (version === 2 && (!initialized || readFileSync(marker, "utf8") !== markerFor(version))) {
+      if (version >= 2 && (!initialized || readFileSync(marker, "utf8") !== markerFor(version))) {
         recover("新版学生档案的初始化标记缺失或无效。");
       }
     } else {
@@ -243,13 +243,13 @@ export class WorkspaceDatabase {
   }
 
   students(): Student[] {
-    if (this.version === 2) this.protectionConnection();
+    if (this.version >= 2) this.protectionConnection();
     return this.db.prepare("SELECT " + studentColumns + " FROM students ORDER BY created_at DESC, id DESC")
       .all().map(row => ({ ...row })) as unknown as Student[];
   }
 
   history(rawStudentId: unknown): Lesson[] {
-    if (this.version === 2) this.protectionConnection();
+    if (this.version >= 2) this.protectionConnection();
     const studentId = identifier(rawStudentId);
     return this.db.prepare("SELECT " + lessonColumns + " FROM learning_records WHERE student_id = ?" +
       " ORDER BY study_date DESC, created_at DESC, id DESC").all(studentId).map(row => ({ ...row })) as unknown as Lesson[];
@@ -277,7 +277,26 @@ export class WorkspaceDatabase {
   }
 
   private requireEditSupport(): void {
-    if (this.version !== 2) recover("新版编辑仅在已验证的五库合成档案中可用。");
+    if (this.version < 2) recover("新版编辑仅在已验证的五库合成档案中可用。");
+  }
+
+  private requireParentSupport(): void {
+    if (this.version !== 3) recover("家长诉求仅在已验证的新版五库合成档案中可用。");
+  }
+
+  parentFollowUp(rawStudentId: unknown) {
+    this.requireParentSupport();
+    return readParentFollowUp(this.protectionConnection(), rawStudentId);
+  }
+
+  createParentConcern(raw: unknown) {
+    this.requireParentSupport();
+    return this.write(() => createParentConcern(this.db, raw));
+  }
+
+  appendParentFollowUp(raw: unknown) {
+    this.requireParentSupport();
+    return this.write(() => appendParentFollowUp(this.db, raw));
   }
 
   private editState(studentId: string) {
@@ -447,3 +466,11 @@ export const m1EditProtection = {
   tables: [...m1Protection.tables, "student_edits", "student_edit_pending"],
   ddl: schemaFor(2).map(entry => entry[2]),
 };
+const m1ParentProtection = {
+  ...m1EditProtection, marker: markerFor(3), version: 3,
+  tables: [...m1EditProtection.tables, "parent_concerns", "parent_followups"],
+  ddl: schemaFor(3).map(entry => entry[2]),
+};
+export function m1ProtectionLayout(version: M1Version) {
+  return version === 3 ? m1ParentProtection : version === 2 ? m1EditProtection : m1Protection;
+}

@@ -196,7 +196,7 @@ internal static class RecoveryIo {
     }
 
     static string Marker(int index, string m1Version) {
-        return index == 0 && m1Version == "2" ? "mvp-v2\n" : MarkerContents[index];
+        return index == 0 ? "mvp-v" + m1Version + "\n" : MarkerContents[index];
     }
 
     static void Restore(string root, string name, bool forActivation, int count, string m1Version) {
@@ -312,7 +312,7 @@ internal static class RecoveryIo {
                 string version = args.Length == 3 ? "1" : args[3];
                 string m1Version = args.Length == 5 ? args[4] : "1";
                 Check(version == "1" || version == "2", "Invalid recovery format.");
-                Check(m1Version == "1" || (version == "2" && m1Version == "2"), "Invalid student database version.");
+                Check(m1Version == "1" || (version == "2" && (m1Version == "2" || m1Version == "3")), "Invalid student database version.");
                 int count = version == "2" ? RestoreFiles.Length : RestoreFiles.Length - 1;
                 if (args[0] == "inspect") Inspect(args[1], args[2], count, m1Version);
                 else Restore(args[1], args[2], args[0] == "activate", count, m1Version);

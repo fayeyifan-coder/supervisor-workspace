@@ -16,7 +16,7 @@ import { OperationsDatabase } from "./operations";
 import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
 import { applyLearningChange, readLearningDay, readScheduleReceipt } from "./learning-api";
 import { OperationsPending } from "./operations-pending";
-import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isStudentEditProfile, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
+import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
 const scheme = "supervisor-workspace-mvp";
@@ -105,7 +105,7 @@ function openProfile(profile: string, format: ProtectionFormat, m1Version: M1Ver
   try {
     database = WorkspaceDatabase.open(path, join(profile, "data", "mvp.initialized"), m1Version);
   } catch (error) {
-    if (m1Version === 2) throw error;
+    if (m1Version >= 2) throw error;
     const result = failure(error);
     if (result.code === "recovery" || result.code === "busy") startupError = result;
   }
@@ -195,16 +195,21 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   ipcMain.handle(channels.history, (event, id: unknown) => invoke(event, store => store.history(id)));
   ipcMain.handle(channels.createStudent, (event, raw: unknown) => invoke(event, store => store.createStudent(raw)));
   ipcMain.handle(channels.studentEditAvailable, event => isTrusted(event, window)
-    ? { ok: true, value: m1Version === 2 && format === 2 && Boolean(database && operations) } : denied());
+    ? { ok: true, value: m1Version >= 2 && format === 2 && Boolean(database && operations) } : denied());
   ipcMain.handle(channels.studentEdit, (event, id: unknown) => invoke(event, store => store.studentEditView(id)));
-  function writeStudentEdit<T>(event: IpcMainInvokeEvent, operation: (store: WorkspaceDatabase) => T): Result<T> {
+  function writeStudentData<T>(event: IpcMainInvokeEvent, operation: (store: WorkspaceDatabase) => T): Result<T> {
     return invoke(event, store => {
       if (protecting || state.pending) throw new WorkspaceFault("busy", "档案正在备份或切换，请完成后重试。");
       return operation(store);
     });
   }
-  ipcMain.handle(channels.saveStudentEdit, (event, raw: unknown) => writeStudentEdit(event, store => store.saveStudentEdit(raw)));
-  ipcMain.handle(channels.finishStudentEdit, (event, raw: unknown) => writeStudentEdit(event, store => store.finishStudentEdit(raw)));
+  ipcMain.handle(channels.saveStudentEdit, (event, raw: unknown) => writeStudentData(event, store => store.saveStudentEdit(raw)));
+  ipcMain.handle(channels.finishStudentEdit, (event, raw: unknown) => writeStudentData(event, store => store.finishStudentEdit(raw)));
+  ipcMain.handle(channels.parentFollowUpAvailable, event => isTrusted(event, window)
+    ? { ok: true, value: format === 2 && m1Version === 3 && Boolean(database && operations) } : denied());
+  ipcMain.handle(channels.parentFollowUp, (event, id: unknown) => invoke(event, store => store.parentFollowUp(id)));
+  ipcMain.handle(channels.createParentConcern, (event, raw: unknown) => writeStudentData(event, store => store.createParentConcern(raw)));
+  ipcMain.handle(channels.appendParentFollowUp, (event, raw: unknown) => writeStudentData(event, store => store.appendParentFollowUp(raw)));
   ipcMain.handle(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
   function invokeSchedule<T>(event: IpcMainInvokeEvent,
       operation: (store: OperationsDatabase, students: () => ReturnType<WorkspaceDatabase["students"]>) => T): Result<T> {
@@ -373,7 +378,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
         " 个 · 未结束导入 " + summary.unfinishedImports + " 笔" +
         (legacy ? "\n历史四库包将生成全新的空教务库。" :
           format === 2 ? "\n到校安排 " + summary.attendancePlans + " 条" : "") +
-        (upgradeM1 ? "\n学生档案将在全新副本中升级到 Schema v2，原备份不变。" : "") +
+        (upgradeM1 ? "\n学生档案将在全新副本中升级到 Schema v" + m1Version + "，原备份不变。" : "") +
         "\n恢复只生成副本。激活须另行确认。",
       buttons: ["取消", "写入恢复副本"], defaultId: 0, cancelId: 0, noLink: true,
     });
@@ -547,8 +552,9 @@ try {
       requestedM2CProfile.toLowerCase() === "supervisor-workspace-mvp")) throw new Error("合成 Profile 名称无效。");
   const profileName = syntheticM2CProfile ? requestedM2CProfile
     : syntheticM2BProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-mvp";
-  const m1Version: M1Version = syntheticM2CProfile && isStudentEditProfile(profileName) ? 2 : 1;
-  const format: ProtectionFormat = m1Version === 2 || (syntheticM2CProfile && /^sw-r2a-[a-z0-9-]+$/.test(profileName)) ? 2 : 1;
+  const m1Version: M1Version = syntheticM2CProfile && isParentFollowUpProfile(profileName) ? 3
+    : syntheticM2CProfile && isStudentEditProfile(profileName) ? 2 : 1;
+  const format: ProtectionFormat = m1Version >= 2 || (syntheticM2CProfile && /^sw-r2a-[a-z0-9-]+$/.test(profileName)) ? 2 : 1;
   const profile = prepareProfile(profileName, format);
   const owner = dirname(profile);
   const userData = join(profile, "chromium");

@@ -6,6 +6,10 @@ export const channels = {
   studentEdit: "mvp:student-edit",
   saveStudentEdit: "mvp:save-student-edit",
   finishStudentEdit: "mvp:finish-student-edit",
+  parentFollowUpAvailable: "mvp:parent-follow-up-available",
+  parentFollowUp: "mvp:parent-follow-up",
+  createParentConcern: "mvp:create-parent-concern",
+  appendParentFollowUp: "mvp:append-parent-follow-up",
   addLesson: "mvp:add-lesson",
   workItems: "m2b:work-items",
   searchWorkItems: "m2b:search-work-items",
@@ -82,6 +86,8 @@ export interface StudentEditView {
   history: StudentEditRecord[];
   pending: StudentEditInput | null;
 }
+import type { ParentConcern, ParentConcernInput, ParentFollowUp, ParentFollowUpInput, ParentFollowUpView } from "./parent-follow-up";
+export type { ParentConcern, ParentConcernInput, ParentFollowUp, ParentFollowUpInput, ParentFollowUpView } from "./parent-follow-up";
 export type Lesson = LessonInput & { createdAt: number };
 export type Failure = {
   ok: false;
@@ -160,6 +166,10 @@ export interface WorkspaceApi {
   studentEdit(studentId: string): Promise<Result<StudentEditView>>;
   saveStudentEdit(input: StudentEditInput): Promise<Result<StudentEditRecord>>;
   finishStudentEdit(input: Pick<StudentEditInput, "studentId" | "requestId"> & { discard?: boolean }): Promise<Result<null>>;
+  parentFollowUpAvailable(): Promise<Result<boolean>>;
+  parentFollowUp(studentId: string): Promise<Result<ParentFollowUpView>>;
+  createParentConcern(input: ParentConcernInput): Promise<Result<ParentConcern>>;
+  appendParentFollowUp(input: ParentFollowUpInput): Promise<Result<ParentFollowUp>>;
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
   workItems(today: string): Promise<Result<import("./worklog").WorkItem[]>>;
   searchWorkItems(from: string, to: string, query?: string): Promise<Result<import("./worklog").WorkItem[]>>;

@@ -504,6 +504,76 @@ test("old four- and five-store packages migrate to independent M1 v2 images and 
   assert.deepEqual(originalProfileSegments("sw-r3b-proof", 2), ["sw-r3b-profiles", "sw-r3b-proof", "profile"]);
 });
 
+test("M1 v3 migrates old package formats, preserves v2 edit receipts, and protects parent follow-up WAL", async t => {
+  const f = populated(t);
+  const oldOps = OperationsDatabase.open(f.dir, f.m1, true);
+  t.after(() => oldOps.close());
+  const four = captureProtection(f.stores, "0.1.0", 1);
+  const five = captureProtection([...f.stores, oldOps], "0.1.0", 2);
+  const oldCopy = await io.restore(f.dir, prepareProtectionRestore(five, 2, 2), true);
+  const oldData = join(oldCopy.location, "data");
+  const v2 = openStores(oldData, t, 2);
+  const v2Ops = OperationsDatabase.open(oldData, v2.m1);
+  t.after(() => v2Ops.close());
+  const { id, createdAt, ...fields } = v2.m1.studentEditView(f.studentId).student;
+  const edit = { studentId: id, requestId: randomUUID(), expectedRevision: 0, fields: { ...fields, notes: "合成 v2 修改" } };
+  v2.m1.saveStudentEdit(edit);
+  const sealedV2 = captureProtection([...v2.stores, v2Ops], "0.1.0", 2, 2);
+  const protectedFiles = ["mvp.sqlite3", "mvp.initialized", "mvp.sqlite3-wal"].map(name => join(oldData, name));
+  const before = protectedFiles.map(path => readFileSync(path));
+
+  for (const source of [four, five, sealedV2]) {
+    const original = Buffer.from(source), legacy = validateProtection(source);
+    const upgraded = prepareProtectionRestore(source, 2, 3);
+    assert.deepEqual(source, original);
+    const verified = validateProtection(upgraded);
+    assert.equal(verified.summary.m1Version, 3);
+    assert.equal(verified.manifest.m1SourceVersion, legacy.summary.m1Version);
+    assert.deepEqual(verified.images.slice(1, legacy.images.length), legacy.images.slice(1));
+    assert.throws(() => prepareProtectionRestore(upgraded, 2, 2), /不能降级/);
+    if (legacy.summary.m1Version !== 2) continue;
+
+    const recovery = await io.restore(f.dir, upgraded);
+    assert.equal(readFileSync(join(recovery.location, "recovery", "mvp.initialized"), "utf8"), "mvp-v3\n");
+    await assert.rejects(io.inspect(f.dir, recovery.profileName, 2, 2));
+    const inspected = await io.inspect(f.dir, recovery.profileName, 2, 3);
+    assert.deepEqual(inspected.bytes, upgraded);
+    const artifact = await io.restore(f.dir, inspected.bytes, true);
+    const active = { name: artifact.profileName, digest: inspected.digest };
+    const path = verifyActiveProfile(f.dir, active, true, 2, 3);
+    const root = join(path, "data");
+    const migrated = openStores(root, t, 3);
+    const operations = OperationsDatabase.open(root, migrated.m1);
+    try {
+      verifyProtectionStores([...migrated.stores, operations], "0.1.0", 2, 3);
+      approveActiveProfile(path, active.digest);
+      assert.equal(verifyActiveProfile(f.dir, active, false, 2, 3), path);
+      assert.deepEqual(migrated.m1.studentEditView(id), v2.m1.studentEditView(id));
+      assert.deepEqual(migrated.m1.parentFollowUp(id).concerns, []);
+      const originalCase = migrated.m1.createParentConcern({ requestId: randomUUID(), studentId: id, role: "guardian",
+        category: "habits", concern: "合成跟进", reportedOn: "2026-11-24", nextOn: "" });
+      const followUp = { requestId: randomUUID(), studentId: id, concernId: originalCase.requestId, expectedRevision: 0,
+        followedOn: "2026-11-24", status: "in_progress", note: "已落实第一步", nextOn: "2026-11-26" };
+      migrated.m1.appendParentFollowUp(followUp);
+      assert(readFileSync(join(root, "mvp.sqlite3-wal")).length > 32);
+      const current = captureProtection([...migrated.stores, operations], "0.1.0", 2, 3);
+      const restored = await io.restore(f.dir, current, true);
+      const data = join(restored.location, "data");
+      const reopened = WorkspaceDatabase.open(join(data, "mvp.sqlite3"), join(data, "mvp.initialized"), 3);
+      try {
+        assert.deepEqual(reopened.parentFollowUp(id), migrated.m1.parentFollowUp(id));
+        assert.deepEqual(reopened.studentEditView(id), v2.m1.studentEditView(id));
+        assert.deepEqual(reopened.appendParentFollowUp(followUp), migrated.m1.parentFollowUp(id).concerns[0].followUps[0]);
+        assert.equal(reopened.parentFollowUp(id).concerns[0].followUps.length, 1);
+      } finally { reopened.close(); }
+      migrated.m1.protectionConnection().prepare("UPDATE parent_followups SET revision=3").run();
+      assert.throws(() => captureProtection([...migrated.stores, operations], "0.1.0", 2, 3), /不连续/);
+    } finally { operations.close(); migrated.close(); }
+  }
+  assert.deepEqual(protectedFiles.map(path => readFileSync(path)), before);
+  assert.deepEqual(originalProfileSegments("sw-parent-proof", 2), ["sw-parent-profiles", "sw-parent-proof", "profile"]);
+});
+
 test("SWBACK2 rejects busy and wrongly linked operations and releases earlier SQLite locks", t => {
   const f = fiveFixture(t);
   f.create();

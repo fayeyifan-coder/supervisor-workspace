@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { m1Protection, m1EditProtection, WorkspaceFault, type M1Version } from "./database";
+import { m1Protection, m1ProtectionLayout, WorkspaceFault, type M1Version } from "./database";
 import { growthProtection } from "./growth-profile";
 import { worklogProtection } from "./worklog";
 import { intakeProtection } from "./student-intake";
@@ -128,12 +128,16 @@ export function approveActiveProfile(profile: string, digest: string): void {
 }
 
 export function originalProfileSegments(name: string, format: ProtectionFormat): string[] {
+  if (format === 2 && isParentFollowUpProfile(name)) return ["sw-parent-profiles", name, "profile"];
   if (format === 2 && isStudentEditProfile(name)) return ["sw-r3b-profiles", name, "profile"];
   return format === 2 ? ["sw-r2a-profiles", name, "profile"] : [name, "profile"];
 }
 
 export function isStudentEditProfile(name: string): boolean {
   return /^sw-r3b-[a-z0-9-]+$/.test(name);
+}
+export function isParentFollowUpProfile(name: string): boolean {
+  return /^sw-parent-[a-z0-9-]+$/.test(name);
 }
 
 const enrollment = "operations-synthetic.initialized";
@@ -150,7 +154,8 @@ export function checkOriginalProtectionMode(profile: string, format: ProtectionF
     }
     return false;
   }
-  const expectedEnrollment = m1Version === 2 ? "student-edit-synthetic-v2\n" : enrollmentContents;
+  const expectedEnrollment = m1Version === 3 ? "parent-followup-synthetic-v3\n"
+    : m1Version === 2 ? "student-edit-synthetic-v2\n" : enrollmentContents;
   if (hasEnrollment) {
     if (readFileSync(marker, "utf8") !== expectedEnrollment) invalid("五库合成档案标记无效。");
     verifyProfileData(profile, false, format, m1Version);
@@ -173,7 +178,7 @@ export function verifyProfileData(profile: string, firstOpen = false, format: Pr
     const metadata = key + ".initialized";
     plainFile(join(data, main));
     plainFile(join(data, metadata), 128);
-    const expectedMarker = key === "mvp" && m1Version === 2 ? m1EditProtection.marker : marker;
+    const expectedMarker = key === "mvp" ? m1ProtectionLayout(m1Version).marker : marker;
     if (readFileSync(join(data, metadata), "utf8") !== expectedMarker) invalid("数据库初始化标记不匹配。");
     names.delete(main);
     names.delete(metadata);

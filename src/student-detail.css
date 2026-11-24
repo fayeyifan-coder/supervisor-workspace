@@ -32,6 +32,13 @@
 .student-edit-history summary { color: var(--green); cursor: pointer; }
 .student-edit-comparison { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 12px; }
 .student-edit-comparison h4 { margin: 8px 0; }
+.parent-follow-up > .notice, .parent-follow-up-form { margin-top: 12px; }
+.parent-follow-up-form { padding-top: 12px; border-top: 1px solid var(--line); }
+.parent-concern-list, .parent-follow-up-history { margin: 10px 0 0; padding: 0; list-style: none; }
+.parent-concern-list > li, .parent-follow-up-history > li { padding: 12px 0; border-top: 1px solid var(--line); }
+.parent-concern-list .secondary { margin-top: 10px; }
+.parent-concern-text { margin-top: 5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.parent-follow-up code { overflow-wrap: anywhere; }
 
 @media (max-width: 650px) {
   .roster .student-list { max-height: 172px; overflow-y: auto; }

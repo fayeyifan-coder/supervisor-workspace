@@ -8,6 +8,7 @@ import { DataProtectionPanel } from "./DataProtectionPanel";
 import { StudentIntakePanel } from "./StudentIntakePanel";
 import { StudentDetail } from "./StudentDetail";
 import { StudentEditPanel } from "./StudentEditPanel";
+import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
 import "./styles.css";
 
 declare global {
@@ -106,6 +107,7 @@ function App() {
   const [students, setStudents] = useState<Student[]>();
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [studentEditEnabled, setStudentEditEnabled] = useState(false);
+  const [parentFollowUpEnabled, setParentFollowUpEnabled] = useState(false);
   const [schedule, setSchedule] = useState<{ studentId: string }>();
   const [activeId, setActiveId] = useState<string>();
   const [creating, setCreating] = useState(false);
@@ -121,6 +123,8 @@ function App() {
   const [growthBusy, setGrowthBusy] = useState(false);
   const [studentEditDirty, setStudentEditDirty] = useState(false);
   const [studentEditBusy, setStudentEditBusy] = useState(false);
+  const [parentFollowUpDirty, setParentFollowUpDirty] = useState(false);
+  const [parentFollowUpBusy, setParentFollowUpBusy] = useState(false);
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [intakeBusy, setIntakeBusy] = useState(false);
   const inFlight = useRef(false);
@@ -132,6 +136,9 @@ function App() {
     }).catch(() => {});
     api.studentEditAvailable().then(result => {
       if (current && result.ok) setStudentEditEnabled(result.value);
+    }).catch(() => {});
+    api.parentFollowUpAvailable().then(result => {
+      if (current && result.ok) setParentFollowUpEnabled(result.value);
     }).catch(() => {});
     return () => { current = false; };
   }, [api]);
@@ -229,14 +236,16 @@ function App() {
   const active = students?.find(student => student.id === activeId);
   const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
-  const editorBusy = growthBusy || studentEditBusy;
+  const editorBusy = growthBusy || studentEditBusy || parentFollowUpBusy;
   const showStudentForm = students && (creating || students.length === 0);
 
   function canLeaveStudentDrafts(): boolean {
     if (editorBusy) return false;
-    if ((growthDirty || studentEditDirty) && !window.confirm("学生档案有未保存修改，确定离开并放弃吗？")) return false;
+    if ((growthDirty || studentEditDirty || parentFollowUpDirty) &&
+        !window.confirm("学生档案有未保存输入，确定离开并放弃吗？")) return false;
     setGrowthDirty(false);
     setStudentEditDirty(false);
+    setParentFollowUpDirty(false);
     return true;
   }
 
@@ -299,6 +308,8 @@ function App() {
               edit={studentEditEnabled && <StudentEditPanel key={active.id} studentId={active.id} api={api}
                 onDirtyChange={setStudentEditDirty} onBusyChange={setStudentEditBusy}
                 onSaved={() => setListRefresh(value => value + 1)} />}
+              parentFollowUp={parentFollowUpEnabled && <ParentFollowUpPanel key={active.id} studentId={active.id} api={api}
+                onDirtyChange={setParentFollowUpDirty} onBusyChange={setParentFollowUpBusy} />}
               growth={<GrowthProfilePanel key={active.id} student={active} api={api}
                 onDirtyChange={setGrowthDirty} onBusyChange={setGrowthBusy} />}
               history={<div className="learning">
