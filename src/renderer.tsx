@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
+import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
 import "./styles.css";
 
@@ -108,6 +109,8 @@ function App() {
   const [pending, setPending] = useState<Command>();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>();
+  const [growthDirty, setGrowthDirty] = useState(false);
+  const [growthBusy, setGrowthBusy] = useState(false);
   const inFlight = useRef(false);
 
   useEffect(() => {
@@ -201,6 +204,13 @@ function App() {
   const locked = busy || pending !== undefined;
   const showStudentForm = students && (creating || students.length === 0);
 
+  function canLeaveGrowth(): boolean {
+    if (growthBusy) return false;
+    if (growthDirty && !window.confirm("成长档案有未保存修改，确定离开并放弃吗？")) return false;
+    setGrowthDirty(false);
+    return true;
+  }
+
   return <main className="shell" data-ui>
     <header className="masthead">
       <div className="brand"><span className="brand-mark" aria-hidden="true" /><strong>督学工作台</strong></div>
@@ -209,13 +219,18 @@ function App() {
     <div className="workspace">
       <aside className="roster" aria-label="学生档案">
         <div className="roster-heading"><h2>学生档案</h2>
-          <button className="secondary" disabled={locked || !students} onClick={() => { setCreating(true); setNotice(undefined); }}>新建学生</button>
+          <button className="secondary" disabled={locked || growthBusy || !students} onClick={() => {
+            if (!canLeaveGrowth()) return;
+            setCreating(true); setNotice(undefined);
+          }}>新建学生</button>
         </div>
         {!listError && !students && <p role="status" className="muted">正在读取档案…</p>}
         {listError && <div className="notice failure" role="alert">{listError} <button className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取</button></div>}
         {students?.length === 0 && <p className="muted">还没有学生档案。</p>}
         <ul className="student-list">{students?.map(student => <li key={student.id}>
-          <button disabled={locked} aria-pressed={!creating && student.id === activeId} onClick={() => {
+          <button disabled={locked || growthBusy} aria-pressed={!creating && student.id === activeId} onClick={() => {
+            if (student.id === activeId && !creating) return;
+            if (!canLeaveGrowth()) return;
             setActiveId(student.id); setCreating(false); setNotice(undefined);
           }}><strong>{student.alias}</strong><span>{student.grade} · {student.subjects}</span></button>
         </li>)}</ul>
@@ -237,6 +252,8 @@ function App() {
                 {active.notes && <div><dt>备注</dt><dd>{active.notes}</dd></div>}
               </dl>}
             </section>
+            <GrowthProfilePanel key={active.id} student={active} api={api}
+              onDirtyChange={setGrowthDirty} onBusyChange={setGrowthBusy} />
             <div className="learning">
               <LessonForm key={active.id + formVersion} student={active} disabled={locked || !visibleHistory?.rows}
                 submit={input => void save({ kind: "lesson", input })} />

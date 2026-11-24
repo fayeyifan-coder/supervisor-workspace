@@ -6,6 +6,7 @@ import { channels, type Failure, type Result } from "./contracts";
 import { failure, WorkspaceDatabase } from "./database";
 import { closeStoresIndependently } from "./database-lifecycle";
 import { WorkLogDatabase, type WorkStatus } from "./worklog";
+import { GrowthProfileDatabase, GrowthProfileFault, type GrowthSaveInput } from "./growth-profile";
 
 const scheme = "supervisor-workspace-mvp";
 const page = `${scheme}://workspace/index.html`;
@@ -14,6 +15,7 @@ const appId = "cn.supervisorworkspace.desktop.mvp";
 const title = "督学工作台";
 let database: WorkspaceDatabase | undefined;
 let workLog: WorkLogDatabase | undefined;
+let growthProfile: GrowthProfileDatabase | undefined;
 
 protocol.registerSchemesAsPrivileged([{ scheme, privileges: { standard: true, secure: true } }]);
 
@@ -78,6 +80,10 @@ async function start(profile: string): Promise<void> {
     const result = failure(error);
     if (result.code === "recovery" || result.code === "busy") startupError = result;
   }
+  let growthStartupError: Failure = { ok: false, code: "recovery", message: "成长档案数据库无法打开。请保留文件后重开。" };
+  try {
+    growthProfile = GrowthProfileDatabase.open(join(profile, "data", "growth.sqlite3"), join(profile, "data", "growth.initialized"));
+  } catch (error) { growthStartupError = failure(error); }
 
   const window = new BrowserWindow({
     title,
@@ -132,6 +138,23 @@ async function start(profile: string): Promise<void> {
     studentId => Boolean(database?.students().some(student => student.id === studentId)))));
   ipcMain.handle(channels.setWorkItemStatus, (event, id: string, status: WorkStatus) =>
     invokeWork(event, store => store.setStatus(id, status)));
+  function invokeGrowth<T>(event: IpcMainInvokeEvent, studentId: unknown, operation: (store: GrowthProfileDatabase) => T): Result<T> {
+    if (!isTrusted(event, window)) return denied();
+    if (!growthProfile) return growthStartupError;
+    if (!database) return startupError;
+    try {
+      if (typeof studentId !== "string" || !database.students().some(student => student.id === studentId)) {
+        throw new GrowthProfileFault("invalid", "关联的 M1 学生档案不存在，请重新选择学生。");
+      }
+      return { ok: true, value: operation(growthProfile) };
+    } catch (error) { return failure(error); }
+  }
+  ipcMain.handle(channels.growthProfile, (event, studentId: unknown) =>
+    invokeGrowth(event, studentId, store => store.load(studentId)));
+  ipcMain.handle(channels.saveGrowthProfile, (event, raw: unknown) => {
+    const studentId = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Partial<GrowthSaveInput>).studentId : undefined;
+    return invokeGrowth(event, studentId, store => store.save(raw, id => Boolean(database?.students().some(student => student.id === id))));
+  });
   window.once("ready-to-show", () => window.show());
   await window.loadURL(page);
 }
@@ -156,8 +179,14 @@ function ensureDirectory(path: string, create: boolean): void {
 }
 
 try {
-  const syntheticProfile = process.env.M2B_SYNTHETIC_TEST === "1" && !app.isPackaged;
-  const profile = prepareProfile(syntheticProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-mvp");
+  const syntheticM2CProfile = (process.env.M2C_SYNTHETIC_TEST === "1" && !app.isPackaged) ||
+    (process.env.M2C_SYNTHETIC_PACKAGED === "1" && app.isPackaged);
+  const syntheticM2BProfile = process.env.M2B_SYNTHETIC_TEST === "1" && !app.isPackaged;
+  const requestedM2CProfile = process.env.M2C_SYNTHETIC_PROFILE ?? "supervisor-workspace-m2c-test";
+  if (syntheticM2CProfile && !/^[A-Za-z0-9-]{1,64}$/.test(requestedM2CProfile)) throw new Error("M2-C 合成 Profile 名称无效。");
+  const profileName = syntheticM2CProfile ? requestedM2CProfile
+    : syntheticM2BProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-mvp";
+  const profile = prepareProfile(profileName);
   const userData = join(profile, "chromium");
   app.setPath("userData", userData);
   app.setPath("sessionData", userData);
@@ -177,7 +206,7 @@ try {
     });
     app.on("window-all-closed", () => app.quit());
     app.on("will-quit", () => {
-      for (const error of closeStoresIndependently(() => workLog?.close(), () => database?.close())) {
+      for (const error of closeStoresIndependently(() => growthProfile?.close(), () => workLog?.close(), () => database?.close())) {
         console.error("Database close failed during application exit", error);
       }
     });
