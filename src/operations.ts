@@ -289,6 +289,7 @@ export class OperationsDatabase {
           if (current.status !== "attended" || checkInAt === null || checkOutAt !== null || actualAt < checkInAt) {
             conflict("该到校安排不能签退。");
           }
+          if (this.hasLearningInProgress(change.id)) conflict("请先结束进行中的学习块，再签退。");
           status = "attended";
           checkOutAt = actualAt;
           break;
@@ -401,6 +402,10 @@ export class OperationsDatabase {
       if (action === "start" && block.attendancePlanId !== null) {
         const plan = this.attendancePlan(block.attendancePlanId);
         if (!plan || plan.status === "cancelled" || plan.status === "absent") conflict("关联到校安排不可执行。");
+        if (plan.checkOutAt !== null) conflict("本次到校已签退，不能开始学习块。");
+      }
+      if (action === "finish" && block.tasks.some(task => task.status === "in_progress")) {
+        conflict("请先完成或跳过进行中的任务，再结束学习块。");
       }
       const status = action === "start" ? "in_progress" : action === "finish" ? "done" : "cancelled";
       this.db.prepare("UPDATE learning_blocks SET status=?,actual_start=?,actual_end=? WHERE id=?")

@@ -68,6 +68,42 @@ test("learning IPC constrains each write and read to the selected attendance and
   assert.equal(f.read(a).blocks.length, 1);
 });
 
+test("checked-out attendance cannot retain or start an active learning block", t => {
+  const f = fixture(t);
+  let plan = f.plan(f.ids[0]);
+  let learning = f.apply(block(f, plan));
+  const next = f.apply(block(f, plan, "10:00", "11:00"));
+  f.setClock(f.at("08:05"));
+  plan = f.apply(command(plan, plan, { command: "recordAttendance", action: "checkIn" }));
+  learning = f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "start" }));
+  f.setClock(f.at("08:20"));
+  assert.throws(() => f.apply(command(plan, plan, { command: "recordAttendance", action: "checkOut" })), isCode("conflict"));
+  assert.equal(f.board().entries[0].status, "learning");
+  f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "finish" }));
+  assert.equal(f.board().entries[0].status, "checked_in");
+  plan = f.apply(command(plan, plan, { command: "recordAttendance", action: "checkOut" }));
+  assert.throws(() => f.apply(command(plan, next, { command: "recordLearningOutcome", action: "start" })), isCode("conflict"));
+  assert.equal(f.board().entries[0].status, "checked_out");
+  assert.equal(f.read(plan).blocks[1].status, "planned");
+});
+
+test("a completed learning block cannot leave a task in progress", t => {
+  const f = fixture(t);
+  const plan = f.plan(f.ids[0]);
+  const task = { id: randomUUID(), category: "home_school", content: "合成作业复查" };
+  let learning = f.apply(block(f, plan));
+  learning = f.apply(command(plan, learning, { command: "saveLearningTasks", tasks: [task] }));
+  f.setClock(f.at("08:05"));
+  learning = f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "start" }));
+  learning = f.apply(command(plan, learning, { command: "recordTaskOutcome", taskId: task.id, status: "in_progress" }));
+  f.setClock(f.at("08:20"));
+  assert.throws(() => f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "finish" })), isCode("conflict"));
+  learning = f.apply(command(plan, learning, { command: "recordTaskOutcome", taskId: task.id, status: "done", resultNotes: "合成完成结果" }));
+  learning = f.apply(command(plan, learning, { command: "recordLearningOutcome", action: "finish" }));
+  assert.equal(learning.tasks[0].resultNotes, "合成完成结果");
+  assert.equal(learning.status, "done");
+});
+
 test("today's board counts explicit attendance and learning states at Shanghai boundaries", t => {
   const f = fixture(t);
   let first = f.plan(f.ids[0], "08:00", "11:00");
