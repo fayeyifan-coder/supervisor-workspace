@@ -53,3 +53,6 @@
   .schedule-filter { width: 100%; }
   .schedule-heading-actions { flex-wrap: wrap; justify-content: end; gap: 4px; }
 }
+.schedule-days.schedule-single-day { grid-template-columns: minmax(0, 1fr); }
+.schedule-single-day .schedule-card-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+.schedule-period > label { display: grid; gap: 4px; }

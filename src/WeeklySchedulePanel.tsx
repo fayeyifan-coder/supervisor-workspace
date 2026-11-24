@@ -65,6 +65,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
 }) {
   const today = shanghaiParts(Date.now()).date;
   const [week, setWeek] = useState(() => mondayOf(today));
+  const [day, setDay] = useState(today);
+  const [mode, setMode] = useState<"week" | "day">("week");
   const [studentId, setStudentId] = useState(initialStudentId);
   const [queryRevision, setQueryRevision] = useState(0);
   const [listing, setListing] = useState<{ key: string; rows?: AttendancePlan[]; error?: string }>();
@@ -79,7 +81,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const [confirmedLearningRequest, setConfirmedLearningRequest] = useState<string>();
   const request = usePendingOperation(api, (saved, requestId) => {
     if (saved?.command === "saveAttendancePlan") {
-      setWeek(mondayOf(shanghaiParts(saved.startAt).date));
+      selectDay(shanghaiParts(saved.startAt).date);
       showDraft(undefined);
     }
     refresh();
@@ -119,7 +121,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
 
   function newDraft() {
     if (!canDiscard()) return;
-    const date = nextDefaultDate(week);
+    const desired = shanghaiMinute(day, defaults(day, "regular").start);
+    const date = mode === "day" && desired !== null && desired > Date.now() ? day : nextDefaultDate(week);
     showDraft({ id: crypto.randomUUID(), studentId: studentId || students[0]?.id || "", date,
       ...defaults(date, "regular"), kind: "regular", confirmed: false, reason: "" });
   }
@@ -168,7 +171,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
     try {
       const result = await request.run({ ...command, command: "saveAttendancePlan" });
       if (result.ok) {
-        setWeek(mondayOf(shanghaiParts(command.startAt).date));
+        selectDay(shanghaiParts(command.startAt).date);
         if (studentId && studentId !== result.value.studentId) setStudentId(result.value.studentId);
         showDraft(undefined);
         setNotice({ kind: "success", message: "排课已保存。" });
@@ -189,9 +192,12 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
     }
   }
 
-  function moveWeek(delta: number) {
-    const date = shiftDate(week, delta);
-    if (weekRange(date)) setWeek(date);
+  function selectDay(date: string) {
+    if (shanghaiMinute(date, "00:00") === null) return;
+    const monday = mondayOf(date);
+    if (!weekRange(monday)) return;
+    setDay(date);
+    setWeek(monday);
   }
 
   const names = new Map(students.map(student => [student.id, student.alias]));
@@ -199,6 +205,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const plansByDay = new Map(days.map(date => [date, [] as AttendancePlan[]]));
   for (const plan of current?.rows ?? []) plansByDay.get(shanghaiParts(plan.startAt).date)?.push(plan);
   const hasMonday = Boolean(plansByDay.get(week)?.length);
+  const shownDays = mode === "day" ? [day] : hasMonday ? days : days.slice(1);
   const readOnly = Boolean(draft?.original && !canEdit(draft.original));
   const exception = draft && outsideHours(draft);
 
@@ -230,18 +237,24 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
     <header className="schedule-heading">
       <div>
         <button className="schedule-back" type="button" onClick={() => { if (canDiscard()) onBack(); }}>返回学生档案</button>
-        <h1 id="schedule-title">排课周视图</h1>
+        <h1 id="schedule-title">{initialStudentId ? "学生排课" : "全局总课表"}</h1>
         <p className="muted">机构时间（上海） · 周一默认停排</p>
       </div>
       <button type="button" className="primary schedule-primary" disabled={!students.length || busy || request.blocked} onClick={newDraft}>新建单次排课</button>
     </header>
     <div className="schedule-toolbar">
       <div className="schedule-period">
-        <strong aria-live="polite">{week.replaceAll("-", ".")} – {days[6].replaceAll("-", ".")}</strong>
+        <div className="schedule-buttons" aria-label="课表视图">
+          <button className="secondary" type="button" aria-pressed={mode === "week"} onClick={() => setMode("week")}>周视图</button>
+          <button className="secondary" type="button" aria-pressed={mode === "day"} onClick={() => setMode("day")}>日视图</button>
+        </div>
+        {mode === "week"
+          ? <strong aria-live="polite">{week.replaceAll("-", ".")} – {days[6].replaceAll("-", ".")}</strong>
+          : <label>课表日期<input type="date" value={day} onChange={event => selectDay(event.target.value)} /></label>}
         <div className="schedule-buttons">
-          <button className="secondary" type="button" onClick={() => moveWeek(-7)}>上一周</button>
-          <button className="secondary" type="button" onClick={() => setWeek(mondayOf(today))}>本周</button>
-          <button className="secondary" type="button" onClick={() => moveWeek(7)}>下一周</button>
+          <button className="secondary" type="button" onClick={() => selectDay(shiftDate(day, mode === "week" ? -7 : -1))}>{mode === "week" ? "上一周" : "前一天"}</button>
+          <button className="secondary" type="button" onClick={() => selectDay(today)}>{mode === "week" ? "本周" : "今天"}</button>
+          <button className="secondary" type="button" onClick={() => selectDay(shiftDate(day, mode === "week" ? 7 : 1))}>{mode === "week" ? "下一周" : "后一天"}</button>
         </div>
       </div>
       <label className="schedule-filter">筛选学生
@@ -310,8 +323,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
     {current?.error && <div className="notice failure" role="alert">
       {current.error} <button type="button" className="secondary" onClick={refresh}>重新读取</button>
     </div>}
-    <div className={"schedule-days" + (hasMonday ? " schedule-days-extra" : "")}>
-      {(hasMonday ? days : days.slice(1)).map(date => {
+    <div className={"schedule-days" + (mode === "day" ? " schedule-single-day" : hasMonday ? " schedule-days-extra" : "")}>
+      {shownDays.map(date => {
         const day = weekday(date);
         const hours = openingHours(date);
         const plans = plansByDay.get(date)!;
@@ -319,7 +332,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
           aria-label={dayNames[day] + " " + date}>
           <header className="schedule-day-heading" aria-current={date === today ? "date" : undefined}>
             <h2>{dayNames[day]} <time dateTime={date}>{date.slice(5).replace("-", "/")}</time></h2>
-            <p>{hours ? hours.start + "–" + hours.end : "仅显示例外"}</p>
+            <p>{hours ? hours.start + "–" + hours.end : "周一默认停排 · 仅显示例外"}</p>
           </header>
           {current?.rows && (plans.length ? <ul className="schedule-card-list">{plans.map(plan => {
             const start = shanghaiParts(plan.startAt).time;

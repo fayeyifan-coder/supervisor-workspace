@@ -268,7 +268,7 @@ function App() {
         <span className="scope">离线验收 · 仅用虚构学生</span>
         {scheduleEnabled && !schedule && <button className="secondary" type="button"
           disabled={!students || locked || editorBusy || intakeOpen}
-          onClick={() => setSchedule({ studentId: "" })}>排课周视图</button>}
+          onClick={() => setSchedule({ studentId: "" })}>全局总课表</button>}
       </div>
     </header>
     {schedule && students && <WeeklySchedulePanel api={api} students={students} initialStudentId={schedule.studentId}
