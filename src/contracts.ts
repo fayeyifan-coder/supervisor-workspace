@@ -13,6 +13,8 @@ export const channels = {
   studentRecordVersion: "mvp:student-record-version",
   studentRecords: "mvp:student-records",
   saveStudentRecord: "mvp:save-student-record",
+  studentWriteState: "mvp:student-write-state",
+  resolveStudentWrite: "mvp:resolve-student-write",
   addLesson: "mvp:add-lesson",
   workItems: "m2b:work-items",
   searchWorkItems: "m2b:search-work-items",
@@ -93,6 +95,15 @@ export interface StudentEditView {
 import type { ParentConcern, ParentConcernInput, ParentFollowUp, ParentFollowUpInput, ParentFollowUpView } from "./parent-follow-up";
 export type { ParentConcern, ParentConcernInput, ParentFollowUp, ParentFollowUpInput, ParentFollowUpView } from "./parent-follow-up";
 import type { StudentRecord, StudentRecordInput, StudentRecordKind, StudentRecordView } from "./student-records";
+export type StudentWriteCommand =
+  | { kind: "concern"; input: ParentConcernInput }
+  | { kind: "followUp"; input: ParentFollowUpInput }
+  | { kind: "record"; input: StudentRecordInput };
+export type StudentWriteState =
+  | { kind: "empty" }
+  | { kind: "damaged"; requestId?: string }
+  | { kind: "pending"; command: StudentWriteCommand; outcome: "saved" | "notSaved" | "unknown" };
+export type StudentWriteAction = "retry" | "confirm" | "discard" | "archive";
 export type Lesson = LessonInput & { createdAt: number };
 export type Failure = {
   ok: false;
@@ -182,6 +193,8 @@ export interface WorkspaceApi {
   parentFollowUp(studentId: string): Promise<Result<ParentFollowUpView>>;
   createParentConcern(input: ParentConcernInput): Promise<Result<ParentConcern>>;
   appendParentFollowUp(input: ParentFollowUpInput): Promise<Result<ParentFollowUp>>;
+  studentWriteState(): Promise<Result<StudentWriteState>>;
+  resolveStudentWrite(action: StudentWriteAction, requestId?: string): Promise<Result<null>>;
   studentRecordVersion(): Promise<Result<number>>;
   studentRecords(kind: StudentRecordKind, studentId: string): Promise<Result<StudentRecordView>>;
   saveStudentRecord(input: StudentRecordInput): Promise<Result<StudentRecord>>;

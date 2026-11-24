@@ -15,6 +15,7 @@ import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSu
 import { OperationsDatabase } from "./operations";
 import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
 import { applyLearningChange, readAttendanceBoard, readLearningDay, readScheduleReceipt } from "./learning-api";
+import { StudentWriteRecovery } from "./student-write-recovery";
 import { OperationsPending } from "./operations-pending";
 import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, studentServicesVersion, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
@@ -154,6 +155,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   app.setAppUserModelId(appId);
   const ui = session.fromPartition("supervisor-workspace-mvp-ui");
   const operationsPending = new OperationsPending(profile);
+  const studentWrites = new StudentWriteRecovery(profile);
   restrictSession(ui);
   const window = new BrowserWindow({
     title,
@@ -208,14 +210,34 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   ipcMain.handle(channels.parentFollowUpAvailable, event => isTrusted(event, window)
     ? { ok: true, value: format === 2 && m1Version >= 3 && Boolean(database && operations) } : denied());
   ipcMain.handle(channels.parentFollowUp, (event, id: unknown) => invoke(event, store => store.parentFollowUp(id)));
-  ipcMain.handle(channels.createParentConcern, (event, raw: unknown) => writeStudentData(event, store => store.createParentConcern(raw)));
-  ipcMain.handle(channels.appendParentFollowUp, (event, raw: unknown) => writeStudentData(event, store => store.appendParentFollowUp(raw)));
+  ipcMain.handle(channels.createParentConcern, (event, raw: unknown) => writeStudentData(event, store => {
+    const command = store.studentWriteCommand("concern", raw);
+    return studentWrites.run(store, command, () => store.createParentConcern(command.input));
+  }));
+  ipcMain.handle(channels.appendParentFollowUp, (event, raw: unknown) => writeStudentData(event, store => {
+    const command = store.studentWriteCommand("followUp", raw);
+    return studentWrites.run(store, command, () => store.appendParentFollowUp(command.input));
+  }));
   ipcMain.handle(channels.studentRecordVersion, event => isTrusted(event, window)
     ? { ok: true, value: format === 2 && database && operations ? m1Version : 0 } : denied());
   ipcMain.handle(channels.studentRecords, (event, kind: unknown, studentId: unknown) =>
     invoke(event, store => store.studentRecords(kind, studentId)));
-  ipcMain.handle(channels.saveStudentRecord, (event, raw: unknown) =>
-    writeStudentData(event, store => store.saveStudentRecord(raw)));
+  ipcMain.handle(channels.saveStudentRecord, (event, raw: unknown) => writeStudentData(event, store => {
+    const command = store.studentWriteCommand("record", raw);
+    return studentWrites.run(store, command, () => store.saveStudentRecord(command.input));
+  }));
+  function requireStudentWriteSupport() {
+    if (m1Version < 3 || format !== 2 || !operations) throw new WorkspaceFault("recovery", "当前档案没有启用学生资料请求恢复。");
+  }
+  ipcMain.handle(channels.studentWriteState, event => invoke(event, store => {
+    requireStudentWriteSupport();
+    return studentWrites.state(store);
+  }));
+  ipcMain.handle(channels.resolveStudentWrite, (event, action: unknown, requestId: unknown) =>
+    writeStudentData(event, store => {
+      requireStudentWriteSupport();
+      return studentWrites.resolve(store, action, requestId);
+    }));
   ipcMain.handle(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
   function invokeSchedule<T>(event: IpcMainInvokeEvent,
       operation: (store: OperationsDatabase, students: () => ReturnType<WorkspaceDatabase["students"]>) => T): Result<T> {
@@ -362,6 +384,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     })) throw new WorkspaceFault("invalid", "请选择应用数据目录之外的备份位置。");
     if (profile === join(owner, "profile")) checkOriginalProtectionMode(profile, format, false, m1Version);
     else verifyProfileData(profile, false, format, m1Version);
+    if (m1Version >= 3 && database) studentWrites.requireSettled(database);
     return recoveryFiles.publish(parent, captureProtection(stores, app.getVersion(), format, m1Version));
   }));
   ipcMain.handle(channels.restoreProtection, event => protect(event, async () => {
@@ -426,6 +449,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       buttons: ["取消", "确认下次激活"], defaultId: 0, cancelId: 0, noLink: true,
     });
     if (result.response !== 1) return false;
+    if (m1Version >= 3 && database) studentWrites.requireSettled(database);
     const pending = { kind: isRecovery ? "restore" : "resume", ...target } as const;
     commitSwitchOnExit = () => saveActivation(owner, { ...state, pending });
     state.pending = pending;
@@ -439,6 +463,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       buttons: ["取消", "确认返回"], defaultId: 0, cancelId: 0, noLink: true,
     });
     if (result.response !== 1) return false;
+    if (m1Version >= 3 && database) studentWrites.requireSettled(database);
     const pending = { kind: "original" as const };
     commitSwitchOnExit = () => saveActivation(owner, { ...state, pending });
     state.pending = pending;

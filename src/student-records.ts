@@ -199,22 +199,37 @@ function verifyTrainingPlan(db: DatabaseSync, studentId: string, fields: Record<
   if (fields.trainedOn < record(row, definition).fields.startsOn) invalid("训练日期不能早于所选方案版本的开始日期。");
 }
 
-export function saveStudentRecord(db: DatabaseSync, version: number, raw: unknown): StudentRecord {
+export function studentRecordInput(version: number, raw: unknown): StudentRecordInput {
   const input = object(raw), definition = definitionFor(input.kind, version);
   const id = uuid(input.id), studentId = uuid(input.studentId), requestId = uuid(input.requestId);
   const expected = input.expectedRevision;
   if (typeof expected !== "number" || !Number.isSafeInteger(expected) || expected < 0 || expected >= Number.MAX_SAFE_INTEGER) {
     invalid("保存版本无效。");
   }
-  const fields = fieldsFor(definition, input.fields), payload = JSON.stringify(fields);
-  requireStudent(db, studentId);
-  const existing = db.prepare(`SELECT ${columns} FROM ${definition.table} WHERE request_id=?`).get(requestId);
-  if (existing) {
-    if (existing.id !== id || existing.studentId !== studentId || existing.revision !== expected + 1 || existing.payload !== payload) {
-      conflict("此请求编号已用于其他记录。");
-    }
-    return record(existing, definition);
+  return { kind: input.kind as StudentRecordKind, id, studentId, requestId, expectedRevision: expected,
+    fields: fieldsFor(definition, input.fields) };
+}
+function recordReceipt(db: DatabaseSync, input: StudentRecordInput, definition: RecordDefinition): StudentRecord | undefined {
+  const existing = db.prepare(`SELECT ${columns} FROM ${definition.table} WHERE request_id=?`).get(input.requestId);
+  if (!existing) return;
+  if (existing.id !== input.id || existing.studentId !== input.studentId ||
+      existing.revision !== input.expectedRevision + 1 || existing.payload !== JSON.stringify(input.fields)) {
+    conflict("此请求编号已用于其他记录。");
   }
+  return record(existing, definition);
+}
+export function studentRecordCommitted(db: DatabaseSync, version: number, raw: unknown): boolean {
+  const input = studentRecordInput(version, raw);
+  return Boolean(recordReceipt(db, input, definitionFor(input.kind, version)));
+}
+export function saveStudentRecord(db: DatabaseSync, version: number, raw: unknown): StudentRecord {
+  const input = studentRecordInput(version, raw);
+  const definition = definitionFor(input.kind, version);
+  const { id, studentId, requestId, expectedRevision: expected, fields } = input;
+  const payload = JSON.stringify(fields);
+  requireStudent(db, studentId);
+  const existing = recordReceipt(db, input, definition);
+  if (existing) return existing;
   for (const other of definitionsAt(version)) {
     if (other !== definition && db.prepare(`SELECT 1 FROM ${other.table} WHERE request_id=?`).get(requestId)) {
       conflict("此请求编号已用于其他学生记录。");

@@ -12,6 +12,7 @@ import { StudentEditPanel } from "./StudentEditPanel";
 import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
 import { TrainingForPlan } from "./TrainingForPlan";
 import { ScoreTrend } from "./ScoreTrend";
+import { StudentWriteRecoveryPanel, type StudentWriteResolution } from "./StudentWriteRecoveryPanel";
 import { StudentRecordsPanel } from "./StudentRecordsPanel";
 import { studentRecordDefinitions, type StudentRecordKind } from "./student-records";
 import "./styles.css";
@@ -112,6 +113,9 @@ function App() {
   const [students, setStudents] = useState<Student[]>();
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [studentEditEnabled, setStudentEditEnabled] = useState(false);
+  const [studentWriteRefresh, setStudentWriteRefresh] = useState(0);
+  const [writeResolution, setWriteResolution] = useState<StudentWriteResolution>();
+  const refreshStudentWrites = useCallback(() => setStudentWriteRefresh(value => value + 1), []);
   const [studentRecordVersion, setStudentRecordVersion] = useState(0);
   const [recordActivity, setRecordActivity] = useState<Partial<Record<StudentRecordKind, { dirty: boolean; busy: boolean }>>>({});
   const onRecordActivity = useCallback((kind: StudentRecordKind, dirty: boolean, busy: boolean) => {
@@ -300,6 +304,8 @@ function App() {
           onClick={() => setBoardOpen(true)}>今日到校看板</button>}
       </div>
     </header>
+    {parentFollowUpEnabled && students && <StudentWriteRecoveryPanel api={api} students={students}
+      refresh={studentWriteRefresh} onResolved={setWriteResolution} />}
     {schedule && students && <div hidden={showingWorkspace}>
       <WeeklySchedulePanel key={schedule.learning?.attendanceId ?? schedule.studentId} api={api} students={students} initialStudentId={schedule.studentId}
         initialLearning={schedule.learning} onExitLearning={schedule.learning ? () => setSchedule(undefined) : undefined}
@@ -371,12 +377,14 @@ function App() {
                 .filter(kind => kind !== "training" && studentRecordDefinitions[kind].version <= studentRecordVersion).map(kind => ({
                   id: kind, label: studentRecordDefinitions[kind].label,
                   content: <StudentRecordsPanel key={active.id + kind} studentId={active.id} kind={kind} api={api}
-                    onActivity={onRecordActivity} overview={kind === "score" ? records => <ScoreTrend records={records} /> : undefined}
+                    onActivity={onRecordActivity} onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} overview={kind === "score" ? records => <ScoreTrend records={records} /> : undefined}
                     after={kind === "improvement" ? plans => plans.length > 0 &&
-                      <TrainingForPlan api={api} studentId={active.id} plans={plans} onActivity={onRecordActivity} /> : undefined} />,
+                      <TrainingForPlan api={api} studentId={active.id} plans={plans} onActivity={onRecordActivity}
+                        onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} /> : undefined} />,
                 }))}
               parentFollowUp={parentFollowUpEnabled && <ParentFollowUpPanel key={active.id} studentId={active.id} api={api}
-                onDirtyChange={setParentFollowUpDirty} onBusyChange={setParentFollowUpBusy} />}
+                onDirtyChange={setParentFollowUpDirty} onBusyChange={setParentFollowUpBusy}
+                onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} />}
               growth={<GrowthProfilePanel key={active.id} student={active} api={api}
                 onDirtyChange={setGrowthDirty} onBusyChange={setGrowthBusy} />}
               history={<div className="learning">

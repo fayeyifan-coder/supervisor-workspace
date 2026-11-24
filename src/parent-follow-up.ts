@@ -83,13 +83,13 @@ function select<T extends string>(input: unknown, labels: Record<T, string>): T 
   if (typeof input !== "string" || !Object.hasOwn(labels, input)) invalid("家长诉求来源、类别或状态无效。");
   return input as T;
 }
-function concernInput(input: unknown): ParentConcernInput {
+export function concernInput(input: unknown): ParentConcernInput {
   const row = object(input), reportedOn = date(row.reportedOn);
   return { requestId: id(row.requestId), studentId: id(row.studentId), reportedOn,
     role: select(row.role, parentRoles), category: select(row.category, parentCategories),
     concern: detail(row.concern), nextOn: nextDate(row.nextOn, reportedOn) };
 }
-function followUpInput(input: unknown): ParentFollowUpInput {
+export function followUpInput(input: unknown): ParentFollowUpInput {
   const row = object(input), followedOn = date(row.followedOn);
   const revision = row.expectedRevision;
   if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) {
@@ -156,6 +156,21 @@ export function appendParentFollowUp(db: DatabaseSync, raw: unknown): ParentFoll
   db.prepare("INSERT INTO parent_followups VALUES (?,?,?,?,?,?,?,?)").run(input.requestId, input.concernId,
     revision, input.followedOn, input.status, input.note, input.nextOn, recordedAt);
   return { ...input, revision, recordedAt };
+}
+
+export function parentWriteCommitted(db: DatabaseSync, kind: "concern" | "followUp", raw: unknown): boolean {
+  if (kind === "concern") {
+    const input = concernInput(raw);
+    const prior = concernById(db, input.requestId);
+    if (!prior) return false;
+    if (!match(input, prior)) conflict("请求编号的已存诉求内容不一致。");
+    return true;
+  }
+  const { expectedRevision, ...input } = followUpInput(raw);
+  const prior = db.prepare("SELECT " + followUpColumns + joined + " WHERE f.request_id=?").get(input.requestId);
+  if (!prior) return false;
+  if (prior.revision !== expectedRevision + 1 || !match(input, prior)) conflict("请求编号的已存跟进内容不一致。");
+  return true;
 }
 
 export function verifyParentFollowUp(db: DatabaseSync): void {

@@ -1,10 +1,12 @@
 import { useCallback, useState } from "react";
 import type { WorkspaceApi } from "./contracts";
 import type { StudentRecord, StudentRecordKind } from "./student-records";
+import type { StudentWriteResolution } from "./StudentWriteRecoveryPanel";
 import { StudentRecordsPanel } from "./StudentRecordsPanel";
 
-export function TrainingForPlan({ api, studentId, plans, onActivity }: {
+export function TrainingForPlan({ api, studentId, plans, onActivity, onRecoveryChange, recoveryResolution }: {
   api: WorkspaceApi; studentId: string; plans: StudentRecord[];
+  onRecoveryChange: () => void; recoveryResolution?: StudentWriteResolution;
   onActivity: (kind: StudentRecordKind, dirty: boolean, busy: boolean) => void;
 }) {
   const [selected, setSelected] = useState(() => plans[0].id);
@@ -27,6 +29,7 @@ export function TrainingForPlan({ api, studentId, plans, onActivity }: {
     </label>
     <p className="muted">新记录将关联当前方案版本 {plan.revision}。既有训练保留原方案版本。</p>
     <StudentRecordsPanel key={plan.id} api={api} studentId={studentId} kind="training" onActivity={updateActivity}
+      onRecoveryChange={onRecoveryChange} recoveryResolution={recoveryResolution}
       fixedFields={{ planId: plan.id, planRevision: String(plan.revision) }}
       filter={row => row.fields.planId === plan.id} />
   </div>;

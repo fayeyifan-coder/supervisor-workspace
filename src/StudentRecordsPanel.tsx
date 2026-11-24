@@ -2,15 +2,17 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Result, WorkspaceApi } from "./contracts";
 import { enrollmentStatus, studentRecordDefinitions, type RecordField, type StudentRecord, type StudentRecordInput,
   type StudentRecordKind, type StudentRecordView } from "./student-records";
+import type { StudentWriteResolution } from "./StudentWriteRecoveryPanel";
 import { shanghaiParts } from "./schedule-calendar";
 
-export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview, after, fixedFields, filter }: {
+export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview, after, fixedFields, filter, onRecoveryChange, recoveryResolution }: {
   api: WorkspaceApi; studentId: string; kind: StudentRecordKind;
   onActivity: (kind: StudentRecordKind, dirty: boolean, busy: boolean) => void;
   overview?: (records: StudentRecord[]) => ReactNode;
   after?: (records: StudentRecord[]) => ReactNode;
   fixedFields?: Record<string, string>;
   filter?: (record: StudentRecord) => boolean;
+  onRecoveryChange: () => void; recoveryResolution?: StudentWriteResolution;
 }) {
   const definition = studentRecordDefinitions[kind];
   const fields: readonly RecordField[] = definition.fields;
@@ -51,6 +53,17 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
     return () => onActivity(kind, false, false);
   }, [kind, onActivity, draft, busy, pending]);
 
+  useEffect(() => {
+    if (!recoveryResolution) return;
+    setRefresh(value => value + 1);
+    if (pending && (recoveryResolution.action === "archive" || pending.requestId === recoveryResolution.requestId)) {
+      setPending(undefined);
+      setDraft(undefined);
+      setMessage("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoveryResolution]);
+
   const result = loaded?.refresh === refresh ? loaded.result : undefined;
   const records = result?.ok ? result.value.records.filter(row => !filter || filter(row)) : [];
   const current = records.find(row => row.id === draft?.id);
@@ -76,6 +89,7 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
         setPending(undefined);
         setConflict(false);
         setMessage("保存成功。");
+        await api.resolveStudentWrite("confirm", input.requestId).catch(() => undefined);
         setRefresh(value => value + 1);
       } else if (reply.ok || reply.code === "unknown" || (pending && reply.code === "busy")) {
         setPending(input);
@@ -94,6 +108,7 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
     } finally {
       setBusy(false);
       inFlight.current = false;
+      onRecoveryChange();
     }
   }
 

@@ -1,9 +1,9 @@
 import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Failure, Lesson, LessonInput, Student, StudentEditFields, StudentEditInput, StudentEditRecord, StudentEditView, StudentInput } from "./contracts";
-import { appendParentFollowUp, createParentConcern, parentSchema, readParentFollowUp, verifyParentFollowUp } from "./parent-follow-up";
-import { readStudentRecords, saveStudentRecord, studentRecordSchema, verifyStudentRecords } from "./student-records";
+import type { Failure, Lesson, LessonInput, Student, StudentEditFields, StudentEditInput, StudentEditRecord, StudentEditView, StudentInput, StudentWriteCommand } from "./contracts";
+import { appendParentFollowUp, concernInput, createParentConcern, followUpInput, parentSchema, parentWriteCommitted, readParentFollowUp, verifyParentFollowUp } from "./parent-follow-up";
+import { readStudentRecords, saveStudentRecord, studentRecordCommitted, studentRecordInput, studentRecordSchema, verifyStudentRecords } from "./student-records";
 import { WorkspaceFault } from "./workspace-fault";
 export { WorkspaceFault } from "./workspace-fault";
 
@@ -312,6 +312,18 @@ export class WorkspaceDatabase {
 
   saveStudentRecord(raw: unknown) {
     return this.write(() => saveStudentRecord(this.db, this.version, raw));
+  }
+
+  studentWriteCommand(kind: StudentWriteCommand["kind"], raw: unknown): StudentWriteCommand {
+    if (kind === "record") return { kind, input: studentRecordInput(this.version, raw) };
+    this.requireParentSupport();
+    return kind === "concern" ? { kind, input: concernInput(raw) } : { kind, input: followUpInput(raw) };
+  }
+
+  studentWriteCommitted(command: StudentWriteCommand): boolean {
+    const db = this.protectionConnection();
+    return command.kind === "record" ? studentRecordCommitted(db, this.version, command.input)
+      : parentWriteCommitted(db, command.kind, command.input);
   }
 
   private editState(studentId: string) {

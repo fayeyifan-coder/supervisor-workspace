@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ParentConcernHistory, ParentConcernInput, ParentFollowUpInput, ParentFollowUpView } from "./parent-follow-up";
 import { parentCategories, parentRoles, parentStatuses } from "./parent-follow-up";
 import type { Result, WorkspaceApi } from "./contracts";
+import type { StudentWriteResolution } from "./StudentWriteRecoveryPanel";
 import { shanghaiParts } from "./schedule-calendar";
 
 type Draft = { kind: "concern" } | { kind: "follow-up"; concernId: string; revision: number };
@@ -11,9 +12,10 @@ function Options({ labels }: { labels: Record<string, string> }) {
   return <>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</>;
 }
 
-export function ParentFollowUpPanel({ studentId, api, onDirtyChange, onBusyChange }: {
+export function ParentFollowUpPanel({ studentId, api, onDirtyChange, onBusyChange, onRecoveryChange, recoveryResolution }: {
   studentId: string; api: WorkspaceApi;
   onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void;
+  onRecoveryChange: () => void; recoveryResolution?: StudentWriteResolution;
 }) {
   const [refresh, setRefresh] = useState(0);
   const [loaded, setLoaded] = useState<{ refresh: number; result: Result<ParentFollowUpView> }>();
@@ -66,6 +68,18 @@ export function ParentFollowUpPanel({ studentId, api, onDirtyChange, onBusyChang
     setNotice({ kind: "success", text: "已从本机记录确认保存结果。" });
   }, [pending, view]);
 
+  useEffect(() => {
+    if (!recoveryResolution) return;
+    setRefresh(value => value + 1);
+    if (pending && (recoveryResolution.action === "archive" || pending.input.requestId === recoveryResolution.requestId)) {
+      setPending(undefined);
+      setDraft(undefined);
+      setNotice(undefined);
+    }
+    // This signal is sent only when a recovery action finishes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoveryResolution]);
+
   const reread = () => setRefresh(value => value + 1);
 
   async function save(command: Command) {
@@ -80,6 +94,7 @@ export function ParentFollowUpPanel({ studentId, api, onDirtyChange, onBusyChang
       if (reply.ok) {
         setPending(undefined); setDraft(undefined);
         setNotice({ kind: "success", text: "已保存到本机。" });
+        await api.resolveStudentWrite("confirm", command.input.requestId).catch(() => undefined);
       } else {
         setPending(reply.code === "unknown" ? command : undefined);
         setNotice({ kind: reply.code === "unknown" ? "pending" : "failure", text: reply.message });
@@ -92,6 +107,7 @@ export function ParentFollowUpPanel({ studentId, api, onDirtyChange, onBusyChang
       inFlight.current = false;
       setBusy(false);
       onBusyChange(false);
+      onRecoveryChange();
     }
   }
 
