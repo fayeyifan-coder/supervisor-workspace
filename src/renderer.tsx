@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
+import { StudentIntakeHistory, StudentIntakePanel } from "./StudentIntakePanel";
 import "./styles.css";
 
 declare global {
@@ -111,6 +112,8 @@ function App() {
   const [notice, setNotice] = useState<Notice>();
   const [growthDirty, setGrowthDirty] = useState(false);
   const [growthBusy, setGrowthBusy] = useState(false);
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const [intakeBusy, setIntakeBusy] = useState(false);
   const inFlight = useRef(false);
 
   useEffect(() => {
@@ -219,16 +222,21 @@ function App() {
     <div className="workspace">
       <aside className="roster" aria-label="学生档案">
         <div className="roster-heading"><h2>学生档案</h2>
-          <button className="secondary" disabled={locked || growthBusy || !students} onClick={() => {
+          <button className="secondary" disabled={locked || growthBusy || intakeOpen || !students} onClick={() => {
             if (!canLeaveGrowth()) return;
             setCreating(true); setNotice(undefined);
           }}>新建学生</button>
         </div>
+        <button className="secondary intake-entry" type="button" disabled={locked || growthBusy || intakeOpen || !students}
+          onClick={() => {
+            if (!canLeaveGrowth()) return;
+            setIntakeOpen(true); setNotice(undefined);
+          }}>导入学生 JSON</button>
         {!listError && !students && <p role="status" className="muted">正在读取档案…</p>}
         {listError && <div className="notice failure" role="alert">{listError} <button className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取</button></div>}
         {students?.length === 0 && <p className="muted">还没有学生档案。</p>}
         <ul className="student-list">{students?.map(student => <li key={student.id}>
-          <button disabled={locked || growthBusy} aria-pressed={!creating && student.id === activeId} onClick={() => {
+          <button disabled={locked || growthBusy || intakeOpen} aria-pressed={!creating && student.id === activeId} onClick={() => {
             if (student.id === activeId && !creating) return;
             if (!canLeaveGrowth()) return;
             setActiveId(student.id); setCreating(false); setNotice(undefined);
@@ -243,24 +251,34 @@ function App() {
             <button className="secondary" disabled={busy} onClick={() => void save(pending)}>重试同一请求</button>
           </div>}
         </div>}
-        {showStudentForm ? <StudentForm key={formVersion} disabled={locked} submit={input => void save({ kind: "student", input })} />
-          : active && <>
-            <section className="profile" aria-label="当前学生">
-              <p className="muted">{active.grade} · {active.subjects}</p><h1>{active.alias}</h1>
-              {(active.goal || active.notes) && <dl>
-                {active.goal && <div><dt>学习目标</dt><dd>{active.goal}</dd></div>}
-                {active.notes && <div><dt>备注</dt><dd>{active.notes}</dd></div>}
-              </dl>}
-            </section>
-            <GrowthProfilePanel key={active.id} student={active} api={api}
-              onDirtyChange={setGrowthDirty} onBusyChange={setGrowthBusy} />
-            <div className="learning">
-              <LessonForm key={active.id + formVersion} student={active} disabled={locked || !visibleHistory?.rows}
-                submit={input => void save({ kind: "lesson", input })} />
-              <HistoryView history={visibleHistory} reload={() => setHistoryRefresh(value => value + 1)} />
-            </div>
-          </>}
-        {students && <WorkLogPanel students={students} api={api} />}
+        {intakeOpen && students && <StudentIntakePanel api={api} students={students} student={active}
+          onImported={studentId => {
+            setActiveId(studentId); setCreating(false); setListRefresh(value => value + 1);
+          }} onBusyChange={setIntakeBusy} onClose={() => {
+            if (intakeBusy) return;
+            setIntakeOpen(false); setListRefresh(value => value + 1);
+          }} />}
+        <div className="student-content" hidden={intakeOpen}>
+          {showStudentForm ? <StudentForm key={formVersion} disabled={locked} submit={input => void save({ kind: "student", input })} />
+            : active && <>
+              <section className="profile" aria-label="当前学生">
+                <p className="muted">{active.grade} · {active.subjects}</p><h1>{active.alias}</h1>
+                {(active.goal || active.notes) && <dl>
+                  {active.goal && <div><dt>学习目标</dt><dd>{active.goal}</dd></div>}
+                  {active.notes && <div><dt>备注</dt><dd>{active.notes}</dd></div>}
+                </dl>}
+              </section>
+              {!intakeOpen && <><GrowthProfilePanel key={active.id} student={active} api={api}
+                onDirtyChange={setGrowthDirty} onBusyChange={setGrowthBusy} />
+              <StudentIntakeHistory api={api} studentId={active.id} /></>}
+              <div className="learning">
+                <LessonForm key={active.id + formVersion} student={active} disabled={locked || !visibleHistory?.rows}
+                  submit={input => void save({ kind: "lesson", input })} />
+                <HistoryView history={visibleHistory} reload={() => setHistoryRefresh(value => value + 1)} />
+              </div>
+            </>}
+          {students && <WorkLogPanel students={students} api={api} />}
+        </div>
       </div>
     </div>
   </main>;

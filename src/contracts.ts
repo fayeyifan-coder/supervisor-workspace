@@ -10,11 +10,18 @@ export const channels = {
   setWorkItemStatus: "m2b:set-work-item-status",
   growthProfile: "m2c:growth-profile",
   saveGrowthProfile: "m2c:save-growth-profile",
+  pickStudentIntake: "m2c:pick-student-intake",
+  prepareStudentIntake: "m2c:prepare-student-intake",
+  saveStudentIntake: "m2c:save-student-intake",
+  studentIntakeHistory: "m2c:student-intake-history",
 } as const;
 
 export type { WorkChange, WorkItem, WorkItemInput, WorkStatus } from "./worklog";
 export type { GrowthFields, GrowthGoal, GrowthGoalInput, GrowthHistory, GrowthObservation,
   GrowthObservationInput, GrowthProfileView, GrowthSaveInput, GrowthSnapshot, GoalStatus } from "./growth-profile";
+
+export type { IntakeConfirm, IntakeFile, IntakeHistoryEntry, IntakeOutcome, IntakeReview, IntakeTarget } from "./student-intake";
+import type { IntakeConfirm, IntakeFile, IntakeHistoryEntry, IntakeOutcome, IntakeReview, IntakeTarget } from "./student-intake";
 
 export interface StudentInput {
   id: string;
@@ -55,6 +62,10 @@ export interface WorkspaceApi {
   workHistory(id: string): Promise<Result<import("./worklog").WorkChange[]>>;
   saveWorkItem(input: import("./worklog").WorkItemInput): Promise<Result<import("./worklog").WorkItem>>;
   setWorkItemStatus(id: string, status: import("./worklog").WorkStatus): Promise<Result<import("./worklog").WorkItem>>;
+  pickStudentIntake(): Promise<Result<IntakeFile[]>>;
+  prepareStudentIntake(token: string, target?: IntakeTarget): Promise<Result<IntakeReview>>;
+  saveStudentIntake(input: IntakeConfirm): Promise<Result<IntakeOutcome>>;
+  studentIntakeHistory(studentId: string): Promise<Result<IntakeHistoryEntry[]>>;
   growthProfile(studentId: string): Promise<Result<import("./growth-profile").GrowthProfileView>>;
   saveGrowthProfile(input: import("./growth-profile").GrowthSaveInput): Promise<Result<import("./growth-profile").GrowthProfileView>>;
 }
