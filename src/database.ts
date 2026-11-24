@@ -3,11 +3,16 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Failure, Lesson, LessonInput, Student, StudentEditFields, StudentEditInput, StudentEditRecord, StudentEditView, StudentInput } from "./contracts";
 import { appendParentFollowUp, createParentConcern, parentSchema, readParentFollowUp, verifyParentFollowUp } from "./parent-follow-up";
+import { readStudentRecords, saveStudentRecord, studentRecordSchema, verifyStudentRecords } from "./student-records";
 import { WorkspaceFault } from "./workspace-fault";
 export { WorkspaceFault } from "./workspace-fault";
 
 const applicationId = 0x53574d31;
-export type M1Version = 1 | 2 | 3;
+export const latestM1Version = 4;
+export type M1Version = 1 | 2 | 3 | 4;
+export function isM1Version(value: unknown): value is M1Version {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= latestM1Version;
+}
 const schema = [
   ["students", "table", `CREATE TABLE students (
     id TEXT PRIMARY KEY, alias TEXT NOT NULL, grade TEXT NOT NULL, subjects TEXT NOT NULL,
@@ -33,7 +38,7 @@ const editSchema = [
     payload TEXT NOT NULL
   ) STRICT`],
 ] as const;
-const schemaFor = (version: M1Version) => version === 3 ? [...schema, ...editSchema, ...parentSchema]
+const schemaFor = (version: M1Version) => version >= 3 ? [...schema, ...editSchema, ...parentSchema, ...studentRecordSchema(version)]
   : version === 2 ? [...schema, ...editSchema] : schema;
 const markerFor = (version: M1Version) => "mvp-v" + version + "\n";
 const studentColumns = "id, alias, grade, subjects, goal, notes, created_at AS createdAt";
@@ -82,7 +87,8 @@ function checkDatabase(db: DatabaseSync, version: M1Version): void {
   const automatic = ["sqlite_autoindex_students_1", "sqlite_autoindex_learning_records_1"];
   if (version >= 2) automatic.push("sqlite_autoindex_student_edits_1", "sqlite_autoindex_student_edits_2",
     "sqlite_autoindex_student_edit_pending_1", "sqlite_autoindex_student_edit_pending_2");
-  if (version === 3) automatic.push("sqlite_autoindex_parent_concerns_1", "sqlite_autoindex_parent_followups_1", "sqlite_autoindex_parent_followups_2");
+  if (version >= 3) automatic.push("sqlite_autoindex_parent_concerns_1", "sqlite_autoindex_parent_followups_1", "sqlite_autoindex_parent_followups_2");
+  for (const [table] of studentRecordSchema(version)) automatic.push("sqlite_autoindex_" + table + "_1", "sqlite_autoindex_" + table + "_2");
   const expected = schemaFor(version);
   const explicitMatch = expected.every(([name, type, ddl]) => definitions.some(object =>
     object.name === name && object.type === type && typeof object.sql === "string" && canonical(object.sql) === canonical(ddl)));
@@ -92,7 +98,8 @@ function checkDatabase(db: DatabaseSync, version: M1Version): void {
       db.prepare("PRAGMA quick_check(1)").get()?.quick_check !== "ok" ||
       db.prepare("PRAGMA foreign_key_check").get()) recover("MVP 数据库结构或完整性检查失败。请保留本地目录。");
   if (version >= 2) verifyStudentEdits(db);
-  if (version === 3) verifyParentFollowUp(db);
+  if (version >= 3) verifyParentFollowUp(db);
+  if (version >= 4) verifyStudentRecords(db, version);
 }
 
 function inputObject(raw: unknown): Record<string, unknown> {
@@ -281,7 +288,7 @@ export class WorkspaceDatabase {
   }
 
   private requireParentSupport(): void {
-    if (this.version !== 3) recover("家长诉求仅在已验证的新版五库合成档案中可用。");
+    if (this.version < 3) recover("家长诉求仅在已验证的新版五库合成档案中可用。");
   }
 
   parentFollowUp(rawStudentId: unknown) {
@@ -297,6 +304,14 @@ export class WorkspaceDatabase {
   appendParentFollowUp(raw: unknown) {
     this.requireParentSupport();
     return this.write(() => appendParentFollowUp(this.db, raw));
+  }
+
+  studentRecords(kind: unknown, studentId: unknown) {
+    return readStudentRecords(this.protectionConnection(), this.version, kind, studentId);
+  }
+
+  saveStudentRecord(raw: unknown) {
+    return this.write(() => saveStudentRecord(this.db, this.version, raw));
   }
 
   private editState(studentId: string) {
@@ -472,5 +487,8 @@ const m1ParentProtection = {
   ddl: schemaFor(3).map(entry => entry[2]),
 };
 export function m1ProtectionLayout(version: M1Version) {
-  return version === 3 ? m1ParentProtection : version === 2 ? m1EditProtection : m1Protection;
+  if (version <= 3) return version === 3 ? m1ParentProtection : version === 2 ? m1EditProtection : m1Protection;
+  return { ...m1ParentProtection, version, marker: markerFor(version),
+    tables: [...m1ParentProtection.tables, ...studentRecordSchema(version).map(entry => entry[0])],
+    ddl: schemaFor(version).map(entry => entry[2]) };
 }

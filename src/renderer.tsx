@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
@@ -9,6 +9,8 @@ import { StudentIntakePanel } from "./StudentIntakePanel";
 import { StudentDetail } from "./StudentDetail";
 import { StudentEditPanel } from "./StudentEditPanel";
 import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
+import { StudentRecordsPanel } from "./StudentRecordsPanel";
+import { studentRecordDefinitions, type StudentRecordKind } from "./student-records";
 import "./styles.css";
 
 declare global {
@@ -107,6 +109,11 @@ function App() {
   const [students, setStudents] = useState<Student[]>();
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [studentEditEnabled, setStudentEditEnabled] = useState(false);
+  const [studentRecordVersion, setStudentRecordVersion] = useState(0);
+  const [recordActivity, setRecordActivity] = useState<Partial<Record<StudentRecordKind, { dirty: boolean; busy: boolean }>>>({});
+  const onRecordActivity = useCallback((kind: StudentRecordKind, dirty: boolean, busy: boolean) => {
+    setRecordActivity(old => old[kind]?.dirty === dirty && old[kind]?.busy === busy ? old : { ...old, [kind]: { dirty, busy } });
+  }, []);
   const [parentFollowUpEnabled, setParentFollowUpEnabled] = useState(false);
   const [schedule, setSchedule] = useState<{ studentId: string }>();
   const [activeId, setActiveId] = useState<string>();
@@ -136,6 +143,9 @@ function App() {
     }).catch(() => {});
     api.studentEditAvailable().then(result => {
       if (current && result.ok) setStudentEditEnabled(result.value);
+    }).catch(() => {});
+    api.studentRecordVersion().then(result => {
+      if (current && result.ok) setStudentRecordVersion(result.value);
     }).catch(() => {});
     api.parentFollowUpAvailable().then(result => {
       if (current && result.ok) setParentFollowUpEnabled(result.value);
@@ -236,12 +246,12 @@ function App() {
   const active = students?.find(student => student.id === activeId);
   const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
-  const editorBusy = growthBusy || studentEditBusy || parentFollowUpBusy;
+  const editorBusy = growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
   const showStudentForm = students && (creating || students.length === 0);
 
   function canLeaveStudentDrafts(): boolean {
     if (editorBusy) return false;
-    if ((growthDirty || studentEditDirty || parentFollowUpDirty) &&
+    if ((growthDirty || studentEditDirty || parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty)) &&
         !window.confirm("学生档案有未保存输入，确定离开并放弃吗？")) return false;
     setGrowthDirty(false);
     setStudentEditDirty(false);
@@ -308,6 +318,12 @@ function App() {
               edit={studentEditEnabled && <StudentEditPanel key={active.id} studentId={active.id} api={api}
                 onDirtyChange={setStudentEditDirty} onBusyChange={setStudentEditBusy}
                 onSaved={() => setListRefresh(value => value + 1)} />}
+              recordPanels={(Object.keys(studentRecordDefinitions) as StudentRecordKind[])
+                .filter(kind => studentRecordDefinitions[kind].version <= studentRecordVersion).map(kind => ({
+                  id: kind, label: studentRecordDefinitions[kind].label,
+                  content: <StudentRecordsPanel key={active.id + kind} studentId={active.id} kind={kind} api={api}
+                    onActivity={onRecordActivity} />,
+                }))}
               parentFollowUp={parentFollowUpEnabled && <ParentFollowUpPanel key={active.id} studentId={active.id} api={api}
                 onDirtyChange={setParentFollowUpDirty} onBusyChange={setParentFollowUpBusy} />}
               growth={<GrowthProfilePanel key={active.id} student={active} api={api}

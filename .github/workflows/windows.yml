@@ -125,7 +125,7 @@ jobs:
             assert.equal(appPackage.main, "build/main.js");
 
             const assetsPattern = /^dist\/assets\/[A-Za-z0-9_.-]+\.(?:js|css)$/;
-            const buildFiles = ["build/main.js", "build/preload.js", "build/contracts.js", "build/database.js", "build/workspace-fault.js", "build/parent-follow-up.js",
+            const buildFiles = ["build/main.js", "build/preload.js", "build/contracts.js", "build/database.js", "build/workspace-fault.js", "build/parent-follow-up.js", "build/student-records.js",
               "build/database-lifecycle.js", "build/worklog.js", "build/growth-profile.js",
               "build/student-intake.js", "build/intake-format.js", "build/offline-protection.js", "build/profile-activation.js",
               "build/operations.js", "build/operations-schema.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js", "build/operations-pending.js"];

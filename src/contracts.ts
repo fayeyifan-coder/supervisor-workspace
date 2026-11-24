@@ -10,6 +10,9 @@ export const channels = {
   parentFollowUp: "mvp:parent-follow-up",
   createParentConcern: "mvp:create-parent-concern",
   appendParentFollowUp: "mvp:append-parent-follow-up",
+  studentRecordVersion: "mvp:student-record-version",
+  studentRecords: "mvp:student-records",
+  saveStudentRecord: "mvp:save-student-record",
   addLesson: "mvp:add-lesson",
   workItems: "m2b:work-items",
   searchWorkItems: "m2b:search-work-items",
@@ -88,6 +91,7 @@ export interface StudentEditView {
 }
 import type { ParentConcern, ParentConcernInput, ParentFollowUp, ParentFollowUpInput, ParentFollowUpView } from "./parent-follow-up";
 export type { ParentConcern, ParentConcernInput, ParentFollowUp, ParentFollowUpInput, ParentFollowUpView } from "./parent-follow-up";
+import type { StudentRecord, StudentRecordInput, StudentRecordKind, StudentRecordView } from "./student-records";
 export type Lesson = LessonInput & { createdAt: number };
 export type Failure = {
   ok: false;
@@ -170,6 +174,9 @@ export interface WorkspaceApi {
   parentFollowUp(studentId: string): Promise<Result<ParentFollowUpView>>;
   createParentConcern(input: ParentConcernInput): Promise<Result<ParentConcern>>;
   appendParentFollowUp(input: ParentFollowUpInput): Promise<Result<ParentFollowUp>>;
+  studentRecordVersion(): Promise<Result<number>>;
+  studentRecords(kind: StudentRecordKind, studentId: string): Promise<Result<StudentRecordView>>;
+  saveStudentRecord(input: StudentRecordInput): Promise<Result<StudentRecord>>;
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
   workItems(today: string): Promise<Result<import("./worklog").WorkItem[]>>;
   searchWorkItems(from: string, to: string, query?: string): Promise<Result<import("./worklog").WorkItem[]>>;

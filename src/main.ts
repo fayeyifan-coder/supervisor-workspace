@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import { channels, type Failure, type Result } from "./contracts";
-import { failure, WorkspaceDatabase, WorkspaceFault, type M1Version } from "./database";
+import { failure, latestM1Version, WorkspaceDatabase, WorkspaceFault, type M1Version } from "./database";
 import { closeStoresIndependently } from "./database-lifecycle";
 import { WorkLogDatabase, type WorkStatus } from "./worklog";
 import { GrowthProfileDatabase, GrowthProfileFault, type GrowthSaveInput } from "./growth-profile";
@@ -16,7 +16,7 @@ import { OperationsDatabase } from "./operations";
 import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
 import { applyLearningChange, readLearningDay, readScheduleReceipt } from "./learning-api";
 import { OperationsPending } from "./operations-pending";
-import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
+import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, isStudentServicesProfile, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
 const scheme = "supervisor-workspace-mvp";
@@ -206,10 +206,16 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   ipcMain.handle(channels.saveStudentEdit, (event, raw: unknown) => writeStudentData(event, store => store.saveStudentEdit(raw)));
   ipcMain.handle(channels.finishStudentEdit, (event, raw: unknown) => writeStudentData(event, store => store.finishStudentEdit(raw)));
   ipcMain.handle(channels.parentFollowUpAvailable, event => isTrusted(event, window)
-    ? { ok: true, value: format === 2 && m1Version === 3 && Boolean(database && operations) } : denied());
+    ? { ok: true, value: format === 2 && m1Version >= 3 && Boolean(database && operations) } : denied());
   ipcMain.handle(channels.parentFollowUp, (event, id: unknown) => invoke(event, store => store.parentFollowUp(id)));
   ipcMain.handle(channels.createParentConcern, (event, raw: unknown) => writeStudentData(event, store => store.createParentConcern(raw)));
   ipcMain.handle(channels.appendParentFollowUp, (event, raw: unknown) => writeStudentData(event, store => store.appendParentFollowUp(raw)));
+  ipcMain.handle(channels.studentRecordVersion, event => isTrusted(event, window)
+    ? { ok: true, value: format === 2 && database && operations ? m1Version : 0 } : denied());
+  ipcMain.handle(channels.studentRecords, (event, kind: unknown, studentId: unknown) =>
+    invoke(event, store => store.studentRecords(kind, studentId)));
+  ipcMain.handle(channels.saveStudentRecord, (event, raw: unknown) =>
+    writeStudentData(event, store => store.saveStudentRecord(raw)));
   ipcMain.handle(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
   function invokeSchedule<T>(event: IpcMainInvokeEvent,
       operation: (store: OperationsDatabase, students: () => ReturnType<WorkspaceDatabase["students"]>) => T): Result<T> {
@@ -552,7 +558,8 @@ try {
       requestedM2CProfile.toLowerCase() === "supervisor-workspace-mvp")) throw new Error("合成 Profile 名称无效。");
   const profileName = syntheticM2CProfile ? requestedM2CProfile
     : syntheticM2BProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-mvp";
-  const m1Version: M1Version = syntheticM2CProfile && isParentFollowUpProfile(profileName) ? 3
+  const m1Version: M1Version = syntheticM2CProfile && isStudentServicesProfile(profileName) ? latestM1Version
+    : syntheticM2CProfile && isParentFollowUpProfile(profileName) ? 3
     : syntheticM2CProfile && isStudentEditProfile(profileName) ? 2 : 1;
   const format: ProtectionFormat = m1Version >= 2 || (syntheticM2CProfile && /^sw-r2a-[a-z0-9-]+$/.test(profileName)) ? 2 : 1;
   const profile = prepareProfile(profileName, format);

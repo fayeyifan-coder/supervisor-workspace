@@ -128,6 +128,7 @@ export function approveActiveProfile(profile: string, digest: string): void {
 }
 
 export function originalProfileSegments(name: string, format: ProtectionFormat): string[] {
+  if (format === 2 && isStudentServicesProfile(name)) return ["sw-student-services-profiles", name, "profile"];
   if (format === 2 && isParentFollowUpProfile(name)) return ["sw-parent-profiles", name, "profile"];
   if (format === 2 && isStudentEditProfile(name)) return ["sw-r3b-profiles", name, "profile"];
   return format === 2 ? ["sw-r2a-profiles", name, "profile"] : [name, "profile"];
@@ -138,6 +139,10 @@ export function isStudentEditProfile(name: string): boolean {
 }
 export function isParentFollowUpProfile(name: string): boolean {
   return /^sw-parent-[a-z0-9-]+$/.test(name);
+}
+
+export function isStudentServicesProfile(name: string): boolean {
+  return /^sw-services-[a-z0-9-]+$/.test(name);
 }
 
 const enrollment = "operations-synthetic.initialized";
@@ -154,7 +159,8 @@ export function checkOriginalProtectionMode(profile: string, format: ProtectionF
     }
     return false;
   }
-  const expectedEnrollment = m1Version === 3 ? "parent-followup-synthetic-v3\n"
+  const expectedEnrollment = m1Version >= 4 ? "student-services-synthetic-v" + m1Version + "\n"
+    : m1Version === 3 ? "parent-followup-synthetic-v3\n"
     : m1Version === 2 ? "student-edit-synthetic-v2\n" : enrollmentContents;
   if (hasEnrollment) {
     if (readFileSync(marker, "utf8") !== expectedEnrollment) invalid("五库合成档案标记无效。");

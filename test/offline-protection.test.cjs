@@ -574,6 +574,64 @@ test("M1 v3 migrates old package formats, preserves v2 edit receipts, and protec
   assert.deepEqual(originalProfileSegments("sw-parent-proof", 2), ["sw-parent-profiles", "sw-parent-proof", "profile"]);
 });
 
+test("M1 v4 upgrades a v3 snapshot and enrollment revisions survive SWBACK2 recovery", async t => {
+  const f = populated(t);
+  const ops = OperationsDatabase.open(f.dir, f.m1, true);
+  t.after(() => ops.close());
+  const legacy = captureProtection([...f.stores, ops], "0.1.0", 2);
+  const restoredV3 = await io.restore(f.dir, prepareProtectionRestore(legacy, 2, 3), true);
+  const dataV3 = join(restoredV3.location, "data");
+  const v3 = openStores(dataV3, t, 3);
+  const ops3 = OperationsDatabase.open(dataV3, v3.m1);
+  t.after(() => ops3.close());
+  v3.m1.createParentConcern({ requestId: randomUUID(), studentId: f.studentId, role: "guardian",
+    category: "habits", concern: "合成旧版诉求", reportedOn: "2026-11-24", nextOn: "" });
+  const before = captureProtection([...v3.stores, ops3], "0.1.0", 2, 3);
+  const copy = Buffer.from(before);
+  const migrated = prepareProtectionRestore(before, 2, 4);
+  assert.deepEqual(before, copy);
+  assert.deepEqual(validateProtection(migrated).images.slice(1), validateProtection(before).images.slice(1));
+  assert.throws(() => prepareProtectionRestore(migrated, 2, 3), /不能降级/);
+  const active = await io.restore(f.dir, migrated, true);
+  const data = join(active.location, "data");
+  const v4 = openStores(data, t, 4);
+  const ops4 = OperationsDatabase.open(data, v4.m1);
+  t.after(() => ops4.close());
+  assert.deepEqual(v4.m1.parentFollowUp(f.studentId), v3.m1.parentFollowUp(f.studentId));
+  assert.deepEqual(v4.m1.studentRecords("enrollment", f.studentId).records, []);
+  const fields = { course: "合成数学课", registeredOn: "2026-11-24", startsOn: "2026-11-24",
+    endsOn: "2026-12-01", status: "有效", notes: "" };
+  const input = { kind: "enrollment", id: randomUUID(), studentId: f.studentId, requestId: randomUUID(),
+    expectedRevision: 0, fields };
+  assert.throws(() => v4.m1.saveStudentRecord({ ...input, fields: { ...fields, endsOn: "2026-11-23" } }), { code: "invalid" });
+  const first = v4.m1.saveStudentRecord(input);
+  assert.deepEqual(v4.m1.saveStudentRecord(input), first);
+  assert.throws(() => v4.m1.saveStudentRecord({ ...input, requestId: randomUUID() }), { code: "conflict" });
+  const other = f.pending.studentId;
+  assert.throws(() => v4.m1.saveStudentRecord({ ...input, studentId: other, requestId: randomUUID(), expectedRevision: 1 }), { code: "invalid" });
+  assert.deepEqual(v4.m1.studentRecords("enrollment", other).records, []);
+  const edit = { ...input, requestId: randomUUID(), expectedRevision: 1, fields: { ...fields, notes: "合成更新" } };
+  const saved = v4.m1.saveStudentRecord(edit);
+  const pack = captureProtection([...v4.stores, ops4], "0.1.0", 2, 4);
+  const recovered = await io.restore(f.dir, pack, true);
+  const finalDir = join(recovered.location, "data");
+  const reopened = openStores(finalDir, t, 4);
+  assert.deepEqual(reopened.m1.studentRecords("enrollment", f.studentId).records, [saved]);
+  assert.deepEqual(reopened.m1.saveStudentRecord(edit), saved);
+  v4.m1.protectionConnection().prepare("UPDATE student_enrollments SET revision=3 WHERE revision=2").run();
+  assert.throws(() => captureProtection([...v4.stores, ops4], "0.1.0", 2, 4), /不一致/);
+});
+
+test("enrollment reminder uses inclusive institution expiry and ignores cancelled registrations", () => {
+  const { enrollmentStatus } = require("../build/student-records.js");
+  const fields = { startsOn: "2026-11-24", endsOn: "2026-12-01", status: "有效" };
+  assert.equal(enrollmentStatus(fields, "2026-11-23"), "尚未生效");
+  assert.equal(enrollmentStatus(fields, "2026-11-30"), "还有 1 天到期");
+  assert.equal(enrollmentStatus(fields, "2026-12-01"), "今日到期");
+  assert.equal(enrollmentStatus(fields, "2026-12-02"), "已到期");
+  assert.equal(enrollmentStatus({ ...fields, status: "已取消" }, "2026-12-02"), "已取消");
+});
+
 test("SWBACK2 rejects busy and wrongly linked operations and releases earlier SQLite locks", t => {
   const f = fiveFixture(t);
   f.create();

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { IntakeHistorySummary, Result, Student, WorkspaceApi } from "./contracts";
+import type { StudentRecordKind } from "./student-records";
 import "./student-detail.css";
 
 const sections = [
@@ -62,11 +63,12 @@ function ImportSources({ api, student }: { api: WorkspaceApi; student: Student }
   </section>;
 }
 
-export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp }: {
+export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, recordPanels }: {
   student: Student; api: WorkspaceApi; intakeOpen: boolean;
   actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode; parentFollowUp?: ReactNode;
+  recordPanels: { id: StudentRecordKind; label: string; content: ReactNode }[];
 }) {
-  const [selected, setSelected] = useState<(typeof sections)[number]["id"] | "edit" | "parent">("growth");
+  const [selected, setSelected] = useState<(typeof sections)[number]["id"] | "edit" | "parent" | StudentRecordKind>("growth");
 
   return <article className="student-detail" aria-labelledby="student-detail-heading">
     <header className="panel student-overview">
@@ -88,6 +90,8 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
         onClick={() => setSelected("edit")}>基础档案编辑</button>}
       {parentFollowUp && <button type="button" aria-controls="student-section-parent" aria-pressed={selected === "parent"}
         onClick={() => setSelected("parent")}>家长诉求</button>}
+      {recordPanels.map(panel => <button key={panel.id} type="button" aria-controls={"student-section-" + panel.id}
+        aria-pressed={selected === panel.id} onClick={() => setSelected(panel.id)}>{panel.label}</button>)}
     </nav>
     <div id="student-section-growth" hidden={selected !== "growth"}>{!intakeOpen && growth}</div>
     <div id="student-section-history" hidden={selected !== "history"}>{history}</div>
@@ -96,11 +100,14 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
     </div>
     {edit && <div id="student-section-edit" hidden={selected !== "edit"}>{!intakeOpen && edit}</div>}
     {parentFollowUp && <div id="student-section-parent" hidden={selected !== "parent"}>{!intakeOpen && parentFollowUp}</div>}
+    {recordPanels.map(panel => <div key={panel.id} id={"student-section-" + panel.id} hidden={selected !== panel.id}>
+      {!intakeOpen && panel.content}
+    </div>)}
     <section id="student-section-planned" className="panel student-planned" hidden={selected !== "planned"}
       aria-labelledby="student-planned-heading">
       <h2 id="student-planned-heading">规划中的功能</h2>
       <ul>{!parentFollowUp && <li>家长诉求</li>}
-        {["成绩趋势", "提分方案", "到期提醒"].map(label => <li key={label}>{label}</li>)}</ul>
+        {["成绩趋势", "提分方案", ...(!recordPanels.length ? ["到期提醒"] : [])].map(label => <li key={label}>{label}</li>)}</ul>
     </section>
   </article>;
 }
