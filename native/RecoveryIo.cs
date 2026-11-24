@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
 // All file traversal below the verified volume root uses single-component relative opens.
@@ -57,6 +58,46 @@ internal static class RecoveryIo {
         IntPtr serial, IntPtr maxComponent, IntPtr flags, StringBuilder fsName, uint fsCapacity);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     static extern uint GetDriveTypeW(string root);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr GetStdHandle(int stream);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool WriteFile(IntPtr handle, IntPtr bytes, uint count, out uint written, IntPtr overlapped);
+
+    // A synchronous Windows pipe write can accept fewer bytes than requested.
+    // The .NET Framework console stream does not expose that count to its caller.
+    sealed class BinaryOutput : Stream {
+        readonly IntPtr handle = GetStdHandle(-11);
+        public override bool CanRead { get { return false; } }
+        public override bool CanSeek { get { return false; } }
+        public override bool CanWrite { get { return true; } }
+        public override long Length { get { throw new NotSupportedException(); } }
+        public override long Position { get { throw new NotSupportedException(); } set { throw new NotSupportedException(); } }
+        public override void Flush() {}
+        public override int Read(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+        public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+        public override void SetLength(long length) { throw new NotSupportedException(); }
+        public override void Write(byte[] buffer, int offset, int count) {
+            var pinned = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+            try {
+                int started = Environment.TickCount;
+                while (count != 0) {
+                    uint written;
+                    if (!WriteFile(handle, IntPtr.Add(pinned.AddrOfPinnedObject(), offset), (uint)count, out written, IntPtr.Zero))
+                        throw new Win32Exception(Marshal.GetLastWin32Error());
+                    Check(written <= count, "Invalid binary output count.");
+                    if (written == 0) {
+                        Check(unchecked(Environment.TickCount - started) < 5000, "Binary output is stalled.");
+                        Thread.Sleep(1);
+                        continue;
+                    }
+                    offset += (int)written;
+                    count -= (int)written;
+                    started = Environment.TickCount;
+                }
+            } finally { pinned.Free(); }
+        }
+    }
+
 
     static void Check(bool valid, string message) {
         if (!valid) throw new IOException(message);
@@ -190,8 +231,25 @@ internal static class RecoveryIo {
         using (var h = Child(path.Current, leaf, false, false))
         using (var input = new FileStream(h, FileAccess.Read, 65536)) {
             Check(input.Length > 0 && input.Length <= MaxPackage, "Backup size out of range.");
-            input.CopyTo(Console.OpenStandardOutput());
+            input.CopyTo(new BinaryOutput());
             CheckEntry(h, false);
+        }
+    }
+
+    static void ReadLegacy(string directory) {
+        using (var path = new PinnedPath(directory))
+        using (var main = Child(path.Current, "mvp.sqlite3", false, false))
+        using (var marker = Child(path.Current, "mvp.initialized", false, false))
+        using (var db = new FileStream(main, FileAccess.Read, 65536))
+        using (var stamp = new FileStream(marker, FileAccess.Read, 128)) {
+            // Share-read handles reject active writable connections and pin the two files for the whole capture.
+            CheckNames(directory, "mvp.sqlite3", "mvp.initialized");
+            Check(stamp.Length == 7 && new StreamReader(stamp, Encoding.ASCII).ReadToEnd() == MarkerContents[0],
+                "Invalid legacy initialization marker.");
+            Check(db.Length >= 512 && db.Length <= MaxDatabase, "Invalid legacy database size.");
+            db.CopyTo(new BinaryOutput());
+            CheckNames(directory, "mvp.sqlite3", "mvp.initialized");
+            CheckEntry(main, false);
         }
     }
 
@@ -289,7 +347,7 @@ internal static class RecoveryIo {
                 expected.Add(RestoreFiles[i].Replace(".sqlite3", ".initialized"));
             }
             CheckNames(Path.Combine(profile, directory), expected.ToArray());
-            var output = new BinaryWriter(Console.OpenStandardOutput());
+            var output = new BinaryWriter(new BinaryOutput());
             output.Write(record.Length);
             output.Write(record);
             for (int i = 0; i < count; i++) {
@@ -308,6 +366,7 @@ internal static class RecoveryIo {
         try {
             if (args.Length == 4 && args[0] == "publish") Publish(args[1], args[2], Int32.Parse(args[3]));
             else if (args.Length == 2 && args[0] == "read") ReadInput(args[1]);
+            else if (args.Length == 2 && args[0] == "read-legacy") ReadLegacy(args[1]);
             else if ((args.Length == 3 || args.Length == 4 || args.Length == 5) &&
                      (args[0] == "restore" || args[0] == "activate" || args[0] == "inspect" || args[0] == "inspect-active")) {
                 string version = args.Length == 3 ? "1" : args[3];

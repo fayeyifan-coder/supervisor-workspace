@@ -14,15 +14,6 @@ asar: true
 npmRebuild: false
 win:
   target:
-    - nsis
+    - dir
   signAndEditExecutable: false
   artifactName: SupervisorWorkspace-MVP-${version}-win-${arch}.${ext}
-nsis:
-  oneClick: false
-  perMachine: false
-  allowElevation: false
-  allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
-  shortcutName: Supervisor Workspace MVP
-  runAfterFinish: false
-  deleteAppDataOnUninstall: false

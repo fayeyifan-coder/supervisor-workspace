@@ -1,6 +1,6 @@
 {
   "name": "supervisor-workspace-mvp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Offline Windows workspace for student learning records",
   "author": "Supervisor Workspace",
@@ -10,7 +10,7 @@
     "build": "node scripts/build-recovery.cjs && tsc -p tsconfig.main.json && vite build --base ./",
     "test": "node scripts/build-recovery.cjs && tsc -p tsconfig.main.json && node --test test/*.test.cjs",
     "pack:win:dir": "electron-builder --win --x64 --dir --publish never",
-    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never"
+    "dist:win": "npm run build && npm run pack:win:dir"
   },
   "dependencies": {
     "react": "19.3.1",

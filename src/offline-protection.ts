@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { freemem } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { isM1Version, m1Protection, m1ProtectionLayout, verifyStudentEdits, WorkspaceFault, type M1Version } from "./database";
 import { studentRecordSchema, verifyStudentRecords } from "./student-records";
@@ -28,6 +29,8 @@ const maxDatabase = 32 * 1024 * 1024;
 const maxPackage = 161 * 1024 * 1024;
 const maxManifest = 16 * 1024;
 const maxRecoveryEvidence = 32 * 1024;
+const minimumBackupReserve = 128 * 1024 * 1024;
+const workingCopies = 8;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 interface ManifestDatabase {
@@ -76,6 +79,18 @@ export function requireSupportedProfileOpen(name: string, hasRestoreRecord = fal
 }
 
 function reject(message: string): never { throw new WorkspaceFault("invalid", message); }
+function maxAffordableBytes(): number {
+  const available = Math.min(freemem(), process.availableMemory());
+  return Math.max(0, Math.floor((available - minimumBackupReserve) / workingCopies));
+}
+
+function lowMemory(): never {
+  throw new WorkspaceFault("failed", "可用内存不足，未完成备份或恢复。请释放内存后重试并保留原档案。");
+}
+
+function requireBackupMemory(bytes: number): void {
+  if (bytes > maxAffordableBytes()) lowMemory();
+}
 function sha(bytes: Uint8Array | string): string { return createHash("sha256").update(bytes).digest("hex"); }
 function schema(db: DatabaseSync): string {
   return JSON.stringify(db.prepare("SELECT type,name,tbl_name,sql FROM main.sqlite_schema ORDER BY type,name").all());
@@ -102,13 +117,18 @@ function checkImage(db: DatabaseSync, layout: Layout): void {
   if (layout.key === "mvp" && layout.version >= 4) verifyStudentRecords(db, layout.version);
 }
 
-function snapshot(source: DatabaseSync, layout: Layout): Buffer {
-  checkImage(source, layout);
+function imageSize(source: DatabaseSync, layout: Layout): number {
   const pageCount = Number(source.prepare("PRAGMA page_count").get()?.page_count);
   const pageSize = Number(source.prepare("PRAGMA page_size").get()?.page_size);
   if (!Number.isSafeInteger(pageCount * pageSize) || pageCount * pageSize > maxDatabase) {
     reject("数据库超过离线备份上限：" + layout.key);
   }
+  return pageCount * pageSize;
+}
+
+function snapshot(source: DatabaseSync, layout: Layout): Buffer {
+  imageSize(source, layout);
+  checkImage(source, layout);
   const memory = new DatabaseSync(":memory:", { allowExtension: false, enableForeignKeyConstraints: true });
   try {
     memory.exec("PRAGMA trusted_schema=OFF; PRAGMA journal_mode=MEMORY; PRAGMA max_page_count=8192; BEGIN");
@@ -249,6 +269,7 @@ export function captureProtection(stores: readonly Store[], applicationVersion: 
   if (!/^[A-Za-z0-9_.+-]{1,64}$/.test(applicationVersion)) reject("备份库清单无效。");
   const layouts = layoutsFor(format, m1Version);
   const { images, createdAt } = withProtectionConnections(stores, format, connections => {
+    requireBackupMemory(connections.reduce((size, db, index) => size + imageSize(db, layouts[index]), maxManifest));
     const createdAt = new Date().toISOString();
     const images = connections.map((db, index) => snapshot(db, layouts[index]));
     if (format === 2) summary(connections, { createdAt, applicationVersion, formatVersion: format });
@@ -320,6 +341,7 @@ function encodeProtection(manifest: Manifest, images: Buffer[]): Buffer {
 }
 
 export function validateProtection(packageBytes: Buffer): { summary: ProtectionSummary; images: Buffer[]; manifest: Manifest } {
+  requireBackupMemory(packageBytes.length);
   const header = packageBytes.subarray(0, magic.length);
   const format: ProtectionFormat = header.equals(fiveMagic) ? 2 : 1;
   if (packageBytes.length > (format === 2 ? maxPackage : 129 * 1024 * 1024) || packageBytes.length < 64 ||
@@ -388,17 +410,20 @@ export function validateProtection(packageBytes: Buffer): { summary: ProtectionS
 export class ProtectionFiles {
   constructor(private readonly helper: string) {}
 
-  private native(args: string[], input?: Buffer): Promise<Buffer> {
+  private native(args: string[], input?: Buffer, expectedOutput = maxPackage): Promise<Buffer> {
+    const memoryLimit = Math.min(expectedOutput, maxAffordableBytes());
     return new Promise((resolve, reject) => {
       const child = spawn(this.helper, args, { windowsHide: true, shell: false });
       const chunks: Buffer[] = [];
       let length = 0;
       let outputOverflow = false;
+      let outOfMemory = false;
       let stdinFailed = false;
       child.stdout.on("data", (chunk: Buffer) => {
         length += chunk.length;
-        if (length > maxPackage) {
+        if (length > memoryLimit) {
           outputOverflow = true;
+          outOfMemory ||= length <= expectedOutput;
           child.kill();
         } else chunks.push(chunk);
       });
@@ -406,9 +431,17 @@ export class ProtectionFiles {
       child.stdin.on("error", () => { stdinFailed = true; });
       child.once("error", () => reject(new WorkspaceFault("failed", "Windows 文件保护组件无法启动。")));
       child.once("close", code => {
-        if (code !== 0 || outputOverflow || stdinFailed) {
+        if (outOfMemory) {
+          reject(new WorkspaceFault("failed", "可用内存不足，未完成备份或恢复。请释放内存后重试并保留原档案。"));
+        } else if (code !== 0 || outputOverflow || stdinFailed) {
           reject(new WorkspaceFault("failed", "Windows 无法确认路径、文件或写入结果。请保留可能留下的文件。"));
-        } else resolve(Buffer.concat(chunks, length));
+        } else {
+          try { resolve(Buffer.concat(chunks, length)); }
+          catch (error) {
+            reject(error instanceof RangeError
+              ? new WorkspaceFault("failed", "内存不足，无法接收完整备份。请保留原档案。") : error);
+          }
+        }
       });
       child.stdin.end(input);
     });
@@ -422,6 +455,7 @@ export class ProtectionFiles {
   }
 
   async read(path: string): Promise<Buffer> { return this.native(["read", path]); }
+  async readLegacy(path: string): Promise<Buffer> { return this.native(["read-legacy", path], undefined, maxDatabase); }
 
   async inspect(parent: string, name: string, format: ProtectionFormat = 1, m1Version: M1Version = 1,
     target: "recovery" | "activation" = "recovery") {

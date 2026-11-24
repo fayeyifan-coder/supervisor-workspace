@@ -31,18 +31,22 @@ function read(path: string, limit: number): string | undefined {
 export class OperationsPending {
   private readonly marker: string;
   private readonly payload: string;
+  private readonly guard: string;
   private determinedId: string | undefined;
 
   constructor(profile: string) {
     this.marker = join(profile, "operations-request.pending");
     this.payload = join(profile, "operations-request.json");
+    this.guard = join(profile, "operations-request.guard");
   }
 
   state(): PendingOperationState {
     let descriptor: ScheduleReceiptInput | undefined;
     try {
+      const guard = read(this.guard, 32);
+      if (guard !== undefined && guard !== "operations-journal-v1\n") return { kind: "damaged" };
       const marker = read(this.marker, 2048);
-      if (marker === undefined) return read(this.payload, maxPayload) === undefined
+      if (marker === undefined) return guard === undefined && read(this.payload, maxPayload) === undefined
         ? { kind: "empty" } : { kind: "damaged" };
       const parsed = object(JSON.parse(marker));
       descriptor = identity(parsed.identity);
@@ -65,7 +69,8 @@ export class OperationsPending {
       if (existing.kind === "pending" && JSON.stringify(existing.command) === payload) return descriptor.requestId;
       throw new WorkspaceFault("recovery", "另有待核对请求，请先读取数据库并核对。");
     }
-    // The marker precedes the payload. SQLite must not start unless both writes have been flushed.
+    // Independent evidence still blocks writes when both descriptor files are missing.
+    writeFileSync(this.guard, "operations-journal-v1\n", { flag: "wx", flush: true });
     writeFileSync(this.marker, JSON.stringify({ identity: descriptor, sha256: digest(payload) }), { flag: "wx", flush: true });
     writeFileSync(this.payload, payload, { flag: "wx", flush: true });
     this.determinedId = undefined;
@@ -89,6 +94,7 @@ export class OperationsPending {
     // If removal is interrupted, a remaining marker keeps the request in recovery.
     if (read(this.payload, maxPayload) !== undefined) unlinkSync(this.payload);
     unlinkSync(this.marker);
+    if (read(this.guard, 32) !== undefined) unlinkSync(this.guard);
     this.determinedId = undefined;
   }
 }

@@ -46,11 +46,11 @@ function plainFile(path: string, max = Infinity, optional = false) {
   return true;
 }
 
-export function readActivation(owner: string): ActivationState {
+export function readActivation(owner: string, required = false): ActivationState {
   const path = join(owner, stateName);
   const initialized = plainFile(join(owner, markerName), 32, true);
   if (!plainFile(path, 2048, true)) {
-    if (initialized) invalid("活动档案选择记录缺失。请保留原档案和恢复资料。");
+    if (required || initialized) invalid("活动档案选择记录缺失。请保留原档案和恢复资料。");
     return { version: 1, active: null, pending: null };
   }
   let state: ActivationState;
@@ -64,7 +64,7 @@ export function readActivation(owner: string): ActivationState {
     invalid("活动档案选择记录无效。请保留原档案和恢复资料。");
   }
   // The first state is empty until the initialization marker is durably published.
-  if (initialized ? readFileSync(join(owner, markerName), "utf8") !== markerContents : state.active !== null || pending !== null) {
+  if (initialized ? readFileSync(join(owner, markerName), "utf8") !== markerContents : required || state.active !== null || pending !== null) {
     invalid("档案选择初始化记录不完整。请保留原档案和恢复资料。");
   }
   return state;
@@ -76,10 +76,10 @@ function publishSelectionFile(owner: string, path: string, value: string) {
   renameSync(temporary, path);
 }
 
-export function saveActivation(owner: string, state: ActivationState): void {
+export function saveActivation(owner: string, state: ActivationState, required = false): void {
   const path = join(owner, stateName);
   const marker = join(owner, markerName);
-  const previous = readActivation(owner);
+  const previous = readActivation(owner, required);
   if (!plainFile(marker, 32, true)) {
     publishSelectionFile(owner, path, JSON.stringify(previous));
     publishSelectionFile(owner, marker, markerContents);
