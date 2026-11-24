@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { AttendancePlan, Failure, ScheduleSaveInput, Student, WorkspaceApi } from "./contracts";
-import { minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange } from "./schedule-calendar";
+import { attendanceCounts, minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange } from "./schedule-calendar";
 import { AttendanceLearningPanel } from "./AttendanceLearningPanel";
 import { usePendingOperation } from "./use-pending-operation";
 import "./weekly-schedule.css";
@@ -9,6 +9,7 @@ const dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "�
 const statuses: Record<AttendancePlan["status"], string> = {
   planned: "待确认", confirmed: "已确认", attended: "已到校", absent: "缺席", cancelled: "已取消",
 };
+const attendanceLabel = (plan: AttendancePlan) => plan.checkOutAt === null ? statuses[plan.status] : "已签退";
 
 interface Draft {
   id: string;
@@ -209,6 +210,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
   for (const plan of current?.rows ?? []) plansByDay.get(shanghaiParts(plan.startAt).date)?.push(plan);
   const hasMonday = Boolean(plansByDay.get(week)?.length);
   const shownDays = mode === "day" ? [day] : hasMonday ? days : days.slice(1);
+  const listed = attendanceCounts(shownDays.flatMap(date => plansByDay.get(date) ?? []));
   const readOnly = Boolean(draft?.original && !canEdit(draft.original));
   const exception = draft && outsideHours(draft);
 
@@ -274,11 +276,11 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
     {draft && <form className="panel schedule-form" ref={formRef} onSubmit={event => void save(event)} aria-label="排课表单">
       <div className="schedule-form-heading">
         <h2>{readOnly ? "排课详情" : draft.original ? "修改单次排课" : "新建单次排课"}</h2>
-        {draft.original && <span className="muted">{statuses[draft.original.status]}</span>}
+        {draft.original && <span className="muted">{attendanceLabel(draft.original)}</span>}
       </div>
       {readOnly && <p className="muted">已开始或已结束的排课只供查看。</p>}
       {latest && <div className="notice pending" role="alert">
-        <p>当前版本已变更。最新安排为 {shanghaiParts(latest.startAt).date} {shanghaiParts(latest.startAt).time}–{shanghaiParts(latest.endAt).time}，{latest.kind === "whole_day" ? "全天" : "普通"}，{statuses[latest.status]}。</p>
+        <p>当前版本已变更。最新安排为 {shanghaiParts(latest.startAt).date} {shanghaiParts(latest.startAt).time}–{shanghaiParts(latest.endAt).time}，{latest.kind === "whole_day" ? "全天" : "普通"}，{attendanceLabel(latest)}。</p>
         <p>最新时段外例外原因：{latest.exceptionReason ?? "无"}</p>
         {canEdit(latest) ? <button className="secondary" type="button" onClick={() => {
           updateDraft({ original: latest, confirmed: false });
@@ -327,6 +329,9 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
     {current?.error && <div className="notice failure" role="alert">
       {current.error} <button type="button" className="secondary" onClick={refresh}>重新读取</button>
     </div>}
+    {current?.rows && <p className="muted schedule-counts" aria-live="polite">
+      排课 {listed.students} 人 · {listed.visits} 人次（含取消）
+    </p>}
     <div className={"schedule-days" + (mode === "day" ? " schedule-single-day" : hasMonday ? " schedule-days-extra" : "")}>
       {shownDays.map(date => {
         const day = weekday(date);
@@ -344,12 +349,12 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
             const alias = names.get(plan.studentId) ?? "待核对学生";
             return <li key={plan.id} className="schedule-card-item" data-kind={plan.kind} data-exception={Boolean(plan.exceptionReason)}>
               <button type="button" disabled={busy} className="schedule-card"
-                aria-label={alias + " " + start + "–" + end + " " + statuses[plan.status] + " · 排课详情"} onClick={() => {
+                aria-label={alias + " " + start + "–" + end + " " + attendanceLabel(plan) + " · 排课详情"} onClick={() => {
                   if (canDiscard()) showDraft(toDraft(plan));
                 }}>
                 <span className="schedule-card-time">{start}–{end}</span>
                 <strong>{alias}</strong>
-                <span className="schedule-card-meta">{plan.kind === "whole_day" ? "全天" : "普通"} · {statuses[plan.status]}</span>
+                <span className="schedule-card-meta">{plan.kind === "whole_day" ? "全天" : "普通"} · {attendanceLabel(plan)}</span>
                 {plan.exceptionReason && <span className="schedule-card-exception">时段例外</span>}
               </button>
               <div className="schedule-card-actions">

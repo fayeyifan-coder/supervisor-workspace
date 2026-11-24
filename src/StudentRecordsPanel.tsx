@@ -123,6 +123,7 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
         <button type="button" className="secondary" onClick={() => setRefresh(value => value + 1)}>重新读取</button></div>
       : <>
         {overview?.(result.value.records)}
+        {kind === "enrollment" && records.length > 0 && <p className="muted">每期独立计算有效期，历史期次保留当期状态。</p>}
         {records.length === 0 && <p className="muted">尚无{definition.item}记录。</p>}
         <ul className="student-source-list">
           {records.map(row => <li key={row.id}>
