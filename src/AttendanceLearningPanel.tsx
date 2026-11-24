@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import type { AttendancePlan, LearningBlock, LearningChange, LearningDay, LearningDayInput, LearningTask,
   LearningTaskInput, Result, WorkspaceApi } from "./contracts";
 import { shanghaiMinute, shanghaiParts } from "./schedule-calendar";
@@ -220,9 +220,10 @@ function BlockCard({ block, target, locked, checkedOut, submit, onEdit }: {
   </article>;
 }
 
-export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, backLabel = "返回排课周视图" }: {
+export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, leaveGuard, backLabel = "返回课表" }: {
   api: WorkspaceApi; target: LearningDayInput; alias: string; reloadVersion: number; confirmedRequestId?: string; blocked: boolean;
   submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void; backLabel?: string;
+  leaveGuard: Ref<() => boolean>;
 }) {
   const [data, setData] = useState<LearningDay>();
   const [reload, setReload] = useState(0);
@@ -234,6 +235,10 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
   const pendingEditor = useRef<{ command: LearningChange; close: () => void } | undefined>(undefined);
+  function canLeave() {
+    return !running.current && (!draft || window.confirm("确认离开学习块表单？"));
+  }
+  useImperativeHandle(leaveGuard, () => canLeave);
   useEffect(() => {
     let ignore = false;
     const query = { attendanceId: target.attendanceId, studentId: target.studentId };
@@ -305,10 +310,8 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
 
   return <section className="schedule-page learning-day" aria-labelledby="learning-day-title">
     <header className="schedule-heading">
-      <div><button className="schedule-back" type="button" disabled={busy} onClick={() => {
-        if (!draft || window.confirm("确认离开学习块表单？")) onBack();
-      }}>{backLabel}</button>
-        <h1 id="learning-day-title">{alias} · 当日学习</h1>
+      <div><button className="schedule-back" type="button" disabled={busy} onClick={() => { if (canLeave()) onBack(); }}>{backLabel}</button>
+        <h1 id="learning-day-title" tabIndex={-1}>{alias} · 当日学习</h1>
         {plan && <p className="muted">{shanghaiParts(plan.startAt).date} · {plan.kind === "whole_day" ? "全天到校" : "普通到校"}</p>}</div>
       <button className="secondary" type="button" disabled={busy} onClick={reread}>重新读取本次到校</button>
     </header>
@@ -342,7 +345,9 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
           {plan.status === "attended" && plan.checkOutAt === null && <button type="button" className="primary"
             disabled={locked || hasActiveBlock} onClick={() => attendance("checkOut")}>签退</button>}
         </div>}
-        {waiting && started && hasStartedBlock && <p className="muted">已有实际学习记录，此次安排不能标记缺席。</p>}
+        {waiting && hasStartedBlock && <p className="notice pending" role="status">
+          本次未签到，已有实际学习记录。请核对到校情况，确认已到后点击「签到」。本次无法标记缺席。
+        </p>}
         {waiting && !started && hasLiveBlock && <p className="muted">取消到校前，须先核对关联学习块。</p>}
         {plan.status === "attended" && plan.checkOutAt === null && hasActiveBlock &&
           <p className="muted">请先结束进行中的学习块，再签退。</p>}

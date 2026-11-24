@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { AttendancePlan, Failure, ScheduleSaveInput, Student, WorkspaceApi } from "./contracts";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
+import type { AttendancePlan, Failure, LearningDayInput, ScheduleSaveInput, Student, WorkspaceApi } from "./contracts";
 import { attendanceCounts, minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange } from "./schedule-calendar";
 import { AttendanceLearningPanel } from "./AttendanceLearningPanel";
 import { usePendingOperation } from "./use-pending-operation";
@@ -61,17 +61,19 @@ function exceptionText(draft: Draft): string {
     : "周一默认停排。";
 }
 
-export function WeeklySchedulePanel({ api, students, initialStudentId, initialLearning, onExitLearning, onBack, onStudent }: {
-  api: WorkspaceApi; students: Student[]; initialStudentId: string; onBack: () => void;
-  initialLearning?: { attendanceId: string; studentId: string };
-  onExitLearning?: () => void;
-  onStudent: (studentId: string) => boolean;
+export function WeeklySchedulePanel({ api, students, studentId, setStudentId, learning, learningFromBoard,
+  onLearning, onExitLearning, learningLeaveGuard, onStudent, summary }: {
+  api: WorkspaceApi; students: Student[]; studentId: string; setStudentId: (id: string) => void;
+  learning?: LearningDayInput; learningFromBoard: boolean;
+  onLearning: (target: LearningDayInput, trigger: HTMLButtonElement) => void;
+  onExitLearning: () => void; learningLeaveGuard: Ref<() => boolean>;
+  onStudent: (studentId: string, trigger: HTMLButtonElement) => boolean;
+  summary: ReactNode;
 }) {
   const today = shanghaiParts(Date.now()).date;
   const [week, setWeek] = useState(() => mondayOf(today));
   const [day, setDay] = useState(today);
-  const [mode, setMode] = useState<"week" | "day">("week");
-  const [studentId, setStudentId] = useState(initialStudentId);
+  const [mode, setMode] = useState<"week" | "day">("day");
   const [queryRevision, setQueryRevision] = useState(0);
   const [listing, setListing] = useState<{ key: string; rows?: AttendancePlan[]; error?: string }>();
   const [draft, setDraft] = useState<Draft>();
@@ -80,7 +82,6 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const submission = useRef<ScheduleSaveInput | undefined>(undefined);
-  const [learning, setLearning] = useState(initialLearning);
   const [learningRevision, setLearningRevision] = useState(0);
   const [confirmedLearningRequest, setConfirmedLearningRequest] = useState<string>();
   const request = usePendingOperation(api, (saved, requestId) => {
@@ -94,7 +95,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
   });
   const [latest, setLatest] = useState<AttendancePlan>();
   const formRef = useRef<HTMLFormElement>(null);
-  const queryKey = week + "/" + studentId + "/" + queryRevision;
+  // Refresh the same list in place so the originating course button can receive focus.
+  const queryKey = week + "/" + studentId;
   const current = listing?.key === queryKey ? listing : undefined;
 
   useEffect(() => {
@@ -105,7 +107,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
       if (mounted) setListing({ key: queryKey, error: "无法读取本周排课，请重试。" });
     });
     return () => { mounted = false; };
-  }, [api, queryKey, studentId, week]);
+  }, [api, queryKey, queryRevision, studentId, week, learning]);
 
   function refresh() { setQueryRevision(value => value + 1); }
 
@@ -234,20 +236,20 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
             onClick={() => void request.hydrate()}>重新读取待核对状态</button>}
         </div>
       </aside>}
-    {learning && <AttendanceLearningPanel api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
+    {learning && <AttendanceLearningPanel key={learning.attendanceId} api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
       reloadVersion={learningRevision} confirmedRequestId={confirmedLearningRequest}
       blocked={request.blocked} submit={request.run}
-      backLabel={onExitLearning ? "返回今日到校" : undefined}
-      onBack={() => { if (onExitLearning) onExitLearning(); else { setLearning(undefined); refresh(); } }} />}
+      leaveGuard={learningLeaveGuard} backLabel={learningFromBoard ? "返回今日到校" : undefined}
+      onBack={onExitLearning} />}
     <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}>
     <header className="schedule-heading">
       <div>
-        <button className="schedule-back" type="button" onClick={() => { if (canDiscard()) onBack(); }}>返回学生档案</button>
-        <h1 id="schedule-title">{initialStudentId ? "学生排课" : "全局总课表"}</h1>
+        <h1 id="schedule-title" tabIndex={-1}>全局总课表</h1>
         <p className="muted">机构时间（上海） · 周一默认停排</p>
       </div>
       <button type="button" className="primary schedule-primary" disabled={!students.length || busy || request.blocked} onClick={newDraft}>新建单次排课</button>
     </header>
+    {summary}
     <div className="schedule-toolbar">
       <div className="schedule-period">
         <div className="schedule-buttons" aria-label="课表视图">
@@ -359,15 +361,14 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, initialLe
               </button>
               <div className="schedule-card-actions">
                 <button className="primary schedule-learning-entry" type="button" disabled={busy || request.busy}
-                  aria-label={"进入学习 · " + alias + " " + start + "–" + end} onClick={() => {
+                  aria-label={"进入学习 · " + alias + " " + start + "–" + end} onClick={event => {
                     if (!canDiscard()) return;
                     showDraft(undefined);
-                    setLearning({ attendanceId: plan.id, studentId: plan.studentId });
-                    window.scrollTo(0, 0);
+                    onLearning({ attendanceId: plan.id, studentId: plan.studentId }, event.currentTarget);
                   }}>进入学习</button>
                 <button className="schedule-profile-link" type="button" disabled={busy || request.busy || !names.has(plan.studentId)}
-                  aria-label={"查看学生档案 · " + alias} onClick={() => {
-                    if (canDiscard() && onStudent(plan.studentId)) showDraft(undefined);
+                  aria-label={"查看学生档案 · " + alias} onClick={event => {
+                    if (canDiscard() && onStudent(plan.studentId, event.currentTarget)) showDraft(undefined);
                   }}>学生档案</button>
               </div>
             </li>;

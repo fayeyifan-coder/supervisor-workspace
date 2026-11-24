@@ -1,5 +1,11 @@
 .workspace[hidden] { display: none; }
 .schedule-heading-actions { display: flex; align-items: center; gap: 12px; }
+.masthead:has(.workspace-navigation button) { position: sticky; top: 0; z-index: 2; background: #f3f5ef; }
+.workspace-navigation { justify-content: end; flex-wrap: wrap; gap: 6px; }
+.workspace-navigation [aria-current="page"] { background: #e3ebe0; border-color: #899c8c; }
+@media (max-width: 720px) {
+  .workspace-navigation .scope { display: none; }
+}
 .schedule-page { padding: 25px 24px 32px; }
 .schedule-heading, .schedule-toolbar, .schedule-form-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; }
 .schedule-heading { padding-bottom: 16px; border-bottom: 1px solid var(--line); }

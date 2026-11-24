@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { LearningDayInput, Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
-import { AttendanceBoard } from "./AttendanceBoard";
+import { AttendanceBoard, AttendanceOverview, useTodayAttendance } from "./AttendanceBoard";
 import { WeeklySchedulePanel } from "./WeeklySchedulePanel";
 import { DataProtectionPanel } from "./DataProtectionPanel";
 import { StudentIntakePanel } from "./StudentIntakePanel";
@@ -111,7 +111,12 @@ function HistoryView({ history, reload }: { history?: History; reload: () => voi
 function App() {
   const api = window.supervisorWorkspace;
   const [students, setStudents] = useState<Student[]>();
-  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduleEnabled, setScheduleEnabled] = useState<boolean>();
+  const [page, setPage] = useState<"schedule" | "board" | "students">("schedule");
+  const [studentFilter, setStudentFilter] = useState("");
+  const [learning, setLearning] = useState<LearningDayInput>();
+  const learningLeaveGuard = useRef<() => boolean>(null);
+  const attendance = useTodayAttendance(api, scheduleEnabled === true);
   const [studentEditEnabled, setStudentEditEnabled] = useState(false);
   const [studentWriteRefresh, setStudentWriteRefresh] = useState(0);
   const [writeResolution, setWriteResolution] = useState<StudentWriteResolution>();
@@ -122,10 +127,9 @@ function App() {
     setRecordActivity(old => old[kind]?.dirty === dirty && old[kind]?.busy === busy ? old : { ...old, [kind]: { dirty, busy } });
   }, []);
   const [parentFollowUpEnabled, setParentFollowUpEnabled] = useState(false);
-  const [schedule, setSchedule] = useState<{ studentId: string; learning?: LearningDayInput }>();
-  const [boardOpen, setBoardOpen] = useState(false);
   const [profileReturn, setProfileReturn] = useState<"schedule" | "board">();
-  const routeScroll = useRef(0);
+  const entry = useRef<{ trigger: HTMLButtonElement; scroll: number }>(null);
+  const scheduleNav = useRef<HTMLButtonElement>(null);
   const [activeId, setActiveId] = useState<string>();
   const [creating, setCreating] = useState(false);
   const [listError, setListError] = useState("");
@@ -149,8 +153,8 @@ function App() {
   useEffect(() => {
     let current = true;
     api.scheduleAvailable().then(result => {
-      if (current && result.ok) setScheduleEnabled(result.value);
-    }).catch(() => {});
+      if (current) setScheduleEnabled(result.ok && result.value);
+    }).catch(() => { if (current) setScheduleEnabled(false); });
     api.studentEditAvailable().then(result => {
       if (current && result.ok) setStudentEditEnabled(result.value);
     }).catch(() => {});
@@ -269,16 +273,43 @@ function App() {
     return true;
   }
 
-  const showingWorkspace = Boolean(profileReturn) || (!schedule && !boardOpen);
+  const showingWorkspace = scheduleEnabled === false || page === "students";
 
-  function openLinkedStudent(studentId: string, origin: "schedule" | "board"): boolean {
+  function restoreEntry() {
+    const origin = entry.current;
+    entry.current = null;
+    requestAnimationFrame(() => {
+      window.scrollTo(0, origin?.scroll ?? 0);
+      const control = origin?.trigger;
+      (control?.isConnected && !control.disabled && control.getClientRects().length ? control : scheduleNav.current)
+        ?.focus({ preventScroll: true });
+    });
+  }
+
+  function openLearning(target: LearningDayInput, trigger: HTMLButtonElement) {
+    entry.current = { trigger, scroll: window.scrollY };
+    setLearning(target);
+    requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+      document.getElementById("learning-day-title")?.focus({ preventScroll: true });
+    });
+  }
+
+  function closeLearning() {
+    setLearning(undefined);
+    attendance.reload();
+    restoreEntry();
+  }
+
+  function openLinkedStudent(studentId: string, origin: "schedule" | "board", trigger: HTMLButtonElement): boolean {
     if (!students?.some(student => student.id === studentId) || locked || editorBusy || intakeOpen) return false;
     if ((studentId !== activeId || creating) && !canLeaveStudentDrafts()) return false;
-    routeScroll.current = window.scrollY;
+    entry.current = { trigger, scroll: window.scrollY };
     setActiveId(studentId);
     setCreating(false);
     setNotice(undefined);
     setProfileReturn(origin);
+    setPage("students");
     requestAnimationFrame(() => {
       document.getElementById("student-detail-heading")?.focus({ preventScroll: true });
       window.scrollTo(0, 0);
@@ -287,34 +318,62 @@ function App() {
   }
 
   function returnToOrigin() {
+    if (!profileReturn) return;
+    setPage(profileReturn);
     setProfileReturn(undefined);
-    requestAnimationFrame(() => window.scrollTo(0, routeScroll.current));
+    restoreEntry();
+  }
+
+  function navigate(next: typeof page) {
+    if (learning) {
+      if (!learningLeaveGuard.current?.()) return;
+      if (page === next) { closeLearning(); return; }
+      setLearning(undefined);
+      attendance.reload();
+    } else if (next === page) {
+      return;
+    }
+    if (next === profileReturn) { returnToOrigin(); return; }
+    entry.current = null;
+    setProfileReturn(undefined);
+    setPage(next);
+    requestAnimationFrame(() => window.scrollTo(0, 0));
   }
 
   return <main className="shell" data-ui>
     <header className="masthead">
       <div className="brand"><span className="brand-mark" aria-hidden="true" /><strong>督学工作台</strong></div>
-      <div className="schedule-heading-actions">
+      <nav className="schedule-heading-actions workspace-navigation" aria-label="工作台">
         <span className="scope">离线验收 · 仅用虚构学生</span>
-        {scheduleEnabled && !schedule && !boardOpen && <button className="secondary" type="button"
-          disabled={!students || locked || editorBusy || intakeOpen}
-          onClick={() => setSchedule({ studentId: "" })}>全局总课表</button>}
-        {scheduleEnabled && !schedule && !boardOpen && <button className="secondary" type="button"
-          disabled={!students || locked || editorBusy || intakeOpen}
-          onClick={() => setBoardOpen(true)}>今日到校看板</button>}
-      </div>
+        {scheduleEnabled && <>
+          <button className="secondary" type="button" ref={scheduleNav} aria-current={page === "schedule" && !learning ? "page" : undefined}
+            disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("schedule")}>全局总课表</button>
+          <button className="secondary" type="button" aria-current={page === "board" && !learning ? "page" : undefined}
+            disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("board")}>今日到校看板</button>
+          <button className="secondary" type="button" aria-current={showingWorkspace ? "page" : undefined}
+            disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("students")}>学生档案</button>
+        </>}
+      </nav>
     </header>
     {parentFollowUpEnabled && students && <StudentWriteRecoveryPanel api={api} students={students}
       refresh={studentWriteRefresh} onResolved={setWriteResolution} />}
-    {schedule && students && <div hidden={showingWorkspace}>
-      <WeeklySchedulePanel key={schedule.learning?.attendanceId ?? schedule.studentId} api={api} students={students} initialStudentId={schedule.studentId}
-        initialLearning={schedule.learning} onExitLearning={schedule.learning ? () => setSchedule(undefined) : undefined}
-        onStudent={studentId => openLinkedStudent(studentId, "schedule")} onBack={() => setSchedule(undefined)} />
+    {!showingWorkspace && (!students || scheduleEnabled === undefined) &&
+      <p className="schedule-page" role="status">{listError || "正在读取课表…"}</p>}
+    {!showingWorkspace && !students && listError && <button type="button" className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取档案</button>}
+    {scheduleEnabled && students && <div hidden={page !== "schedule" && !learning}>
+      <WeeklySchedulePanel api={api} students={students} studentId={studentFilter} setStudentId={setStudentFilter}
+        learning={learning} learningFromBoard={page === "board"} onLearning={openLearning} onExitLearning={closeLearning}
+        learningLeaveGuard={learningLeaveGuard} onStudent={(id, trigger) => openLinkedStudent(id, "schedule", trigger)}
+        summary={<section className="schedule-attendance" aria-labelledby="schedule-attendance-title">
+          <h2 id="schedule-attendance-title">今日到校{attendance.result?.ok && <> · <time dateTime={attendance.result.value.date}>{attendance.result.value.date}</time></>}</h2>
+          {!attendance.result ? <p role="status" className="muted">正在读取今日到校…</p>
+            : attendance.result.ok ? <AttendanceOverview day={attendance.result.value} compact />
+            : <p role="alert">{attendance.result.message}</p>}
+        </section>} />
     </div>}
-    {boardOpen && !schedule && students && <div hidden={showingWorkspace}>
-      <AttendanceBoard api={api} students={students}
-        onBack={() => setBoardOpen(false)} onStudent={studentId => openLinkedStudent(studentId, "board")}
-        onLearning={learning => setSchedule({ studentId: learning.studentId, learning })} />
+    {scheduleEnabled && students && <div hidden={page !== "board" || Boolean(learning)}>
+      <AttendanceBoard result={attendance.result} reload={attendance.reload} students={students}
+        onStudent={(id, trigger) => openLinkedStudent(id, "board", trigger)} onLearning={openLearning} />
     </div>}
     <div className="workspace" hidden={!showingWorkspace}>
       <aside className="roster" aria-label="学生档案">
@@ -364,9 +423,10 @@ function App() {
                 </button>}
                 <button className="secondary" type="button" disabled={locked || editorBusy}
                   onClick={() => {
+                    entry.current = null;
                     setProfileReturn(undefined);
-                    setBoardOpen(false);
-                    setSchedule({ studentId: active.id });
+                    setStudentFilter(active.id);
+                    setPage("schedule");
                     window.scrollTo(0, 0);
                   }}>查看该学生排课</button>
               </div>}
