@@ -36,9 +36,21 @@ export interface IntakeOutcome {
   message: string;
 }
 export interface IntakeHistoryEntry {
+  digest: string;
   source: IntakePreview;
   state: "pending" | "review" | "done";
   updatedAt: number;
+}
+export interface IntakeHistorySummary {
+  studentId: string;
+  entries: {
+    digest: string;
+    code: string;
+    state: IntakeHistoryEntry["state"];
+    updatedAt: number;
+    documentCount: number;
+    reviewCount: number;
+  }[];
 }
 
 const applicationId = 0x53574931;
@@ -195,8 +207,9 @@ export class IntakeStore {
   }
 
   history(studentId: string): IntakeHistoryEntry[] {
-    return this.db.prepare("SELECT source_json,state,updated_at FROM intake_jobs JOIN intake_bindings USING(code) " +
+    return this.db.prepare("SELECT digest,source_json,state,updated_at FROM intake_jobs JOIN intake_bindings USING(code) " +
       "WHERE student_id=? ORDER BY updated_at DESC,digest DESC LIMIT 20").all(studentId).map(row => ({
+      digest: row.digest as string,
       source: JSON.parse(row.source_json as string) as IntakePreview,
       state: row.state as Job["state"], updatedAt: row.updated_at as number,
     }));
@@ -406,6 +419,21 @@ export class StudentIntakeService {
   history(studentId: string): IntakeHistoryEntry[] {
     if (typeof studentId !== "string" || !this.student(studentId)) invalid("找不到所选学生。");
     return this.store.history(studentId);
+  }
+
+  historySummary(studentId: string): IntakeHistorySummary {
+    const entries = this.history(studentId).map(({ digest, source, state, updatedAt }) => {
+      if (!Number.isFinite(new Date(updatedAt).getTime())) recovery("导入来源的处理时间无效。请保留原档案以供核对。");
+      return {
+        digest,
+        code: source.code,
+        state,
+        updatedAt,
+        documentCount: Array.isArray(source.source.source_documents) ? source.source.source_documents.length : 0,
+        reviewCount: source.review.filter(item => item.category === "warning" || item.category === "unknown").length,
+      };
+    });
+    return { studentId, entries };
   }
 }
 

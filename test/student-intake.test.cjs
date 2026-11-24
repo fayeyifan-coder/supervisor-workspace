@@ -9,7 +9,7 @@ const { test } = require("node:test");
 const { WorkspaceDatabase } = require("../build/database.js");
 const { GrowthProfileDatabase } = require("../build/growth-profile.js");
 const { parseIntake } = require("../build/intake-format.js");
-const { IntakeStore, StudentIntakeService } = require("../build/student-intake.js");
+const { IntakeStore, StudentIntakeService, intakeSourceDigest } = require("../build/student-intake.js");
 
 const fullFixture = readFileSync(join(__dirname, "fixtures", "synthetic-intake-001.json"), "utf8");
 const shortFixture = readFileSync(join(__dirname, "fixtures", "synthetic-intake-002.json"), "utf8");
@@ -44,6 +44,7 @@ function localStores(t) {
   return {
     get m1() { return m1; },
     get growth() { return growth; },
+    get intake() { return intake; },
     get service() { return service; },
     useGrowth(growthOverride) {
       service = new StudentIntakeService(intake, m1, growthOverride);
@@ -187,6 +188,29 @@ test("new import requires explicit confirmation and survives reopen", t => {
   assert.equal(history[0].state, "done");
   assert.deepEqual(history[0].source.source, fullJson());
   assert.deepEqual(f.service.history(unrelated.id), []);
+  assert.deepEqual(f.service.historySummary(student.id), {
+    studentId: student.id,
+    entries: [{
+      digest: intakeSourceDigest(fullJson()), code: "DEMO-001", state: "done", updatedAt: history[0].updatedAt,
+      documentCount: fullJson().source_documents.length,
+      reviewCount: history[0].source.review.filter(item => ["warning", "unknown"].includes(item.category)).length,
+    }],
+  });
+  assert.deepEqual(f.service.historySummary(unrelated.id), { studentId: unrelated.id, entries: [] });
+  assert.throws(() => f.service.historySummary(randomUUID()), validationFault);
+});
+
+test("intake history reports an unreadable timestamp without erasing the source", t => {
+  const f = localStores(t);
+  const file = register(f.service);
+  const saved = f.service.confirm(command(file, f.service.prepare(file.token, newTarget)));
+  const digest = intakeSourceDigest(fullJson());
+  const db = f.intake.protectionConnection();
+  db.prepare("UPDATE intake_jobs SET updated_at=? WHERE digest=?").run(8640000000000001, digest);
+  const original = f.service.history(saved.studentId);
+  assert.equal(original[0].updatedAt, 8640000000000001);
+  assert.throws(() => f.service.historySummary(saved.studentId), error => error.code === "recovery");
+  assert.deepEqual(f.service.history(saved.studentId), original);
 });
 
 test("a matching display alias is never treated as an import identity", t => {
