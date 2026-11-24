@@ -217,9 +217,9 @@ function BlockCard({ block, target, locked, submit, onEdit }: {
   </article>;
 }
 
-export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack }: {
+export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, backLabel = "返回排课周视图" }: {
   api: WorkspaceApi; target: LearningDayInput; alias: string; reloadVersion: number; confirmedRequestId?: string; blocked: boolean;
-  submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void;
+  submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void; backLabel?: string;
 }) {
   const [data, setData] = useState<LearningDay>();
   const [reload, setReload] = useState(0);
@@ -303,7 +303,7 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
     <header className="schedule-heading">
       <div><button className="schedule-back" type="button" disabled={busy} onClick={() => {
         if (!draft || window.confirm("确认离开学习块表单？")) onBack();
-      }}>返回排课周视图</button>
+      }}>{backLabel}</button>
         <h1 id="learning-day-title">{alias} · 当日学习</h1>
         {plan && <p className="muted">{shanghaiParts(plan.startAt).date} · {plan.kind === "whole_day" ? "全天到校" : "普通到校"}</p>}</div>
       <button className="secondary" type="button" disabled={busy} onClick={reread}>重新读取本次到校</button>

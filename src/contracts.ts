@@ -33,6 +33,7 @@ export const channels = {
   scheduleAvailable: "r2b:schedule-available",
   scheduleWeek: "r2b:schedule-week",
   schedulePlan: "r2b:schedule-plan",
+  attendanceBoard: "r2b:attendance-board",
   saveSchedulePlan: "r2b:save-schedule-plan",
   learningDay: "r2b:learning-day",
   applyLearningChange: "r2b:apply-learning-change",
@@ -114,6 +115,12 @@ export interface LearningDayInput {
   studentId: string;
 }
 
+export type AttendanceBoardStatus = "upcoming" | "unchecked" | "checked_in" | "learning" | "checked_out" | "absent" | "cancelled";
+export interface AttendanceBoardDay {
+  date: string;
+  entries: { plan: AttendancePlan; status: AttendanceBoardStatus }[];
+}
+
 export interface LearningDay {
   attendance: AttendancePlan;
   blocks: LearningBlock[];
@@ -156,6 +163,7 @@ export interface WorkspaceApi {
   acknowledgeOperation(requestId: string, reviewed?: boolean): Promise<Result<null>>;
   scheduleAvailable(): Promise<Result<boolean>>;
   scheduleWeek(input: ScheduleWeekInput): Promise<Result<AttendancePlan[]>>;
+  attendanceBoard(): Promise<Result<AttendanceBoardDay>>;
   schedulePlan(id: string): Promise<Result<AttendancePlan | null>>;
   saveSchedulePlan(input: ScheduleSaveInput): Promise<Result<AttendancePlan>>;
   exportProtection(): Promise<Result<ProtectionResult | null>>;

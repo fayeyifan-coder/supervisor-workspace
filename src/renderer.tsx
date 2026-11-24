@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import type { Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
+import type { LearningDayInput, Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
+import { AttendanceBoard } from "./AttendanceBoard";
 import { WeeklySchedulePanel } from "./WeeklySchedulePanel";
 import { DataProtectionPanel } from "./DataProtectionPanel";
 import { StudentIntakePanel } from "./StudentIntakePanel";
@@ -117,7 +118,8 @@ function App() {
     setRecordActivity(old => old[kind]?.dirty === dirty && old[kind]?.busy === busy ? old : { ...old, [kind]: { dirty, busy } });
   }, []);
   const [parentFollowUpEnabled, setParentFollowUpEnabled] = useState(false);
-  const [schedule, setSchedule] = useState<{ studentId: string }>();
+  const [schedule, setSchedule] = useState<{ studentId: string; learning?: LearningDayInput }>();
+  const [boardOpen, setBoardOpen] = useState(false);
   const [activeId, setActiveId] = useState<string>();
   const [creating, setCreating] = useState(false);
   const [listError, setListError] = useState("");
@@ -266,14 +268,21 @@ function App() {
       <div className="brand"><span className="brand-mark" aria-hidden="true" /><strong>督学工作台</strong></div>
       <div className="schedule-heading-actions">
         <span className="scope">离线验收 · 仅用虚构学生</span>
-        {scheduleEnabled && !schedule && <button className="secondary" type="button"
+        {scheduleEnabled && !schedule && !boardOpen && <button className="secondary" type="button"
           disabled={!students || locked || editorBusy || intakeOpen}
           onClick={() => setSchedule({ studentId: "" })}>全局总课表</button>}
+        {scheduleEnabled && !schedule && !boardOpen && <button className="secondary" type="button"
+          disabled={!students || locked || editorBusy || intakeOpen}
+          onClick={() => setBoardOpen(true)}>今日到校看板</button>}
       </div>
     </header>
     {schedule && students && <WeeklySchedulePanel api={api} students={students} initialStudentId={schedule.studentId}
+      initialLearning={schedule.learning} onExitLearning={schedule.learning ? () => setSchedule(undefined) : undefined}
       onBack={() => setSchedule(undefined)} />}
-    <div className="workspace" hidden={Boolean(schedule)}>
+    {boardOpen && !schedule && students && <AttendanceBoard api={api} students={students}
+      onBack={() => setBoardOpen(false)}
+      onLearning={learning => setSchedule({ studentId: learning.studentId, learning })} />}
+    <div className="workspace" hidden={Boolean(schedule) || boardOpen}>
       <aside className="roster" aria-label="学生档案">
         <div className="roster-heading"><h2>学生档案</h2>
           <button className="secondary" disabled={locked || editorBusy || intakeOpen || !students} onClick={() => {

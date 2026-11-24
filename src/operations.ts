@@ -321,6 +321,11 @@ export class OperationsDatabase {
     return { ...row, tasks } as unknown as LearningBlock;
   }
 
+  hasLearningInProgress(planId: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM learning_blocks WHERE attendance_plan_id=? AND status='in_progress' LIMIT 1")
+      .get(id(planId)));
+  }
+
   learningBlocksForAttendance(planId: string): LearningBlock[] {
     return this.db.prepare("SELECT id FROM learning_blocks WHERE attendance_plan_id=? ORDER BY planned_start,id")
       .all(id(planId)).map(row => this.learningBlock(row.id as string)!);

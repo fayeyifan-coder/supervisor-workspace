@@ -60,8 +60,10 @@ function exceptionText(draft: Draft): string {
     : "周一默认停排。";
 }
 
-export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }: {
+export function WeeklySchedulePanel({ api, students, initialStudentId, initialLearning, onExitLearning, onBack }: {
   api: WorkspaceApi; students: Student[]; initialStudentId: string; onBack: () => void;
+  initialLearning?: { attendanceId: string; studentId: string };
+  onExitLearning?: () => void;
 }) {
   const today = shanghaiParts(Date.now()).date;
   const [week, setWeek] = useState(() => mondayOf(today));
@@ -76,7 +78,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const submission = useRef<ScheduleSaveInput | undefined>(undefined);
-  const [learning, setLearning] = useState<{ attendanceId: string; studentId: string }>();
+  const [learning, setLearning] = useState(initialLearning);
   const [learningRevision, setLearningRevision] = useState(0);
   const [confirmedLearningRequest, setConfirmedLearningRequest] = useState<string>();
   const request = usePendingOperation(api, (saved, requestId) => {
@@ -232,7 +234,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
     {learning && <AttendanceLearningPanel api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
       reloadVersion={learningRevision} confirmedRequestId={confirmedLearningRequest}
       blocked={request.blocked} submit={request.run}
-      onBack={() => { setLearning(undefined); refresh(); }} />}
+      backLabel={onExitLearning ? "返回今日到校" : undefined}
+      onBack={() => { if (onExitLearning) onExitLearning(); else { setLearning(undefined); refresh(); } }} />}
     <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}>
     <header className="schedule-heading">
       <div>

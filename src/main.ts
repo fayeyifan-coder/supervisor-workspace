@@ -14,7 +14,7 @@ import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSu
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
 import { OperationsDatabase } from "./operations";
 import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
-import { applyLearningChange, readLearningDay, readScheduleReceipt } from "./learning-api";
+import { applyLearningChange, readAttendanceBoard, readLearningDay, readScheduleReceipt } from "./learning-api";
 import { OperationsPending } from "./operations-pending";
 import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, studentServicesVersion, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
@@ -231,6 +231,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     ? { ok: true, value: format === 2 && Boolean(operations && database) } : denied());
   ipcMain.handle(channels.scheduleWeek, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => listScheduleWeek(store, students, raw)));
+  ipcMain.handle(channels.attendanceBoard, event => invokeSchedule(event, readAttendanceBoard));
   ipcMain.handle(channels.schedulePlan, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => readSchedulePlan(store, students, raw)));
   function performOperation<T>(command: Record<string, unknown>, operation: () => T): T {

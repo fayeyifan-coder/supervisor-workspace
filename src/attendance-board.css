@@ -1,0 +1,12 @@
+.attendance-overview { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(78px, 1fr)); margin: 16px 0; }
+.attendance-overview div { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.attendance-overview dt { color: var(--green); margin-bottom: 4px; }
+.attendance-overview dd { font-size: 20px; font-weight: 650; margin: 0; }
+.attendance-board-list { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.attendance-board-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(75px, 1fr) auto; gap: 12px; align-items: center; margin: 0; }
+.attendance-board-row h2 { margin: 0; overflow-wrap: anywhere; }
+.attendance-board-row p { margin: 3px 0; overflow-wrap: anywhere; }
+@media (max-width: 540px) {
+  .attendance-board-row { grid-template-columns: minmax(0, 1fr) minmax(75px, auto); }
+  .attendance-board-row button { justify-self: start; }
+}
