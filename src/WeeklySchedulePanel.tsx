@@ -76,12 +76,14 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const submission = useRef<ScheduleSaveInput | undefined>(undefined);
   const [learning, setLearning] = useState<{ attendanceId: string; studentId: string }>();
   const [learningRevision, setLearningRevision] = useState(0);
-  const request = usePendingOperation(api, saved => {
+  const [confirmedLearningRequest, setConfirmedLearningRequest] = useState<string>();
+  const request = usePendingOperation(api, (saved, requestId) => {
     if (saved?.command === "saveAttendancePlan") {
       setWeek(mondayOf(shanghaiParts(saved.startAt).date));
       showDraft(undefined);
     }
     refresh();
+    setConfirmedLearningRequest(requestId);
     setLearningRevision(value => value + 1);
   });
   const [latest, setLatest] = useState<AttendancePlan>();
@@ -221,7 +223,8 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
         </div>
       </aside>}
     {learning && <AttendanceLearningPanel api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
-      reloadVersion={learningRevision} blocked={request.blocked} submit={request.run}
+      reloadVersion={learningRevision} confirmedRequestId={confirmedLearningRequest}
+      blocked={request.blocked} submit={request.run}
       onBack={() => { setLearning(undefined); refresh(); }} />}
     <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}>
     <header className="schedule-heading">
@@ -322,9 +325,9 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
             const start = shanghaiParts(plan.startAt).time;
             const end = shanghaiParts(plan.endAt).time;
             const alias = names.get(plan.studentId) ?? "待核对学生";
-            return <li key={plan.id}>
-              <button type="button" disabled={busy} className="schedule-card" data-kind={plan.kind} data-exception={Boolean(plan.exceptionReason)}
-                aria-label={alias + " " + start + "–" + end + " " + statuses[plan.status]} onClick={() => {
+            return <li key={plan.id} className="schedule-card-item" data-kind={plan.kind} data-exception={Boolean(plan.exceptionReason)}>
+              <button type="button" disabled={busy} className="schedule-card"
+                aria-label={alias + " " + start + "–" + end + " " + statuses[plan.status] + " · 排课详情"} onClick={() => {
                   if (canDiscard()) showDraft(toDraft(plan));
                 }}>
                 <span className="schedule-card-time">{start}–{end}</span>
@@ -332,13 +335,15 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
                 <span className="schedule-card-meta">{plan.kind === "whole_day" ? "全天" : "普通"} · {statuses[plan.status]}</span>
                 {plan.exceptionReason && <span className="schedule-card-exception">时段例外</span>}
               </button>
-              <button className="schedule-learning-entry" type="button" disabled={busy || request.busy}
-                aria-label={alias + " 到校与任务"} onClick={() => {
-                  if (!canDiscard()) return;
-                  showDraft(undefined);
-                  setLearning({ attendanceId: plan.id, studentId: plan.studentId });
-                  window.scrollTo(0, 0);
-                }}>到校与任务</button>
+              <div className="schedule-card-actions">
+                <button className="primary schedule-learning-entry" type="button" disabled={busy || request.busy}
+                  aria-label={"进入学习 · " + alias + " " + start + "–" + end} onClick={() => {
+                    if (!canDiscard()) return;
+                    showDraft(undefined);
+                    setLearning({ attendanceId: plan.id, studentId: plan.studentId });
+                    window.scrollTo(0, 0);
+                  }}>进入学习</button>
+              </div>
             </li>;
           })}</ul> : <p className="schedule-empty muted">无排课</p>)}
         </section>;

@@ -1,8 +1,6 @@
 .schedule-page[hidden] { display: none; }
 .schedule-recovery { margin: 16px 24px 0; }
 .schedule-recovery code { word-break: break-all; }
-.schedule-learning-entry { background: transparent; color: var(--green); width: 100%; min-height: 29px; margin-top: 2px; padding: 3px 6px; text-align: left; font-size: 12px; }
-.schedule-learning-entry:hover:enabled { background: #e6efe3; }
 .learning-day .schedule-heading { margin-bottom: 16px; }
 .learning-day h4 { margin: 0; overflow-wrap: anywhere; }
 .learning-task-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
