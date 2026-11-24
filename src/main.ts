@@ -17,6 +17,7 @@ import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSched
 import { applyLearningChange, readAttendanceBoard, readLearningDay, readScheduleReceipt } from "./learning-api";
 import { StudentWriteRecovery } from "./student-write-recovery";
 import { OperationsPending } from "./operations-pending";
+import { isWithin, plainFile, productionRootOf, requireLocalDirectory, requireProductionProfile } from "./production-profile";
 import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, studentServicesVersion, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
@@ -131,7 +132,7 @@ function openProfile(profile: string, format: ProtectionFormat, m1Version: M1Ver
   }
   if (format === 2) {
     if (!database || !workLog || !growthProfile || !intakeStore) {
-      throw new WorkspaceFault("recovery", "五库合成档案中有数据库无法打开，请保留现场。");
+      throw new WorkspaceFault("recovery", "五库档案中有数据库无法打开，请保留现场。");
     }
     operations = OperationsDatabase.open(join(profile, "data"), database, initializeOperations);
   }
@@ -150,7 +151,9 @@ function completeStores(format: ProtectionFormat) {
   return operations ? [database, workLog, growthProfile, intakeStore, operations] : [database, workLog, growthProfile, intakeStore];
 }
 
-async function start(owner: string, profile: string, state: ActivationState, opened: ReturnType<typeof openProfile>, format: ProtectionFormat, m1Version: M1Version): Promise<void> {
+interface ProductionPaths { root: string; exports: string; logs: string }
+
+async function start(owner: string, profile: string, state: ActivationState, opened: ReturnType<typeof openProfile>, format: ProtectionFormat, m1Version: M1Version, production?: ProductionPaths): Promise<void> {
   const { startupError, growthStartupError, intakeStartupError, intake } = opened;
   app.setAppUserModelId(appId);
   const ui = session.fromPartition("supervisor-workspace-mvp-ui");
@@ -244,7 +247,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if (!isTrusted(event, window)) return denied();
     const m1 = database;
     if (format !== 2 || !operations || !m1) {
-      return { ok: false, code: "recovery", message: "排课只在独立五库合成档案中提供。" };
+      return { ok: false, code: "recovery", message: "排课需要可用的五库档案。" };
     }
     try { return { ok: true, value: operation(operations, () => m1.students()) }; }
     catch (error) { return failure(error); }
@@ -374,16 +377,21 @@ async function start(owner: string, profile: string, state: ActivationState, ope
 
   ipcMain.handle(channels.exportProtection, event => protect(event, async () => {
     const stores = completeStores(format);
-    const choice = await dialog.showOpenDialog(window, { title: "选择新备份所在的上级目录", properties: ["openDirectory"] });
+    const choice = await dialog.showOpenDialog(window, {
+      title: "选择新备份所在的上级目录", properties: ["openDirectory"], defaultPath: production?.exports,
+    });
     if (choice.canceled) return null;
     const parent = choice.filePaths[0];
     const ordinaryProfile = "D:\\Codex-Development\\Temp\\supervisor-workspace-mvp\\profile";
-    if ([owner, ordinaryProfile].some(p => {
+    if ((production && ((isWithin(production.root, parent) && !isWithin(production.exports, parent)) ||
+      isWithin(profileRoot, parent))) ||
+      [owner, ordinaryProfile].some(p => {
       const path = relative(p, parent);
       return !isAbsolute(path) && path !== ".." && !path.startsWith("..\\");
     })) throw new WorkspaceFault("invalid", "请选择应用数据目录之外的备份位置。");
-    if (profile === join(owner, "profile")) checkOriginalProtectionMode(profile, format, false, m1Version);
-    else verifyProfileData(profile, false, format, m1Version);
+    if (profile !== join(owner, "profile")) verifyProfileData(profile, false, format, m1Version);
+    else if (production) requireProductionProfile(production.root);
+    else checkOriginalProtectionMode(profile, format, false, m1Version);
     if (m1Version >= 3 && database) studentWrites.requireSettled(database);
     return recoveryFiles.publish(parent, captureProtection(stores, app.getVersion(), format, m1Version));
   }));
@@ -397,7 +405,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     const summary = validateProtection(bytes).summary;
     if (summary.m1Version > m1Version) throw new WorkspaceFault("invalid", "该备份使用较新的学生档案版本，不能降级恢复。");
     if (format === 1 && summary.formatVersion === 2) {
-      throw new WorkspaceFault("invalid", "五库备份只能恢复到五库合成验收环境。");
+      throw new WorkspaceFault("invalid", "五库备份只能恢复到支持五库的环境。");
     }
     const legacy = format === 2 && summary.formatVersion === 1;
     const upgradeM1 = summary.m1Version < m1Version;
@@ -451,7 +459,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if (result.response !== 1) return false;
     if (m1Version >= 3 && database) studentWrites.requireSettled(database);
     const pending = { kind: isRecovery ? "restore" : "resume", ...target } as const;
-    commitSwitchOnExit = () => saveActivation(owner, { ...state, pending });
+    commitSwitchOnExit = () => saveActivation(owner, { ...state, pending }, Boolean(production));
     state.pending = pending;
     return true;
   }));
@@ -465,7 +473,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if (result.response !== 1) return false;
     if (m1Version >= 3 && database) studentWrites.requireSettled(database);
     const pending = { kind: "original" as const };
-    commitSwitchOnExit = () => saveActivation(owner, { ...state, pending });
+    commitSwitchOnExit = () => saveActivation(owner, { ...state, pending }, Boolean(production));
     state.pending = pending;
     return true;
   }));
@@ -498,8 +506,8 @@ function ensureDirectory(path: string, create: boolean): void {
   }
 }
 
-async function startSelected(owner: string, original: string, format: ProtectionFormat, m1Version: M1Version) {
-  let state = readActivation(owner);
+async function startSelected(owner: string, original: string, format: ProtectionFormat, m1Version: M1Version, production?: ProductionPaths) {
+  let state = readActivation(owner, Boolean(production));
   let profile = original;
   let opened: ReturnType<typeof openProfile>;
   try {
@@ -507,7 +515,7 @@ async function startSelected(owner: string, original: string, format: Protection
     if (state.pending?.kind === "restore") {
       const pending = state.pending;
       const files = protectionFiles();
-      saveActivation(owner, { ...state, pending: { ...pending, kind: "opening" } });
+      saveActivation(owner, { ...state, pending: { ...pending, kind: "opening" } }, Boolean(production));
       const checked = await files.inspect(format === 2 ? owner : profileRoot, pending.name, format, m1Version);
       if (checked.digest !== pending.digest) throw new Error("Selected recovery copy changed.");
       const next = await files.restore(owner, checked.bytes, true);
@@ -519,31 +527,32 @@ async function startSelected(owner: string, original: string, format: Protection
       verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
       approveActiveProfile(profile, active.digest);
       const committed: ActivationState = { ...state, active, pending: null };
-      saveActivation(owner, committed);
+      saveActivation(owner, committed, Boolean(production));
       state = committed;
     } else if (state.pending?.kind === "resume") {
       const { name, digest } = state.pending;
-      saveActivation(owner, { ...state, pending: { kind: "resuming", name, digest } });
+      saveActivation(owner, { ...state, pending: { kind: "resuming", name, digest } }, Boolean(production));
       const active = { name, digest };
       profile = verifyActiveProfile(owner, active, false, format, m1Version);
       opened = openProfile(profile, format, m1Version);
       verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
       const committed: ActivationState = { ...state, active, pending: null };
-      saveActivation(owner, committed);
+      saveActivation(owner, committed, Boolean(production));
       state = committed;
     } else if (state.pending?.kind === "original") {
-      checkOriginalProtectionMode(original, format, false, m1Version);
+      if (production) requireProductionProfile(production.root);
+      else checkOriginalProtectionMode(original, format, false, m1Version);
       opened = openProfile(original, format, m1Version);
       verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
       const committed: ActivationState = { ...state, active: null, pending: null };
-      saveActivation(owner, committed);
+      saveActivation(owner, committed, Boolean(production));
       state = committed;
     } else if (state.active) {
       profile = verifyActiveProfile(owner, state.active, false, format, m1Version);
       opened = openProfile(profile, format, m1Version);
       verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
     } else {
-      const initializeOperations = checkOriginalProtectionMode(original, format, true, m1Version);
+      const initializeOperations = !production && checkOriginalProtectionMode(original, format, true, m1Version);
       opened = openProfile(original, format, m1Version, initializeOperations);
       if (format === 2) verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
     }
@@ -559,12 +568,12 @@ async function startSelected(owner: string, original: string, format: Protection
       defaultId: 0, cancelId: 0, noLink: true,
     });
     if (result.response === 1 && canReturn) {
-      saveActivation(owner, { ...state, active: fallback, pending: fallback ? null : { kind: "original" } });
+      saveActivation(owner, { ...state, active: fallback, pending: fallback ? null : { kind: "original" } }, Boolean(production));
     }
     app.quit();
     return;
   }
-  await start(owner, profile, state, opened, format, m1Version);
+  await start(owner, profile, state, opened, format, m1Version, production);
 }
 
 function closeOpenStores() {
@@ -578,25 +587,37 @@ function closeOpenStores() {
 }
 
 try {
-  const syntheticM2CProfile = (process.env.M2C_SYNTHETIC_TEST === "1" && !app.isPackaged) ||
-    (process.env.M2C_SYNTHETIC_PACKAGED === "1" && app.isPackaged);
+  const productionRoot = app.isPackaged ? productionRootOf(process.execPath) : undefined;
+  const syntheticM2CProfile = !productionRoot && ((process.env.M2C_SYNTHETIC_TEST === "1" && !app.isPackaged) ||
+    (process.env.M2C_SYNTHETIC_PACKAGED === "1" && app.isPackaged));
   const syntheticM2BProfile = process.env.M2B_SYNTHETIC_TEST === "1" && !app.isPackaged;
   const requestedM2CProfile = process.env.M2C_SYNTHETIC_PROFILE ?? "supervisor-workspace-m2c-test";
   if (syntheticM2CProfile && (!/^[A-Za-z0-9-]{1,64}$/.test(requestedM2CProfile) ||
       requestedM2CProfile.toLowerCase() === "supervisor-workspace-mvp")) throw new Error("合成 Profile 名称无效。");
   const profileName = syntheticM2CProfile ? requestedM2CProfile
-    : syntheticM2BProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-mvp";
-  const m1Version: M1Version = (syntheticM2CProfile ? studentServicesVersion(profileName) : undefined) ??
+    : syntheticM2BProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-development";
+  if (app.isPackaged && !productionRoot && !syntheticM2CProfile) {
+    throw new WorkspaceFault("recovery", "请从已验证的版本化安装目录启动，并先完成正式档案激活。");
+  }
+  if (productionRoot) {
+    requireLocalDirectory(dirname(process.execPath));
+    plainFile(process.execPath);
+    const helper = join(process.resourcesPath, "recovery-io.exe");
+    plainFile(helper);
+  }
+  const installed = productionRoot ? requireProductionProfile(productionRoot) : undefined;
+  const production = productionRoot && installed ? { root: productionRoot, exports: installed.exports, logs: installed.logs } : undefined;
+  const m1Version: M1Version = production ? 6 : (syntheticM2CProfile ? studentServicesVersion(profileName) : undefined) ??
     (syntheticM2CProfile && isParentFollowUpProfile(profileName) ? 3
       : syntheticM2CProfile && isStudentEditProfile(profileName) ? 2 : 1);
   const format: ProtectionFormat = m1Version >= 2 || (syntheticM2CProfile && /^sw-r2a-[a-z0-9-]+$/.test(profileName)) ? 2 : 1;
-  const profile = prepareProfile(profileName, format);
-  const owner = dirname(profile);
+  const profile = installed?.profile ?? prepareProfile(profileName, format);
+  const owner = installed?.owner ?? dirname(profile);
   const userData = join(profile, "chromium");
   app.setPath("userData", userData);
   app.setPath("sessionData", userData);
-  app.setPath("crashDumps", join(profile, "crash"));
-  app.setAppLogsPath(join(profile, "logs"));
+  app.setPath("crashDumps", production ? join(production.logs, "Crash") : join(profile, "crash"));
+  app.setAppLogsPath(production?.logs ?? join(profile, "logs"));
   app.commandLine.appendSwitch("disable-background-networking");
   app.commandLine.appendSwitch("disable-component-update");
 
@@ -624,7 +645,7 @@ try {
         }
       }
     });
-    app.whenReady().then(() => startSelected(owner, profile, format, m1Version)).catch(error => {
+    app.whenReady().then(() => startSelected(owner, profile, format, m1Version, production)).catch(error => {
       dialog.showErrorBox(title, error instanceof WorkspaceFault ? error.message : "桌面窗口启动失败。请保留档案并检查安装。");
       app.quit();
     });

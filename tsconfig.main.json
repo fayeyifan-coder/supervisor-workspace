@@ -15,6 +15,7 @@
     "src/main.ts",
     "src/database.ts",
     "src/operations.ts",
+    "src/production-admission.ts",
     "src/preload.ts",
     "src/contracts.ts"
   ]
