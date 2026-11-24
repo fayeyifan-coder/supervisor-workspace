@@ -21,10 +21,11 @@ const io = new ProtectionFiles(exe);
 const input = [1, 2].map(n => readFileSync(join(__dirname, "fixtures", "synthetic-intake-00" + n + ".json"), "utf8"));
 const temp = () => mkdtempSync(join(realpathSync.native(tmpdir()), "sw-m2d-"));
 const fakeName = () => "sw-backup-" + randomUUID().replaceAll("-", "");
-function openStores(dir, t) {
+function openStores(dir, t, m1Version = 1) {
   const specs = [[WorkspaceDatabase, "mvp"], [WorkLogDatabase, "worklog"],
     [GrowthProfileDatabase, "growth"], [IntakeStore, "student-intake"]];
-  const stores = specs.map(([type, key]) => type.open(join(dir, key + ".sqlite3"), join(dir, key + ".initialized")));
+  const stores = specs.map(([type, key]) => type.open(join(dir, key + ".sqlite3"), join(dir, key + ".initialized"),
+    ...(key === "mvp" ? [m1Version] : [])));
   let closed = false;
   const close = () => {
     if (closed) return;
@@ -447,6 +448,60 @@ test("SWBACK1 upgrades into a new isolated SWBACK2 copy with an empty operations
   assert.equal(f.ops.attendancePlan(f.plan.id).revision, 1);
   assert.throws(() => captureProtection(f.stores, "0.2.0", 1), /清单/);
   assert.throws(() => captureProtection(f.stores.slice(0, 4), "0.2.0", 2), /清单/);
+});
+
+test("old four- and five-store packages migrate to independent M1 v2 images and retain original bytes", async t => {
+  const f = populated(t);
+  const operations = OperationsDatabase.open(f.dir, f.m1, true);
+  t.after(() => operations.close());
+  const originalFiles = ["mvp.sqlite3", "mvp.initialized"].map(name => readFileSync(join(f.dir, name)));
+  for (const [stores, format] of [[f.stores, 1], [[...f.stores, operations], 2]]) {
+    const legacy = captureProtection(stores, "0.1.0", format);
+    const sealed = Buffer.from(legacy);
+    const old = validateProtection(legacy);
+    const upgraded = prepareProtectionRestore(legacy, 2, 2);
+    assert.deepEqual(legacy, sealed);
+    assert.equal(old.summary.m1Version, 1);
+    const checked = validateProtection(upgraded);
+    assert.equal(checked.summary.m1Version, 2);
+    assert.equal(checked.summary.upgradedM1, true);
+    assert.deepEqual(checked.images.slice(1, old.images.length), old.images.slice(1));
+    assert.equal(checked.manifest.m1UpgradedFrom, createHash("sha256").update(sealed).digest("hex"));
+    assert.throws(() => prepareProtectionRestore(upgraded, 2), /不能降级/);
+
+    const isolated = await io.restore(f.dir, upgraded);
+    assert.equal(readFileSync(join(isolated.location, "recovery", "mvp.initialized"), "utf8"), "mvp-v2\n");
+    await assert.rejects(io.inspect(f.dir, isolated.profileName, 2));
+    const inspected = await io.inspect(f.dir, isolated.profileName, 2, 2);
+    assert.deepEqual(inspected.bytes, upgraded);
+    const active = await io.restore(f.dir, inspected.bytes, true);
+    const selection = { name: active.profileName, digest: inspected.digest };
+    const profile = verifyActiveProfile(f.dir, selection, true, 2, 2);
+    const root = join(profile, "data");
+    const edited = openStores(root, t, 2);
+    const ops = OperationsDatabase.open(root, edited.m1);
+    try {
+      assert.deepEqual(edited.m1.students(), f.m1.students());
+      const view = edited.m1.studentEditView(f.studentId);
+      assert.deepEqual(view.history, []);
+      const { id, createdAt, ...fields } = view.student;
+      edited.m1.saveStudentEdit({ studentId: id, requestId: randomUUID(), expectedRevision: 0,
+        fields: { ...fields, alias: "恢复后的虚构学生" } });
+      const current = captureProtection([...edited.stores, ops], "0.1.0", 2, 2);
+      const copy = await io.restore(f.dir, current, true);
+      const library = join(copy.location, "data");
+      const reopened = WorkspaceDatabase.open(join(library, "mvp.sqlite3"), join(library, "mvp.initialized"), 2);
+      try {
+        assert.deepEqual(reopened.studentEditView(id), edited.m1.studentEditView(id));
+        assert.equal(reopened.students().find(s => s.id === id).createdAt, createdAt);
+      } finally { reopened.close(); }
+      assert.equal(f.m1.students().find(s => s.id === id).alias, fields.alias);
+      edited.m1.protectionConnection().prepare("UPDATE students SET alias=? WHERE id=?").run("合成损坏", id);
+      assert.throws(() => captureProtection([...edited.stores, ops], "0.1.0", 2, 2), /与修改历史不一致/);
+    } finally { ops.close(); edited.close(); }
+  }
+  assert.deepEqual(["mvp.sqlite3", "mvp.initialized"].map(name => readFileSync(join(f.dir, name))), originalFiles);
+  assert.deepEqual(originalProfileSegments("sw-r3b-proof", 2), ["sw-r3b-profiles", "sw-r3b-proof", "profile"]);
 });
 
 test("SWBACK2 rejects busy and wrongly linked operations and releases earlier SQLite locks", t => {

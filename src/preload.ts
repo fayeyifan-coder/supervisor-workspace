@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { IntakeConfirm, IntakeTarget, LearningChange, LearningDayInput, LessonInput, ScheduleReceiptInput, ScheduleSaveInput, ScheduleWeekInput, StudentInput, WorkspaceApi } from "./contracts";
+import type { IntakeConfirm, IntakeTarget, LearningChange, LearningDayInput, LessonInput, ScheduleReceiptInput, ScheduleSaveInput, ScheduleWeekInput, StudentEditInput, StudentInput, WorkspaceApi } from "./contracts";
 import type { WorkItemInput, WorkStatus } from "./worklog";
 import type { GrowthSaveInput } from "./growth-profile";
 
@@ -23,6 +23,10 @@ const api: WorkspaceApi = {
   returnOriginalProfile: () => ipcRenderer.invoke("m2d:return-original"),
   history: (id: string) => ipcRenderer.invoke("mvp:history", id),
   createStudent: (input: StudentInput) => ipcRenderer.invoke("mvp:create-student", input),
+  studentEditAvailable: () => ipcRenderer.invoke("mvp:student-edit-available"),
+  studentEdit: (id: string) => ipcRenderer.invoke("mvp:student-edit", id),
+  saveStudentEdit: (input: StudentEditInput) => ipcRenderer.invoke("mvp:save-student-edit", input),
+  finishStudentEdit: input => ipcRenderer.invoke("mvp:finish-student-edit", input),
   addLesson: (input: LessonInput) => ipcRenderer.invoke("mvp:add-lesson", input),
   workItems: (day: string) => ipcRenderer.invoke("m2b:work-items", day),
   searchWorkItems: (from: string, to: string, query?: string) => ipcRenderer.invoke("m2b:search-work-items", from, to, query),

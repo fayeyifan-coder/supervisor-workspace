@@ -62,11 +62,11 @@ function ImportSources({ api, student }: { api: WorkspaceApi; student: Student }
   </section>;
 }
 
-export function StudentDetail({ student, api, intakeOpen, actions, growth, history }: {
+export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit }: {
   student: Student; api: WorkspaceApi; intakeOpen: boolean;
-  actions: ReactNode; growth: ReactNode; history: ReactNode;
+  actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode;
 }) {
-  const [selected, setSelected] = useState<(typeof sections)[number]["id"]>("growth");
+  const [selected, setSelected] = useState<(typeof sections)[number]["id"] | "edit">("growth");
 
   return <article className="student-detail" aria-labelledby="student-detail-heading">
     <header className="panel student-overview">
@@ -84,12 +84,15 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
     <nav className="student-detail-nav" aria-label="学生详情">
       {sections.map(({ id, label }) => <button key={id} type="button" aria-controls={"student-section-" + id}
         aria-pressed={selected === id} onClick={() => setSelected(id)}>{label}</button>)}
+      {edit && <button type="button" aria-controls="student-section-edit" aria-pressed={selected === "edit"}
+        onClick={() => setSelected("edit")}>基础档案编辑</button>}
     </nav>
     <div id="student-section-growth" hidden={selected !== "growth"}>{!intakeOpen && growth}</div>
     <div id="student-section-history" hidden={selected !== "history"}>{history}</div>
     <div id="student-section-sources" hidden={selected !== "sources"}>
       {!intakeOpen && <ImportSources key={student.id} api={api} student={student} />}
     </div>
+    {edit && <div id="student-section-edit" hidden={selected !== "edit"}>{!intakeOpen && edit}</div>}
     <section id="student-section-planned" className="panel student-planned" hidden={selected !== "planned"}
       aria-labelledby="student-planned-heading">
       <h2 id="student-planned-heading">规划中的功能</h2>

@@ -22,6 +22,16 @@
 .growth-editor { margin-top: 14px; }
 .growth-editor > summary { cursor: pointer; color: var(--green); font-weight: 600; }
 .growth-editor .growth-fields { margin-top: 10px; }
+.student-edit .notice { margin-top: 12px; }
+.student-edit code { overflow-wrap: anywhere; }
+.student-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.student-edit-actions .primary, .student-edit .retry-actions .primary { margin-top: 0; }
+.student-edit-history { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+.student-edit-history ol { margin: 6px 0 0; padding: 0; list-style: none; }
+.student-edit-history li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.student-edit-history summary { color: var(--green); cursor: pointer; }
+.student-edit-comparison { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 12px; }
+.student-edit-comparison h4 { margin: 8px 0; }
 
 @media (max-width: 650px) {
   .roster .student-list { max-height: 172px; overflow-y: auto; }

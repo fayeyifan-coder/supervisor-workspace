@@ -2,6 +2,10 @@ export const channels = {
   students: "mvp:students",
   history: "mvp:history",
   createStudent: "mvp:create-student",
+  studentEditAvailable: "mvp:student-edit-available",
+  studentEdit: "mvp:student-edit",
+  saveStudentEdit: "mvp:save-student-edit",
+  finishStudentEdit: "mvp:finish-student-edit",
   addLesson: "mvp:add-lesson",
   workItems: "m2b:work-items",
   searchWorkItems: "m2b:search-work-items",
@@ -58,6 +62,26 @@ export interface LessonInput {
 }
 
 export type Student = StudentInput & { createdAt: number };
+export type StudentEditFields = Omit<StudentInput, "id">;
+export interface StudentEditInput {
+  studentId: string;
+  requestId: string;
+  expectedRevision: number;
+  fields: StudentEditFields;
+}
+export interface StudentEditRecord {
+  requestId: string;
+  revision: number;
+  changedAt: number;
+  before: StudentEditFields;
+  after: StudentEditFields;
+}
+export interface StudentEditView {
+  student: Student;
+  revision: number;
+  history: StudentEditRecord[];
+  pending: StudentEditInput | null;
+}
 export type Lesson = LessonInput & { createdAt: number };
 export type Failure = {
   ok: false;
@@ -132,6 +156,10 @@ export interface WorkspaceApi {
   students(): Promise<Result<Student[]>>;
   history(studentId: string): Promise<Result<Lesson[]>>;
   createStudent(input: StudentInput): Promise<Result<Student>>;
+  studentEditAvailable(): Promise<Result<boolean>>;
+  studentEdit(studentId: string): Promise<Result<StudentEditView>>;
+  saveStudentEdit(input: StudentEditInput): Promise<Result<StudentEditRecord>>;
+  finishStudentEdit(input: Pick<StudentEditInput, "studentId" | "requestId"> & { discard?: boolean }): Promise<Result<null>>;
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
   workItems(today: string): Promise<Result<import("./worklog").WorkItem[]>>;
   searchWorkItems(from: string, to: string, query?: string): Promise<Result<import("./worklog").WorkItem[]>>;

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { m1Protection, WorkspaceFault } from "./database";
+import { m1Protection, m1EditProtection, verifyStudentEdits, WorkspaceFault, type M1Version } from "./database";
 import { growthProtection } from "./growth-profile";
 import { intakeProtection, intakeSourceDigest } from "./student-intake";
 import { parseIntake } from "./intake-format";
@@ -13,7 +13,13 @@ import { operationsProtection, verifyOperationsStudentLinks } from "./operations
 const fourLayouts = [m1Protection, worklogProtection, growthProtection, intakeProtection] as const;
 const fiveLayouts = [...fourLayouts, operationsProtection] as const;
 export type ProtectionFormat = 1 | 2;
-const layoutsFor = (version: ProtectionFormat) => version === 2 ? fiveLayouts : fourLayouts;
+function layoutsFor(format: ProtectionFormat, m1Version: M1Version = 1) {
+  if (m1Version === 2) {
+    if (format !== 2) reject("新版学生档案只支持五库备份。");
+    return [m1EditProtection, worklogProtection, growthProtection, intakeProtection, operationsProtection];
+  }
+  return format === 2 ? fiveLayouts : fourLayouts;
+}
 const magic = Buffer.from("SWBACK1\n");
 const fiveMagic = Buffer.from("SWBACK2\n");
 const maxDatabase = 32 * 1024 * 1024;
@@ -34,6 +40,8 @@ interface ManifestDatabase {
 }
 export interface ProtectionSummary {
   formatVersion: ProtectionFormat;
+  m1Version: M1Version;
+  upgradedM1?: true;
   attendancePlans?: number;
   learningBlocks?: number;
   learningTasks?: number;
@@ -50,6 +58,7 @@ export interface ProtectionResult extends ProtectionSummary { location: string; 
 interface Manifest {
   formatVersion: ProtectionFormat;
   upgradedFrom?: string;
+  m1UpgradedFrom?: string;
   createdAt: string;
   applicationVersion: string;
   databases: ManifestDatabase[];
@@ -85,6 +94,7 @@ function checkImage(db: DatabaseSync, layout: Layout): void {
   if (integrity !== "ok" || db.prepare("PRAGMA foreign_key_check").get()) {
     reject("数据库完整性或外键校验失败：" + layout.key);
   }
+  if (layout.key === "mvp" && layout.version === 2) verifyStudentEdits(db);
 }
 
 function snapshot(source: DatabaseSync, layout: Layout): Buffer {
@@ -116,7 +126,7 @@ function snapshot(source: DatabaseSync, layout: Layout): Buffer {
 function count(db: DatabaseSync, table: string): number {
   return Number(db.prepare("SELECT count(*) AS n FROM " + table).get()?.n);
 }
-function summary(dbs: DatabaseSync[], manifest: Pick<Manifest, "createdAt" | "applicationVersion" | "formatVersion" | "upgradedFrom">): ProtectionSummary {
+function summary(dbs: DatabaseSync[], manifest: Omit<Manifest, "databases">): ProtectionSummary {
   const [m1, work, growth, intake, operations] = dbs;
   const students = new Set(m1.prepare("SELECT id FROM students").all().map(x => String(x.id)));
   for (const id of students) if (typeof id !== "string" || !uuid.test(id)) reject("M1 学生 UUID 无效。");
@@ -170,8 +180,12 @@ function summary(dbs: DatabaseSync[], manifest: Pick<Manifest, "createdAt" | "ap
       reject("从四库备份升级的教务库必须为空。");
     }
   }
+  if (manifest.m1UpgradedFrom && (count(m1, "student_edits") !== 0 || count(m1, "student_edit_pending") !== 0)) {
+    reject("从 M1 v1 升级的编辑历史与待核对请求必须为空。");
+  }
   return { createdAt: manifest.createdAt, applicationVersion: manifest.applicationVersion,
-    formatVersion: manifest.formatVersion,
+    formatVersion: manifest.formatVersion, m1Version: m1.prepare("PRAGMA user_version").get()?.user_version === 2 ? 2 : 1,
+    ...(manifest.m1UpgradedFrom ? { upgradedM1: true as const } : {}),
     ...(manifest.upgradedFrom ? { upgradedFromFour: true as const } : {}),
     ...(operations ? { attendancePlans: count(operations, "attendance_plans"),
       learningBlocks: count(operations, "learning_blocks"), learningTasks: count(operations, "learning_tasks") } : {}),
@@ -205,17 +219,17 @@ function withProtectionConnections<T>(stores: readonly Store[], format: Protecti
   }
 }
 
-export function verifyProtectionStores(stores: readonly Store[], applicationVersion: string, format: ProtectionFormat = 1): void {
-  const layouts = layoutsFor(format);
+export function verifyProtectionStores(stores: readonly Store[], applicationVersion: string, format: ProtectionFormat = 1, m1Version: M1Version = 1): void {
+  const layouts = layoutsFor(format, m1Version);
   withProtectionConnections(stores, format, connections => {
     connections.forEach((db, index) => checkImage(db, layouts[index]));
     summary(connections, { createdAt: new Date().toISOString(), applicationVersion, formatVersion: format });
   });
 }
 
-export function captureProtection(stores: readonly Store[], applicationVersion: string, format: ProtectionFormat = 1): Buffer {
+export function captureProtection(stores: readonly Store[], applicationVersion: string, format: ProtectionFormat = 1, m1Version: M1Version = 1): Buffer {
   if (!/^[A-Za-z0-9_.+-]{1,64}$/.test(applicationVersion)) reject("备份库清单无效。");
-  const layouts = layoutsFor(format);
+  const layouts = layoutsFor(format, m1Version);
   const { images, createdAt } = withProtectionConnections(stores, format, connections => {
     const createdAt = new Date().toISOString();
     const images = connections.map((db, index) => snapshot(db, layouts[index]));
@@ -236,22 +250,45 @@ function manifestDatabase(layout: Layout, image: Buffer, format: ProtectionForma
   };
 }
 
-export function prepareProtectionRestore(bytes: Buffer, format: ProtectionFormat): Buffer {
+export function prepareProtectionRestore(bytes: Buffer, format: ProtectionFormat, m1Version: M1Version = 1): Buffer {
   const { manifest, images } = validateProtection(bytes);
-  if (manifest.formatVersion === format) return bytes;
+  const sourceVersion = manifest.databases[0].schemaVersion;
+  layoutsFor(format, m1Version);
+  if (sourceVersion > m1Version) reject("备份中的学生档案版本较新，不能降级恢复。");
+  if (manifest.formatVersion === format && sourceVersion === m1Version) return bytes;
   if (format === 1) reject("五库备份需要支持教务库的隔离环境，未写入任何恢复文件。");
+  const nextManifest: Manifest = { ...manifest, formatVersion: format,
+    databases: manifest.databases.map(entry => ({ ...entry, integrity: "ok" })) };
+  const nextImages = [...images];
+  const sourceDigest = sha(bytes);
+  if (sourceVersion === 1 && m1Version === 2) {
+    const m1 = new DatabaseSync(":memory:", { allowExtension: false, enableForeignKeyConstraints: true });
+    try {
+      m1.exec("PRAGMA trusted_schema=OFF");
+      m1.deserialize(Buffer.from(images[0]));
+      for (const ddl of m1EditProtection.ddl.slice(m1Protection.ddl.length)) m1.exec(ddl);
+      m1.exec("PRAGMA user_version=2");
+      const upgraded = snapshot(m1, m1EditProtection);
+      nextImages[0] = upgraded;
+      nextManifest.databases[0] = manifestDatabase(m1EditProtection, upgraded, 2);
+      nextManifest.m1UpgradedFrom = sourceDigest;
+    } finally { m1.close(); }
+  }
 
-  const db = new DatabaseSync(":memory:", { allowExtension: false, enableForeignKeyConstraints: true });
-  try {
-    for (const ddl of operationsProtection.ddl) db.exec(ddl);
-    db.exec(`PRAGMA application_id=${operationsProtection.applicationId}; PRAGMA user_version=${operationsProtection.version}`);
-    const empty = snapshot(db, operationsProtection);
-    return encodeProtection({
-      ...manifest, formatVersion: 2, upgradedFrom: sha(bytes),
-      databases: [...manifest.databases.map(entry => ({ ...entry, integrity: "ok" as const })),
-        manifestDatabase(operationsProtection, empty, 2)],
-    }, [...images, empty]);
-  } finally { db.close(); }
+  if (manifest.formatVersion === 1) {
+    const db = new DatabaseSync(":memory:", { allowExtension: false, enableForeignKeyConstraints: true });
+    try {
+      for (const ddl of operationsProtection.ddl) db.exec(ddl);
+      db.exec(`PRAGMA application_id=${operationsProtection.applicationId}; PRAGMA user_version=${operationsProtection.version}`);
+      const empty = snapshot(db, operationsProtection);
+      nextImages.push(empty);
+      nextManifest.databases.push(manifestDatabase(operationsProtection, empty, 2));
+      nextManifest.upgradedFrom = sourceDigest;
+    } finally { db.close(); }
+  }
+  const upgraded = encodeProtection(nextManifest, nextImages);
+  validateProtection(upgraded);
+  return upgraded;
 }
 
 function encodeProtection(manifest: Manifest, images: Buffer[]): Buffer {
@@ -267,7 +304,6 @@ export function validateProtection(packageBytes: Buffer): { summary: ProtectionS
   const format: ProtectionFormat = header.equals(fiveMagic) ? 2 : 1;
   if (packageBytes.length > (format === 2 ? maxPackage : 129 * 1024 * 1024) || packageBytes.length < 64 ||
       (format === 1 && !header.equals(magic))) reject("备份包格式或长度无效。");
-  const layouts = layoutsFor(format);
   const end = packageBytes.length - 32;
   if (sha(packageBytes.subarray(0, end)) !== packageBytes.subarray(end).toString("hex")) reject("备份不完整或总体 SHA-256 不匹配。");
   const manifestLength = packageBytes.readUInt32LE(magic.length);
@@ -286,7 +322,12 @@ export function validateProtection(packageBytes: Buffer): { summary: ProtectionS
       typeof manifest.applicationVersion !== "string" || !/^[A-Za-z0-9_.+-]{1,64}$/.test(manifest.applicationVersion) ||
       typeof manifest.createdAt !== "string" || !Number.isFinite(Date.parse(manifest.createdAt)) ||
       new Date(manifest.createdAt).toISOString() !== manifest.createdAt ||
-      !Array.isArray(manifest.databases) || manifest.databases.length !== layouts.length) reject("备份清单版本或时间无效。");
+      !Array.isArray(manifest.databases) || manifest.databases.length !== layoutsFor(format).length) reject("备份清单版本或时间无效。");
+  const m1Version = manifest.databases[0]?.schemaVersion;
+  if (m1Version !== 1 && m1Version !== 2) reject("备份中的学生档案版本不受支持。");
+  if (manifest.m1UpgradedFrom !== undefined && (m1Version !== 2 || typeof manifest.m1UpgradedFrom !== "string" ||
+      !/^[a-f0-9]{64}$/.test(manifest.m1UpgradedFrom))) reject("新版学生档案的来源摘要无效。");
+  const layouts = layoutsFor(format, m1Version);
   let offset = start + manifestLength;
   const images = layouts.map((layout, index) => {
     const entry = manifest.databases[index];
@@ -359,8 +400,8 @@ export class ProtectionFiles {
 
   async read(path: string): Promise<Buffer> { return this.native(["read", path]); }
 
-  async inspect(parent: string, name: string, format: ProtectionFormat = 1) {
-    const wire = await this.native(["inspect", parent, name, String(format)]);
+  async inspect(parent: string, name: string, format: ProtectionFormat = 1, m1Version: M1Version = 1) {
+    const wire = await this.native(["inspect", parent, name, String(format), String(m1Version)]);
     let offset = 0;
     const part = (max: number): Buffer => {
       if (offset + 4 > wire.length) return reject("恢复副本不完整。");
@@ -375,8 +416,10 @@ export class ProtectionFiles {
     if (record?.format !== "sw-recovery-evidence-v1" || record.profileName !== name ||
         typeof record.packageEvidenceBase64 !== "string") reject("恢复副本缺少有效的完成记录。");
     const evidence = JSON.parse(Buffer.from(record.packageEvidenceBase64, "base64").toString("utf8"));
-    if (evidence.manifest?.formatVersion !== format) reject("恢复副本与当前库清单不兼容。");
-    const images = layoutsFor(format).map(() => part(maxDatabase));
+    if (evidence.manifest?.formatVersion !== format || evidence.manifest?.databases?.[0]?.schemaVersion !== m1Version) {
+      reject("恢复副本与当前库清单不兼容。");
+    }
+    const images = layoutsFor(format, m1Version).map(() => part(maxDatabase));
     if (offset !== wire.length) reject("恢复副本包含未声明数据。");
     const bytes = encodeProtection(evidence.manifest, images);
     const digest = sha(bytes);
@@ -398,7 +441,8 @@ export class ProtectionFiles {
       length.writeUInt32LE(bytes.length);
       return [length, bytes];
     }));
-    await this.native([forActivation ? "activate" : "restore", parent, name, String(verified.manifest.formatVersion)], input);
+    await this.native([forActivation ? "activate" : "restore", parent, name, String(verified.manifest.formatVersion),
+      String(verified.summary.m1Version)], input);
     return { ...verified.summary, location: join(parent, name, "profile"), profileName: name };
   }
 }

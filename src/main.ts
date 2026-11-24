@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import { channels, type Failure, type Result } from "./contracts";
-import { failure, WorkspaceDatabase, WorkspaceFault } from "./database";
+import { failure, WorkspaceDatabase, WorkspaceFault, type M1Version } from "./database";
 import { closeStoresIndependently } from "./database-lifecycle";
 import { WorkLogDatabase, type WorkStatus } from "./worklog";
 import { GrowthProfileDatabase, GrowthProfileFault, type GrowthSaveInput } from "./growth-profile";
@@ -16,7 +16,7 @@ import { OperationsDatabase } from "./operations";
 import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
 import { applyLearningChange, readLearningDay, readScheduleReceipt } from "./learning-api";
 import { OperationsPending } from "./operations-pending";
-import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
+import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isStudentEditProfile, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
 const scheme = "supervisor-workspace-mvp";
@@ -99,12 +99,13 @@ async function readIntakeFile(path: string): Promise<string> {
   } finally { await fd.close(); }
 }
 
-function openProfile(profile: string, format: ProtectionFormat, initializeOperations = false) {
+function openProfile(profile: string, format: ProtectionFormat, m1Version: M1Version, initializeOperations = false) {
   const path = join(profile, "data", "mvp.sqlite3");
   let startupError: Failure = { ok: false, code: "recovery", message: "MVP 数据库无法打开。请保留原目录后重开。" };
   try {
-    database = WorkspaceDatabase.open(path, join(profile, "data", "mvp.initialized"));
+    database = WorkspaceDatabase.open(path, join(profile, "data", "mvp.initialized"), m1Version);
   } catch (error) {
+    if (m1Version === 2) throw error;
     const result = failure(error);
     if (result.code === "recovery" || result.code === "busy") startupError = result;
   }
@@ -148,7 +149,7 @@ function completeStores(format: ProtectionFormat) {
   return operations ? [database, workLog, growthProfile, intakeStore, operations] : [database, workLog, growthProfile, intakeStore];
 }
 
-async function start(owner: string, profile: string, state: ActivationState, opened: ReturnType<typeof openProfile>, format: ProtectionFormat): Promise<void> {
+async function start(owner: string, profile: string, state: ActivationState, opened: ReturnType<typeof openProfile>, format: ProtectionFormat, m1Version: M1Version): Promise<void> {
   const { startupError, growthStartupError, intakeStartupError, intake } = opened;
   app.setAppUserModelId(appId);
   const ui = session.fromPartition("supervisor-workspace-mvp-ui");
@@ -193,6 +194,17 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   ipcMain.handle(channels.students, event => invoke(event, store => store.students()));
   ipcMain.handle(channels.history, (event, id: unknown) => invoke(event, store => store.history(id)));
   ipcMain.handle(channels.createStudent, (event, raw: unknown) => invoke(event, store => store.createStudent(raw)));
+  ipcMain.handle(channels.studentEditAvailable, event => isTrusted(event, window)
+    ? { ok: true, value: m1Version === 2 && format === 2 && Boolean(database && operations) } : denied());
+  ipcMain.handle(channels.studentEdit, (event, id: unknown) => invoke(event, store => store.studentEditView(id)));
+  function writeStudentEdit<T>(event: IpcMainInvokeEvent, operation: (store: WorkspaceDatabase) => T): Result<T> {
+    return invoke(event, store => {
+      if (protecting || state.pending) throw new WorkspaceFault("busy", "档案正在备份或切换，请完成后重试。");
+      return operation(store);
+    });
+  }
+  ipcMain.handle(channels.saveStudentEdit, (event, raw: unknown) => writeStudentEdit(event, store => store.saveStudentEdit(raw)));
+  ipcMain.handle(channels.finishStudentEdit, (event, raw: unknown) => writeStudentEdit(event, store => store.finishStudentEdit(raw)));
   ipcMain.handle(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
   function invokeSchedule<T>(event: IpcMainInvokeEvent,
       operation: (store: OperationsDatabase, students: () => ReturnType<WorkspaceDatabase["students"]>) => T): Result<T> {
@@ -336,9 +348,9 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       const path = relative(p, parent);
       return !isAbsolute(path) && path !== ".." && !path.startsWith("..\\");
     })) throw new WorkspaceFault("invalid", "请选择应用数据目录之外的备份位置。");
-    if (profile === join(owner, "profile")) checkOriginalProtectionMode(profile, format);
-    else verifyProfileData(profile, false, format);
-    return recoveryFiles.publish(parent, captureProtection(stores, app.getVersion(), format));
+    if (profile === join(owner, "profile")) checkOriginalProtectionMode(profile, format, false, m1Version);
+    else verifyProfileData(profile, false, format, m1Version);
+    return recoveryFiles.publish(parent, captureProtection(stores, app.getVersion(), format, m1Version));
   }));
   ipcMain.handle(channels.restoreProtection, event => protect(event, async () => {
     const choice = await dialog.showOpenDialog(window, {
@@ -348,10 +360,12 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if (choice.canceled) return null;
     const bytes = await recoveryFiles.read(choice.filePaths[0]);
     const summary = validateProtection(bytes).summary;
+    if (summary.m1Version > m1Version) throw new WorkspaceFault("invalid", "该备份使用较新的学生档案版本，不能降级恢复。");
     if (format === 1 && summary.formatVersion === 2) {
       throw new WorkspaceFault("invalid", "五库备份只能恢复到五库合成验收环境。");
     }
     const legacy = format === 2 && summary.formatVersion === 1;
+    const upgradeM1 = summary.m1Version < m1Version;
     const result = await dialog.showMessageBox(window, {
       type: "question", title: "恢复到独立档案", message: "备份校验通过。是否写入独立恢复副本？",
       detail: "备份时间 " + summary.createdAt + "\n学生 " + summary.students + " 名 · 工作事项 " + summary.workItems +
@@ -359,11 +373,13 @@ async function start(owner: string, profile: string, state: ActivationState, ope
         " 个 · 未结束导入 " + summary.unfinishedImports + " 笔" +
         (legacy ? "\n历史四库包将生成全新的空教务库。" :
           format === 2 ? "\n到校安排 " + summary.attendancePlans + " 条" : "") +
+        (upgradeM1 ? "\n学生档案将在全新副本中升级到 Schema v2，原备份不变。" : "") +
         "\n恢复只生成副本。激活须另行确认。",
       buttons: ["取消", "写入恢复副本"], defaultId: 0, cancelId: 0, noLink: true,
     });
     if (result.response !== 1) return null;
-    const restored = await recoveryFiles.restore(recoveryRoot, legacy ? prepareProtectionRestore(bytes, format) : bytes);
+    const restored = await recoveryFiles.restore(recoveryRoot,
+      legacy || upgradeM1 ? prepareProtectionRestore(bytes, format, m1Version) : bytes);
     lastRecovery = restored.location;
     return restored;
   }));
@@ -384,12 +400,12 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if (!isRecovery && !isResume) {
       throw new WorkspaceFault("invalid", "请选择独立恢复副本或本工作区已激活过的档案中的 restore.ready。");
     }
-    const checked = isRecovery ? await recoveryFiles.inspect(recoveryRoot, name, format) : undefined;
+    const checked = isRecovery ? await recoveryFiles.inspect(recoveryRoot, name, format, m1Version) : undefined;
     const target = checked ? { name, digest: checked.digest } : approvedSelection(owner, name);
     if (checked ? state.active?.digest === target.digest : state.active?.name === name) {
       throw new WorkspaceFault("conflict", "这份资料已经是当前活动档案。");
     }
-    if (isResume) verifyActiveProfile(owner, target, false, format);
+    if (isResume) verifyActiveProfile(owner, target, false, format, m1Version);
     const result = await dialog.showMessageBox(window, {
       type: "warning", title: "切换工作档案", message: "下次打开工作台时切换到所选档案？",
       detail: (checked ? "备份时间 " + checked.summary.createdAt + " · 学生 " + checked.summary.students + " 名" :
@@ -445,7 +461,7 @@ function ensureDirectory(path: string, create: boolean): void {
   }
 }
 
-async function startSelected(owner: string, original: string, format: ProtectionFormat) {
+async function startSelected(owner: string, original: string, format: ProtectionFormat, m1Version: M1Version) {
   let state = readActivation(owner);
   let profile = original;
   let opened: ReturnType<typeof openProfile>;
@@ -455,13 +471,13 @@ async function startSelected(owner: string, original: string, format: Protection
       const pending = state.pending;
       const files = protectionFiles();
       saveActivation(owner, { ...state, pending: { ...pending, kind: "opening" } });
-      const checked = await files.inspect(format === 2 ? owner : profileRoot, pending.name, format);
+      const checked = await files.inspect(format === 2 ? owner : profileRoot, pending.name, format, m1Version);
       if (checked.digest !== pending.digest) throw new Error("Selected recovery copy changed.");
       const next = await files.restore(owner, checked.bytes, true);
       const active = { name: next.profileName, digest: pending.digest };
-      profile = verifyActiveProfile(owner, active, true, format);
-      opened = openProfile(profile, format);
-      verifyProtectionStores(completeStores(format), app.getVersion(), format);
+      profile = verifyActiveProfile(owner, active, true, format, m1Version);
+      opened = openProfile(profile, format, m1Version);
+      verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
       approveActiveProfile(profile, active.digest);
       const committed: ActivationState = { ...state, active, pending: null };
       saveActivation(owner, committed);
@@ -470,28 +486,27 @@ async function startSelected(owner: string, original: string, format: Protection
       const { name, digest } = state.pending;
       saveActivation(owner, { ...state, pending: { kind: "resuming", name, digest } });
       const active = { name, digest };
-      profile = verifyActiveProfile(owner, active, false, format);
-      opened = openProfile(profile, format);
-      verifyProtectionStores(completeStores(format), app.getVersion(), format);
+      profile = verifyActiveProfile(owner, active, false, format, m1Version);
+      opened = openProfile(profile, format, m1Version);
+      verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
       const committed: ActivationState = { ...state, active, pending: null };
       saveActivation(owner, committed);
       state = committed;
     } else if (state.pending?.kind === "original") {
-      checkOriginalProtectionMode(original, format);
-      verifyProfileData(original, false, format);
-      opened = openProfile(original, format);
-      verifyProtectionStores(completeStores(format), app.getVersion(), format);
+      checkOriginalProtectionMode(original, format, false, m1Version);
+      opened = openProfile(original, format, m1Version);
+      verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
       const committed: ActivationState = { ...state, active: null, pending: null };
       saveActivation(owner, committed);
       state = committed;
     } else if (state.active) {
-      profile = verifyActiveProfile(owner, state.active, false, format);
-      opened = openProfile(profile, format);
-      verifyProtectionStores(completeStores(format), app.getVersion(), format);
+      profile = verifyActiveProfile(owner, state.active, false, format, m1Version);
+      opened = openProfile(profile, format, m1Version);
+      verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
     } else {
-      const initializeOperations = checkOriginalProtectionMode(original, format, true);
-      opened = openProfile(original, format, initializeOperations);
-      if (format === 2) verifyProtectionStores(completeStores(format), app.getVersion(), format);
+      const initializeOperations = checkOriginalProtectionMode(original, format, true, m1Version);
+      opened = openProfile(original, format, m1Version, initializeOperations);
+      if (format === 2) verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
     }
   } catch {
     const closes = closeOpenStores();
@@ -510,7 +525,7 @@ async function startSelected(owner: string, original: string, format: Protection
     app.quit();
     return;
   }
-  await start(owner, profile, state, opened, format);
+  await start(owner, profile, state, opened, format, m1Version);
 }
 
 function closeOpenStores() {
@@ -532,7 +547,8 @@ try {
       requestedM2CProfile.toLowerCase() === "supervisor-workspace-mvp")) throw new Error("合成 Profile 名称无效。");
   const profileName = syntheticM2CProfile ? requestedM2CProfile
     : syntheticM2BProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-mvp";
-  const format: ProtectionFormat = syntheticM2CProfile && /^sw-r2a-[a-z0-9-]+$/.test(profileName) ? 2 : 1;
+  const m1Version: M1Version = syntheticM2CProfile && isStudentEditProfile(profileName) ? 2 : 1;
+  const format: ProtectionFormat = m1Version === 2 || (syntheticM2CProfile && /^sw-r2a-[a-z0-9-]+$/.test(profileName)) ? 2 : 1;
   const profile = prepareProfile(profileName, format);
   const owner = dirname(profile);
   const userData = join(profile, "chromium");
@@ -567,7 +583,7 @@ try {
         }
       }
     });
-    app.whenReady().then(() => startSelected(owner, profile, format)).catch(error => {
+    app.whenReady().then(() => startSelected(owner, profile, format, m1Version)).catch(error => {
       dialog.showErrorBox(title, error instanceof WorkspaceFault ? error.message : "桌面窗口启动失败。请保留档案并检查安装。");
       app.quit();
     });
