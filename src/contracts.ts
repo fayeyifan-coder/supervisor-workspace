@@ -1,30 +1,42 @@
 export const channels = {
-  read: "sample-record:read",
-  save: "sample-record:save",
+  students: "mvp:students",
+  history: "mvp:history",
+  createStudent: "mvp:create-student",
+  addLesson: "mvp:add-lesson",
 } as const;
 
-export interface SampleRecord {
-  content: string;
-  revision: number;
-  createdAt: number;
-  updatedAt: number;
+export interface StudentInput {
+  id: string;
+  alias: string;
+  grade: string;
+  subjects: string;
+  goal: string;
+  notes: string;
 }
 
-export interface SaveSample {
-  content: string;
-  expectedRevision: number | null;
+export interface LessonInput {
+  id: string;
+  studentId: string;
+  date: string;
+  subject: string;
+  task: string;
+  completion: string;
+  assessment: string;
+  nextStep: string;
 }
 
-export interface DatabaseDetails {
-  databasePath: string;
-  schemaVersion: number;
-  sqliteVersion: string;
-}
-
-export type Failure = { ok: false; message: string };
+export type Student = StudentInput & { createdAt: number };
+export type Lesson = LessonInput & { createdAt: number };
+export type Failure = {
+  ok: false;
+  code: "invalid" | "conflict" | "busy" | "failed" | "unknown" | "recovery";
+  message: string;
+};
 export type Result<T> = { ok: true; value: T } | Failure;
 
 export interface WorkspaceApi {
-  read(): Promise<Result<DatabaseDetails & { record: SampleRecord | null }>>;
-  save(input: SaveSample): Promise<Result<SampleRecord>>;
+  students(): Promise<Result<Student[]>>;
+  history(studentId: string): Promise<Result<Lesson[]>>;
+  createStudent(input: StudentInput): Promise<Result<Student>>;
+  addLesson(input: LessonInput): Promise<Result<Lesson>>;
 }

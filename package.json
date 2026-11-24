@@ -1,14 +1,15 @@
 {
-  "name": "supervisor-workspace-pr1a",
+  "name": "supervisor-workspace-mvp",
   "version": "0.1.0",
   "private": true,
-  "description": "Windows desktop shell and SQLite persistence verification",
+  "description": "Offline Windows workspace for student learning records",
   "author": "Supervisor Workspace",
   "main": "build/main.js",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc -p tsconfig.main.json && vite build --base ./",
     "test": "tsc -p tsconfig.main.json && node --test test/*.test.cjs",
+    "pack:win:dir": "electron-builder --win --x64 --dir --publish never",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {

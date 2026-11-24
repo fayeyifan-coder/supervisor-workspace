@@ -1,17 +1,16 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, type IpcMainInvokeEvent, type Session } from "electron";
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
-import { channels, type Failure } from "./contracts";
-import { SampleDatabase } from "./database";
+import { join } from "node:path";
+import { channels, type Failure, type Result } from "./contracts";
+import { failure, WorkspaceDatabase } from "./database";
 
-const scheme = "supervisor-pr1a";
+const scheme = "supervisor-workspace-mvp";
 const page = `${scheme}://workspace/index.html`;
 const securityPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; connect-src 'none'";
-const appId = "cn.supervisorworkspace.desktop.pr1a";
-const title = "督学工作台 · 桌面验证";
-const localData = process.env.LOCALAPPDATA;
-let database: SampleDatabase | undefined;
+const appId = "cn.supervisorworkspace.desktop.mvp";
+const title = "督学工作台";
+let database: WorkspaceDatabase | undefined;
 
 protocol.registerSchemesAsPrivileged([{ scheme, privileges: { standard: true, secure: true } }]);
 
@@ -55,27 +54,27 @@ function isTrusted(event: IpcMainInvokeEvent, window: BrowserWindow): boolean {
 }
 
 function denied(): Failure {
-  return { ok: false, message: "此窗口无权访问本地记录。" };
+  return { ok: false, code: "invalid", message: "此窗口无权访问本地记录。" };
 }
 
 async function start(profile: string): Promise<void> {
   app.setAppUserModelId(appId);
-  const ui = session.fromPartition("supervisor-pr1a-ui");
+  const ui = session.fromPartition("supervisor-workspace-mvp-ui");
   restrictSession(ui);
-  const path = join(profile, "data", "workspace.sqlite3");
-  let startupError = "";
+  const path = join(profile, "data", "mvp.sqlite3");
+  let startupError: Failure = { ok: false, code: "recovery", message: "MVP 数据库无法打开。请保留原目录后重开。" };
   try {
-    database = SampleDatabase.open(path, join(profile, "database.initialized"));
+    database = WorkspaceDatabase.open(path, join(profile, "data", "mvp.initialized"));
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "未知错误";
-    startupError = `数据库初始化失败（${reason}）。请关闭应用，检查并保留原文件：${path}`;
+    const result = failure(error);
+    if (result.code === "recovery" || result.code === "busy") startupError = result;
   }
 
   const window = new BrowserWindow({
     title,
-    width: 840,
-    height: 620,
-    minWidth: 540,
+    width: 1100,
+    height: 800,
+    minWidth: 580,
     minHeight: 480,
     show: false,
     autoHideMenuBar: true,
@@ -98,37 +97,51 @@ async function start(profile: string): Promise<void> {
   window.webContents.on("will-redirect", event => event.preventDefault());
   window.webContents.on("will-attach-webview", event => event.preventDefault());
 
-  ipcMain.handle(channels.read, (event) => {
+  function invoke<T>(event: IpcMainInvokeEvent, operation: (store: WorkspaceDatabase) => T): Result<T> {
     if (!isTrusted(event, window)) return denied();
-    if (!database) return { ok: false, message: startupError };
+    if (!database) return startupError;
     try {
-      return { ok: true, value: { ...database.details, record: database.read() } };
-    } catch {
-      return { ok: false, message: "读取测试记录失败。请关闭应用并保留原数据库文件。" };
-    }
-  });
-  ipcMain.handle(channels.save, (event, raw: unknown) => {
-    if (!isTrusted(event, window)) return denied();
-    if (!database) return { ok: false, message: startupError };
-    try {
-      return { ok: true, value: database.save(raw) };
+      return { ok: true, value: operation(database) };
     } catch (error) {
-      const reason = error instanceof Error ? error.message : "未知错误";
-      return { ok: false, message: `保存失败（${reason}）。输入仍在当前窗口中，可检查后重试。` };
+      return failure(error);
     }
-  });
+  }
+  ipcMain.handle(channels.students, event => invoke(event, store => store.students()));
+  ipcMain.handle(channels.history, (event, id: unknown) => invoke(event, store => store.history(id)));
+  ipcMain.handle(channels.createStudent, (event, raw: unknown) => invoke(event, store => store.createStudent(raw)));
+  ipcMain.handle(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
   window.once("ready-to-show", () => window.show());
   await window.loadURL(page);
 }
 
+function prepareProfile(): string {
+  if (process.platform !== "win32") throw new Error("MVP 验收使用本机 D 盘。");
+  let path = "D:\\";
+  for (const [index, part] of ["Codex-Development", "Temp", "supervisor-workspace-mvp", "profile"].entries()) {
+    path = join(path, part);
+    ensureDirectory(path, index >= 2);
+  }
+  for (const directory of ["data", "chromium", "logs", "crash"]) ensureDirectory(join(path, directory), true);
+  return path;
+}
+
+function ensureDirectory(path: string, create: boolean): void {
+  if (create && !lstatSync(path, { throwIfNoEntry: false })) mkdirSync(path);
+  const entry = lstatSync(path);
+  if (!entry.isDirectory() || entry.isSymbolicLink() || realpathSync.native(path) !== path) {
+    throw new Error("MVP 使用独立的本机目录。");
+  }
+}
+
 try {
-  if (!localData || !isAbsolute(localData)) throw new Error("无法定位 Windows 本地应用数据目录。");
-  const profile = join(localData, "SupervisorWorkspace", "PR1A", "桌面验证");
+  const profile = prepareProfile();
   const userData = join(profile, "chromium");
-  mkdirSync(userData, { recursive: true });
   app.setPath("userData", userData);
   app.setPath("sessionData", userData);
+  app.setPath("crashDumps", join(profile, "crash"));
+  app.setAppLogsPath(join(profile, "logs"));
   app.commandLine.appendSwitch("disable-background-networking");
+  app.commandLine.appendSwitch("disable-component-update");
 
   if (!app.requestSingleInstanceLock()) {
     app.quit();
