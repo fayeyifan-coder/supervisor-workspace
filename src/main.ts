@@ -487,6 +487,8 @@ async function startSelected(owner: string, original: string, format: Protection
       if (checked.digest !== pending.digest) throw new Error("Selected recovery copy changed.");
       const next = await files.restore(owner, checked.bytes, true);
       const active = { name: next.profileName, digest: pending.digest };
+      const staged = await files.inspect(owner, active.name, format, m1Version, "activation");
+      if (staged.digest !== pending.digest) throw new Error("Activation image does not match the selected backup.");
       profile = verifyActiveProfile(owner, active, true, format, m1Version);
       opened = openProfile(profile, format, m1Version);
       verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);

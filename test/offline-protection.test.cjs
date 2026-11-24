@@ -133,6 +133,27 @@ test("activation rejects sidecars, corrupt markers, missing artifacts and modifi
   assert.equal(f.m1.students().length, 2);
 });
 
+test("before first SQLite open activation rejects same-schema changed bytes in the actual target", async t => {
+  const f = populated(t);
+  const old = captureProtection(f.stores, "0.1.0");
+  const bytes = prepareProtectionRestore(old, 2, 6);
+  const restored = await io.restore(f.dir, bytes, true);
+  const inspected = await io.inspect(f.dir, restored.profileName, 2, 6, "activation");
+  assert.deepEqual(inspected.bytes, bytes);
+  const active = { name: restored.profileName, digest: inspected.digest };
+  const path = join(restored.location, "data", "mvp.sqlite3");
+  const alternate = new DatabaseSync(path);
+  try {
+    alternate.prepare("UPDATE students SET alias=? WHERE id=?").run("合成替代内容", f.studentId);
+    assert.equal(alternate.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+  } finally { alternate.close(); }
+  const modified = readFileSync(path);
+  verifyActiveProfile(f.dir, active, true, 2, 6);
+  await assert.rejects(io.inspect(f.dir, restored.profileName, 2, 6, "activation"), /摘要/);
+  assert.deepEqual(readFileSync(path), modified);
+  assert.notEqual(f.m1.students().find(row => row.id === f.studentId).alias, "合成替代内容");
+});
+
 test("missing or corrupt activated profile metadata fails closed", async t => {
   const f = populated(t);
   const original = readActivation(f.dir);

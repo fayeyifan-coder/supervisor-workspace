@@ -423,8 +423,9 @@ export class ProtectionFiles {
 
   async read(path: string): Promise<Buffer> { return this.native(["read", path]); }
 
-  async inspect(parent: string, name: string, format: ProtectionFormat = 1, m1Version: M1Version = 1) {
-    const wire = await this.native(["inspect", parent, name, String(format), String(m1Version)]);
+  async inspect(parent: string, name: string, format: ProtectionFormat = 1, m1Version: M1Version = 1,
+    target: "recovery" | "activation" = "recovery") {
+    const wire = await this.native([target === "activation" ? "inspect-active" : "inspect", parent, name, String(format), String(m1Version)]);
     let offset = 0;
     const part = (max: number): Buffer => {
       if (offset + 4 > wire.length) return reject("恢复副本不完整。");
