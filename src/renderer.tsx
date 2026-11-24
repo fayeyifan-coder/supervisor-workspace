@@ -9,6 +9,7 @@ import { StudentIntakePanel } from "./StudentIntakePanel";
 import { StudentDetail } from "./StudentDetail";
 import { StudentEditPanel } from "./StudentEditPanel";
 import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
+import { ScoreTrend } from "./ScoreTrend";
 import { StudentRecordsPanel } from "./StudentRecordsPanel";
 import { studentRecordDefinitions, type StudentRecordKind } from "./student-records";
 import "./styles.css";
@@ -322,7 +323,7 @@ function App() {
                 .filter(kind => studentRecordDefinitions[kind].version <= studentRecordVersion).map(kind => ({
                   id: kind, label: studentRecordDefinitions[kind].label,
                   content: <StudentRecordsPanel key={active.id + kind} studentId={active.id} kind={kind} api={api}
-                    onActivity={onRecordActivity} />,
+                    onActivity={onRecordActivity} overview={kind === "score" ? records => <ScoreTrend records={records} /> : undefined} />,
                 }))}
               parentFollowUp={parentFollowUpEnabled && <ParentFollowUpPanel key={active.id} studentId={active.id} api={api}
                 onDirtyChange={setParentFollowUpDirty} onBusyChange={setParentFollowUpBusy} />}

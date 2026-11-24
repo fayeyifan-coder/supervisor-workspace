@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import { channels, type Failure, type Result } from "./contracts";
-import { failure, latestM1Version, WorkspaceDatabase, WorkspaceFault, type M1Version } from "./database";
+import { failure, WorkspaceDatabase, WorkspaceFault, type M1Version } from "./database";
 import { closeStoresIndependently } from "./database-lifecycle";
 import { WorkLogDatabase, type WorkStatus } from "./worklog";
 import { GrowthProfileDatabase, GrowthProfileFault, type GrowthSaveInput } from "./growth-profile";
@@ -16,7 +16,7 @@ import { OperationsDatabase } from "./operations";
 import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
 import { applyLearningChange, readLearningDay, readScheduleReceipt } from "./learning-api";
 import { OperationsPending } from "./operations-pending";
-import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, isStudentServicesProfile, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
+import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, studentServicesVersion, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
 const scheme = "supervisor-workspace-mvp";
@@ -558,9 +558,9 @@ try {
       requestedM2CProfile.toLowerCase() === "supervisor-workspace-mvp")) throw new Error("合成 Profile 名称无效。");
   const profileName = syntheticM2CProfile ? requestedM2CProfile
     : syntheticM2BProfile ? "supervisor-workspace-m2b-test" : "supervisor-workspace-mvp";
-  const m1Version: M1Version = syntheticM2CProfile && isStudentServicesProfile(profileName) ? latestM1Version
-    : syntheticM2CProfile && isParentFollowUpProfile(profileName) ? 3
-    : syntheticM2CProfile && isStudentEditProfile(profileName) ? 2 : 1;
+  const m1Version: M1Version = (syntheticM2CProfile ? studentServicesVersion(profileName) : undefined) ??
+    (syntheticM2CProfile && isParentFollowUpProfile(profileName) ? 3
+      : syntheticM2CProfile && isStudentEditProfile(profileName) ? 2 : 1);
   const format: ProtectionFormat = m1Version >= 2 || (syntheticM2CProfile && /^sw-r2a-[a-z0-9-]+$/.test(profileName)) ? 2 : 1;
   const profile = prepareProfile(profileName, format);
   const owner = dirname(profile);

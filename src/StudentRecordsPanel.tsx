@@ -121,15 +121,15 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
       <fieldset disabled={busy || Boolean(pending)}>
         <legend>{draft.expectedRevision ? "编辑" : "新增"}{definition.item}</legend>
         {fields.map(field => {
-          const control = { name: field.key, value: draft.fields[field.key], required: !field.optional, onChange:
-            (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-              const value = event.target.value;
-              setDraft({ ...draft, fields: { ...draft.fields, [field.key]: value } });
-            } };
+          const control = { name: field.key, value: draft.fields[field.key], required: !field.optional };
+          function update(event: React.FormEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
+            const value = event.currentTarget.value;
+            setDraft(current => current && { ...current, fields: { ...current.fields, [field.key]: value } });
+          }
           return <label key={field.key}>{field.label}
-            {field.options ? <select {...control}>{field.options.map(option => <option key={option}>{option}</option>)}</select>
-              : field.type === "textarea" ? <textarea {...control} maxLength={field.limit ?? 1000} />
-                : <input {...control} type={field.type ?? "text"} maxLength={field.limit ?? 1000} step="any" />}
+            {field.options ? <select {...control} onChange={update}>{field.options.map(option => <option key={option}>{option}</option>)}</select>
+              : field.type === "textarea" ? <textarea {...control} onChange={update} maxLength={field.limit ?? 1000} />
+                : <input {...control} onChange={update} type={field.type ?? "text"} maxLength={field.limit ?? 1000} step="any" />}
           </label>;
         })}
       </fieldset>

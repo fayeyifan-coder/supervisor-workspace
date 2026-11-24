@@ -632,6 +632,44 @@ test("enrollment reminder uses inclusive institution expiry and ignores cancelle
   assert.equal(enrollmentStatus({ ...fields, status: "已取消" }, "2026-12-02"), "已取消");
 });
 
+test("M1 v5 preserves enrollment history when migrating and restores valid decimal scores", async t => {
+  const f = populated(t);
+  const ops = OperationsDatabase.open(f.dir, f.m1, true);
+  t.after(() => ops.close());
+  const initial = captureProtection([...f.stores, ops], "0.1.0", 2);
+  async function upgrade(source, version) {
+    const artifact = await io.restore(f.dir, prepareProtectionRestore(source, 2, version), true);
+    const data = join(artifact.location, "data");
+    const current = openStores(data, t, version);
+    const operations = OperationsDatabase.open(data, current.m1);
+    t.after(() => operations.close());
+    return { ...current, backup: () => captureProtection([...current.stores, operations], "0.1.0", 2, version) };
+  }
+  const input = { kind: "enrollment", id: randomUUID(), studentId: f.studentId, requestId: randomUUID(),
+    expectedRevision: 0, fields: { course: "合成数学课", registeredOn: "2026-11-24", startsOn: "2026-11-24",
+      endsOn: "2026-12-01", status: "有效", notes: "" } };
+  const v4 = await upgrade(initial, 4);
+  const enrollment = v4.m1.saveStudentRecord(input);
+  const backup = v4.backup();
+  const copy = Buffer.from(backup);
+  const v5 = await upgrade(backup, 5);
+  assert.deepEqual(backup, copy);
+  assert.deepEqual(v5.m1.saveStudentRecord(input), enrollment);
+  assert.deepEqual(v5.m1.studentRecords("score", f.studentId).records, []);
+  const fields = { assessment: "合成测验", subject: "数学", takenOn: "2026-11-24", category: "日常测验",
+    score: "37.5", maximum: "50", notes: "" };
+  const score = { ...input, kind: "score", id: randomUUID(), requestId: randomUUID(), fields };
+  for (const bad of [{ score: "51" }, { maximum: "0" }, { score: "1e1" }, { score: "37.555" }]) {
+    assert.throws(() => v5.m1.saveStudentRecord({ ...score, fields: { ...fields, ...bad } }), { code: "invalid" });
+  }
+  const saved = v5.m1.saveStudentRecord(score);
+  assert.throws(() => v5.m1.saveStudentRecord({ ...score, fields: { ...fields, score: "39" } }), { code: "conflict" });
+  const recovered = await upgrade(v5.backup(), 5);
+  assert.deepEqual(recovered.m1.studentRecords("score", f.studentId).records, [saved]);
+  assert.deepEqual(recovered.m1.studentRecords("score", f.pending.studentId).records, []);
+  assert.deepEqual(recovered.m1.saveStudentRecord(score), saved);
+});
+
 test("SWBACK2 rejects busy and wrongly linked operations and releases earlier SQLite locks", t => {
   const f = fiveFixture(t);
   f.create();

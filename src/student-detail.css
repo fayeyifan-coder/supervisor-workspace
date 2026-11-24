@@ -45,3 +45,8 @@
   .student-detail-nav { gap: 4px; }
   .student-detail-nav button { padding-inline: 8px; }
 }
+.score-trend { border: 1px solid #d5dfd8; border-radius: 8px; padding: 12px; margin: 12px 0; }
+.score-trend label { display: inline-grid; gap: 6px; }
+.score-trend-plot { overflow-x: auto; }
+.score-trend-plot canvas { display: block; width: 100%; min-width: 480px; max-width: 720px; height: auto; }
+.score-trend-points { padding-inline-start: 24px; margin-block: 6px; font-variant-numeric: tabular-nums; }

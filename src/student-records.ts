@@ -34,6 +34,23 @@ export const studentRecordDefinitions = {
       if (fields.startsOn > fields.endsOn) invalid("有效期结束日期不能早于开始日期。");
     },
   },
+  score: {
+    table: "student_scores", version: 5, label: "成绩趋势", item: "成绩",
+    fields: [
+      { key: "assessment", label: "考试或测验名称", limit: 100 },
+      { key: "subject", label: "学科", limit: 30 },
+      { key: "takenOn", label: "考试日期", type: "date" },
+      { key: "category", label: "考试类别", options: ["日常测验", "阶段考试", "期中考试", "期末考试", "其他"] },
+      { key: "score", label: "得分", type: "number" },
+      { key: "maximum", label: "满分", type: "number" },
+      { key: "notes", label: "备注", type: "textarea", optional: true },
+    ],
+    validate(fields) {
+      if (Number(fields.maximum) <= 0 || Number(fields.score) > Number(fields.maximum)) {
+        invalid("满分必须大于零，得分不能高于满分。");
+      }
+    },
+  },
 } satisfies Record<string, RecordDefinition>;
 
 export type StudentRecordKind = keyof typeof studentRecordDefinitions;
@@ -80,6 +97,9 @@ function fieldsFor(definition: RecordDefinition, raw: unknown): Record<string, s
     const value = input[field.key];
     if (typeof value !== "string" || value.length > (field.limit ?? 1000) || value.includes("\0") ||
         (!field.optional && !value.trim())) invalid("请检查" + field.label + "。");
+    if (value && field.type === "number" && !/^(?:0|[1-9][0-9]{0,4})(?:\.[0-9]{1,2})?$/.test(value)) {
+      invalid(field.label + "须为 0 至 99999.99 的数字，最多两位小数。");
+    }
     if (value && field.type === "date" && shanghaiMinute(value, "00:00") === null) invalid(field.label + "无效。");
     if (field.options && !field.options.includes(value)) invalid(field.label + "无效。");
     fields[field.key] = value.trim();

@@ -128,7 +128,7 @@ export function approveActiveProfile(profile: string, digest: string): void {
 }
 
 export function originalProfileSegments(name: string, format: ProtectionFormat): string[] {
-  if (format === 2 && isStudentServicesProfile(name)) return ["sw-student-services-profiles", name, "profile"];
+  if (format === 2 && studentServicesVersion(name)) return ["sw-student-services-profiles", name, "profile"];
   if (format === 2 && isParentFollowUpProfile(name)) return ["sw-parent-profiles", name, "profile"];
   if (format === 2 && isStudentEditProfile(name)) return ["sw-r3b-profiles", name, "profile"];
   return format === 2 ? ["sw-r2a-profiles", name, "profile"] : [name, "profile"];
@@ -141,8 +141,9 @@ export function isParentFollowUpProfile(name: string): boolean {
   return /^sw-parent-[a-z0-9-]+$/.test(name);
 }
 
-export function isStudentServicesProfile(name: string): boolean {
-  return /^sw-services-[a-z0-9-]+$/.test(name);
+export function studentServicesVersion(name: string): 4 | 5 | undefined {
+  if (/^sw-services-v5-[a-z0-9-]+$/.test(name)) return 5;
+  if (/^sw-services-[a-z0-9-]+$/.test(name)) return 4;
 }
 
 const enrollment = "operations-synthetic.initialized";
