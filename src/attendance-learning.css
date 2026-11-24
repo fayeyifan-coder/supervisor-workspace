@@ -1,0 +1,32 @@
+.schedule-page[hidden] { display: none; }
+.schedule-recovery { margin: 16px 24px 0; }
+.schedule-recovery code { word-break: break-all; }
+.schedule-learning-entry { background: transparent; color: var(--green); width: 100%; min-height: 29px; margin-top: 2px; padding: 3px 6px; text-align: left; font-size: 12px; }
+.schedule-learning-entry:hover:enabled { background: #e6efe3; }
+.learning-day .schedule-heading { margin-bottom: 16px; }
+.learning-day h4 { margin: 0; overflow-wrap: anywhere; }
+.learning-task-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.learning-status { color: var(--green); background: #e8f0e5; border-radius: 4px; padding: 2px 7px; font-size: 12px; flex: 0 0 auto; }
+.learning-day h1 { overflow-wrap: anywhere; }
+.learning-attendance { padding: 16px; }
+.learning-times { display: flex; flex-wrap: wrap; column-gap: 30px; margin: 10px 0; }
+.learning-times div { display: block; min-width: 130px; margin-bottom: 4px; }
+.learning-times dd { font-variant-numeric: tabular-nums; font-weight: 600; }
+.learning-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.learning-actions .primary { margin-top: 0; }
+.learning-blocks-head { margin: 20px 0 10px; }
+.learning-block-list { display: grid; gap: 12px; }
+.learning-block p, .learning-attendance p { font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.learning-block-form { margin-bottom: 12px; }
+.learning-task-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.learning-task { border-top: 1px solid var(--line); padding: 10px 0 0; margin-top: 8px; }
+.learning-task dl, .learning-task label { margin-top: 6px; }
+.learning-task-form { padding-top: 12px; border-top: 1px solid var(--line); }
+.learning-task-fields { margin-bottom: 10px; padding-bottom: 9px; border-bottom: 1px solid var(--line); }
+.learning-close-editor { margin-top: 4px; }
+.learning-no-tasks { margin-top: 7px; }
+@media (max-width: 620px) {
+  .learning-day .schedule-heading { align-items: flex-start; flex-direction: column; }
+  .learning-day .field-grid { grid-template-columns: minmax(0, 1fr); }
+  .schedule-recovery { margin-inline: 16px; }
+}

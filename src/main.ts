@@ -13,7 +13,9 @@ import { maxIntakeBytes } from "./intake-format";
 import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSupportedProfileOpen, validateProtection,
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
 import { OperationsDatabase } from "./operations";
-import { listScheduleWeek, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
+import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
+import { applyLearningChange, readLearningDay, readScheduleReceipt } from "./learning-api";
+import { OperationsPending } from "./operations-pending";
 import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
@@ -150,6 +152,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   const { startupError, growthStartupError, intakeStartupError, intake } = opened;
   app.setAppUserModelId(appId);
   const ui = session.fromPartition("supervisor-workspace-mvp-ui");
+  const operationsPending = new OperationsPending(profile);
   restrictSession(ui);
   const window = new BrowserWindow({
     title,
@@ -207,8 +210,39 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     invokeSchedule(event, (store, students) => listScheduleWeek(store, students, raw)));
   ipcMain.handle(channels.schedulePlan, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => readSchedulePlan(store, students, raw)));
+  function performOperation<T>(command: Record<string, unknown>, operation: () => T): T {
+    const requestId = operationsPending.begin(command);
+    try {
+      const result = operation();
+      operationsPending.remember(requestId);
+      return result;
+    } catch (error) {
+      const { code } = failure(error);
+      if (code === "invalid" || code === "conflict") operationsPending.remember(requestId);
+      throw error;
+    }
+  }
   ipcMain.handle(channels.saveSchedulePlan, (event, raw: unknown) =>
-    invokeSchedule(event, (store, students) => saveSchedulePlan(store, students, raw)));
+    invokeSchedule(event, (store, students) => {
+      const command = { ...scheduleObject(raw), command: "saveAttendancePlan" };
+      return performOperation(command, () => saveSchedulePlan(store, students, command));
+    }));
+  ipcMain.handle(channels.learningDay, (event, raw: unknown) =>
+    invokeSchedule(event, (store, students) => readLearningDay(store, students, raw)));
+  ipcMain.handle(channels.applyLearningChange, (event, raw: unknown) =>
+    invokeSchedule(event, (store, students) => {
+      const command = scheduleObject(raw);
+      return performOperation(command, () => applyLearningChange(store, students, command));
+    }));
+  ipcMain.handle(channels.scheduleReceipt, (event, raw: unknown) =>
+    invokeSchedule(event, (store, students) => readScheduleReceipt(store, students, raw)));
+  ipcMain.handle(channels.pendingOperation, event =>
+    invokeSchedule(event, () => operationsPending.state()));
+  ipcMain.handle(channels.acknowledgeOperation, (event, raw: unknown, reviewed: unknown) =>
+    invokeSchedule(event, (store, students) => {
+      operationsPending.acknowledge(scheduleId(raw), reviewed === true, input => readScheduleReceipt(store, students, input));
+      return null;
+    }));
   const invokeWork = <T>(event: IpcMainInvokeEvent, operation: (store: WorkLogDatabase) => T): Result<T> => {
     if (!isTrusted(event, window)) return denied();
     if (!workLog) return startupError;

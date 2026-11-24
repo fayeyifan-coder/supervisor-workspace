@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { AttendancePlan, Failure, ScheduleSaveInput, Student, WorkspaceApi } from "./contracts";
 import { minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange } from "./schedule-calendar";
+import { AttendanceLearningPanel } from "./AttendanceLearningPanel";
+import { usePendingOperation } from "./use-pending-operation";
 import "./weekly-schedule.css";
 
 const dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
@@ -72,7 +74,16 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const submission = useRef<ScheduleSaveInput | undefined>(undefined);
-  const [uncertain, setUncertain] = useState(false);
+  const [learning, setLearning] = useState<{ attendanceId: string; studentId: string }>();
+  const [learningRevision, setLearningRevision] = useState(0);
+  const request = usePendingOperation(api, saved => {
+    if (saved?.command === "saveAttendancePlan") {
+      setWeek(mondayOf(shanghaiParts(saved.startAt).date));
+      showDraft(undefined);
+    }
+    refresh();
+    setLearningRevision(value => value + 1);
+  });
   const [latest, setLatest] = useState<AttendancePlan>();
   const formRef = useRef<HTMLFormElement>(null);
   const queryKey = week + "/" + studentId + "/" + queryRevision;
@@ -91,15 +102,13 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   function refresh() { setQueryRevision(value => value + 1); }
 
   function canDiscard(): boolean {
-    if (inFlight.current) return false;
-    if (uncertain) return window.confirm("本次保存结果待确认。退出编辑后，请先核对排课记录再重新创建。确定退出编辑吗？");
+    if (inFlight.current || request.busy) return false;
     return !draftDirty || window.confirm("本次排课有未保存的修改。确定放弃吗？");
   }
 
   function showDraft(next: Draft | undefined) {
     setDraft(next);
     setDraftDirty(false);
-    setUncertain(false);
     setLatest(undefined);
     submission.current = undefined;
     setNotice(undefined);
@@ -114,7 +123,7 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   }
 
   function updateDraft(fields: Partial<Draft>) {
-    if (inFlight.current || uncertain) return;
+    if (inFlight.current || request.blocked) return;
     setDraft(previous => previous && { ...previous, ...fields });
     setDraftDirty(true);
     setNotice(undefined);
@@ -127,18 +136,13 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   }
 
   function showFailure(result: Failure) {
-    if (result.code === "unknown" || uncertain) {
-      setUncertain(true);
-      setNotice({ kind: "pending", message: "保存结果待确认。可刷新周视图或重试同一请求。若提示重开，请先核对已保存的排课。"
-        + result.message });
-    } else {
-      setNotice({ kind: "failure", message: result.message });
-    }
+    if (result.code !== "unknown") setNotice({ kind: "failure", message: result.message });
+    else setNotice(undefined);
   }
 
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (!draft || inFlight.current || latest || (draft.original && !canEdit(draft.original))) return;
+    if (!draft || inFlight.current || request.blocked || latest || (draft.original && !canEdit(draft.original))) return;
     const startAt = shanghaiMinute(draft.date, draft.start);
     const endAt = shanghaiMinute(draft.date, draft.end);
     if (startAt === null || endAt === null || startAt >= endAt) {
@@ -150,19 +154,19 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
       setNotice({ kind: "failure", message: "请确认本次时段例外并填写原因。" });
       return;
     }
-    const request = submission.current ?? {
+    const command = submission.current ?? {
       requestId: crypto.randomUUID(), id: draft.id, studentId: draft.studentId,
       expectedRevision: draft.original?.revision ?? 0, startAt, endAt, kind: draft.kind,
       exception: exception ? { confirmed: true, reason: draft.reason.trim() } : undefined,
     };
-    submission.current = request;
+    submission.current = command;
     inFlight.current = true;
     setBusy(true);
     setNotice({ kind: "pending", message: "正在保存排课…" });
     try {
-      const result = await api.saveSchedulePlan(request);
+      const result = await request.run({ ...command, command: "saveAttendancePlan" });
       if (result.ok) {
-        setWeek(mondayOf(shanghaiParts(result.value.startAt).date));
+        setWeek(mondayOf(shanghaiParts(command.startAt).date));
         if (studentId && studentId !== result.value.studentId) setStudentId(result.value.studentId);
         showDraft(undefined);
         setNotice({ kind: "success", message: "排课已保存。" });
@@ -171,15 +175,12 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
         showFailure(result);
         if (result.code === "conflict") {
           refresh();
-          if (draft.original && !uncertain) {
+          if (draft.original) {
             const row = await api.schedulePlan(draft.id).catch(() => undefined);
             if (row?.ok && row.value && row.value.revision !== draft.original.revision) setLatest(row.value);
           }
         }
       }
-    } catch {
-      setUncertain(true);
-      setNotice({ kind: "pending", message: "未收到保存回执。可刷新核对或重试同一请求，避免重复建档。" });
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -199,14 +200,37 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
   const readOnly = Boolean(draft?.original && !canEdit(draft.original));
   const exception = draft && outsideHours(draft);
 
-  return <section className="schedule-page" aria-labelledby="schedule-title">
+  return <>
+    {(request.state?.kind === "pending" || request.state?.kind === "damaged" || request.issue || request.message) &&
+      <aside className="schedule-recovery notice pending" aria-label="待核对教务请求">
+        {request.descriptor && <p>待核对请求 <code>{request.descriptor.requestId}</code> · {names.get(request.descriptor.studentId)}</p>}
+        {request.state?.kind === "damaged" && <p role="alert">原请求内容无法恢复，写入已暂停。请在周课表和当日学习面板查看已保存的出勤、学习块与任务结果。</p>}
+        {(request.message || request.issue) && <p role="status">{request.issue || request.message}</p>}
+        <div className="retry-actions">
+          {request.descriptor && <button className="secondary" type="button" disabled={request.busy}
+            onClick={() => void request.recover("read")}>查询原请求</button>}
+          {request.state?.kind === "pending" && <button className="secondary" type="button" disabled={request.busy}
+            onClick={() => void request.recover("retry")}>重试同一请求</button>}
+          {request.state?.kind === "damaged" && request.descriptor && <button className="secondary" type="button" disabled={request.busy}
+            onClick={() => {
+              if (window.confirm("你已在周课表或当日学习面板核对实际记录，并确认结束这个待核对请求吗？"))
+                void request.recover("reviewed");
+            }}>已核对数据库，结束待核对</button>}
+          {request.issue && <button className="secondary" type="button" disabled={request.busy}
+            onClick={() => void request.hydrate()}>重新读取待核对状态</button>}
+        </div>
+      </aside>}
+    {learning && <AttendanceLearningPanel api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
+      reloadVersion={learningRevision} blocked={request.blocked} submit={request.run}
+      onBack={() => { setLearning(undefined); refresh(); }} />}
+    <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}>
     <header className="schedule-heading">
       <div>
         <button className="schedule-back" type="button" onClick={() => { if (canDiscard()) onBack(); }}>返回学生档案</button>
         <h1 id="schedule-title">排课周视图</h1>
         <p className="muted">机构时间（上海） · 周一默认停排</p>
       </div>
-      <button type="button" className="primary schedule-primary" disabled={!students.length || busy} onClick={newDraft}>新建单次排课</button>
+      <button type="button" className="primary schedule-primary" disabled={!students.length || busy || request.blocked} onClick={newDraft}>新建单次排课</button>
     </header>
     <div className="schedule-toolbar">
       <div className="schedule-period">
@@ -235,13 +259,14 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
       {readOnly && <p className="muted">已开始或已结束的排课只供查看。</p>}
       {latest && <div className="notice pending" role="alert">
         <p>当前版本已变更。最新安排为 {shanghaiParts(latest.startAt).date} {shanghaiParts(latest.startAt).time}–{shanghaiParts(latest.endAt).time}，{latest.kind === "whole_day" ? "全天" : "普通"}，{statuses[latest.status]}。</p>
+        <p>最新时段外例外原因：{latest.exceptionReason ?? "无"}</p>
         {canEdit(latest) ? <button className="secondary" type="button" onClick={() => {
           updateDraft({ original: latest, confirmed: false });
           setLatest(undefined);
         }}>已核对，保留输入并继续</button> :
           <p>当前安排已锁定，请关闭表单后查看最新记录。</p>}
       </div>}
-      <fieldset className="schedule-fields" disabled={readOnly || busy || uncertain || Boolean(latest)}>
+      <fieldset className="schedule-fields" disabled={readOnly || busy || request.blocked || Boolean(latest)}>
         <label>学生
           <select required disabled={Boolean(draft.original)} value={draft.studentId} onChange={event => updateDraft({ studentId: event.target.value })}>
             {students.map(student => <option key={student.id} value={student.id}>{student.alias}</option>)}
@@ -270,10 +295,9 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
         </div>}
       </fieldset>
       <div className="schedule-buttons">
-        {!readOnly && <button type="submit" className="primary schedule-primary" disabled={busy || Boolean(latest)}>
-          {uncertain ? "重试同一请求" : "保存排课"}
+        {!readOnly && <button type="submit" className="primary schedule-primary" disabled={busy || request.blocked || Boolean(latest)}>
+          保存排课
         </button>}
-        {uncertain && <button type="button" className="secondary" onClick={refresh}>刷新周视图</button>}
         <button type="button" className="secondary" disabled={busy} onClick={() => {
           if (canDiscard()) showDraft(undefined);
         }}>{readOnly ? "关闭详情" : "关闭表单"}</button>
@@ -308,10 +332,18 @@ export function WeeklySchedulePanel({ api, students, initialStudentId, onBack }:
                 <span className="schedule-card-meta">{plan.kind === "whole_day" ? "全天" : "普通"} · {statuses[plan.status]}</span>
                 {plan.exceptionReason && <span className="schedule-card-exception">时段例外</span>}
               </button>
+              <button className="schedule-learning-entry" type="button" disabled={busy || request.busy}
+                aria-label={alias + " 到校与任务"} onClick={() => {
+                  if (!canDiscard()) return;
+                  showDraft(undefined);
+                  setLearning({ attendanceId: plan.id, studentId: plan.studentId });
+                  window.scrollTo(0, 0);
+                }}>到校与任务</button>
             </li>;
           })}</ul> : <p className="schedule-empty muted">无排课</p>)}
         </section>;
       })}
     </div>
-  </section>;
+    </section>
+  </>;
 }
