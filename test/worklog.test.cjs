@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { createHash, randomUUID } = require("node:crypto");
-const { mkdtempSync, readFileSync, realpathSync, rmSync } = require("node:fs");
+const { constants, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
@@ -124,4 +124,39 @@ test("COMMIT succeeds then throws: retry is reported unknown and does not duplic
   assert.equal(f.work.history(rowId).length, 1);
   f.work.save(input(null, rowId), () => false);
   assert.equal(f.work.history(rowId).length, 1);
+});
+
+test("ordinary work-log startup preserves regular committed WAL sidecars", t => {
+  const f = fixture(t);
+  f.closeWork();
+  const writer = new DatabaseSync(f.workPath, { enableForeignKeyConstraints: true });
+  const rowId = randomUUID();
+  try {
+    writer.exec("PRAGMA wal_autocheckpoint=0");
+    writer.prepare("INSERT INTO work_items VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(
+      rowId, "合成 WAL 工作事项", "2026-11-18", f.student.id, "", "", "", "open", 1, 1, null);
+    assert.ok(lstatSync(f.workPath + "-wal").isFile());
+    f.reopen();
+    assert.equal(f.work.list("2026-11-18")[0].id, rowId);
+  } finally { writer.close(); }
+});
+
+test("ordinary work-log startup rejects non-file sidecars beside an existing database, preserving evidence", t => {
+  const f = fixture(t);
+  f.closeWork();
+  const expected = hash(f.workPath);
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    const fixturePath = join(f.root, "case" + suffix);
+    mkdirSync(fixturePath);
+    const isolatedMain = join(fixturePath, "worklog.sqlite3");
+    const isolatedMarker = join(fixturePath, "worklog.initialized");
+    copyFileSync(f.workPath, isolatedMain, constants.COPYFILE_EXCL);
+    copyFileSync(f.marker, isolatedMarker, constants.COPYFILE_EXCL);
+    const unexpectedEntry = isolatedMain + suffix;
+    mkdirSync(unexpectedEntry);
+    assert.throws(() => WorkLogDatabase.open(isolatedMain, isolatedMarker),
+      error => error.code === "recovery" && /侧车/.test(error.message));
+    assert.ok(lstatSync(unexpectedEntry).isDirectory());
+    assert.equal(hash(isolatedMain), expected);
+  }
 });

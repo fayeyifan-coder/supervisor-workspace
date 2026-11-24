@@ -2,9 +2,9 @@ name: Windows verification
 
 on:
   push:
-    branches: [m2-b/reliability-proof, m2-c/student-growth-profile]
+    branches: [m2-b/reliability-proof, m2-c/student-growth-profile, m2-d/offline-data-protection]
   pull_request:
-    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile]
+    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import]
 
 permissions:
   contents: read
@@ -48,7 +48,9 @@ jobs:
           $kind = if (($env:GITHUB_HEAD_REF -in @('m2-b/daily-work-log', 'm2-b/reliability-proof')) -or
             ($env:GITHUB_REF_NAME -eq 'm2-b/reliability-proof')) { 'm2b' } elseif (($env:GITHUB_HEAD_REF -eq 'm2-c/student-growth-profile') -or
               ($env:GITHUB_REF_NAME -eq 'm2-c/student-growth-profile')) { 'm2c' } elseif (
-                $env:GITHUB_HEAD_REF -eq 'm2-c/student-json-import') { 'm2c3' } else { 'mvp' }
+                $env:GITHUB_HEAD_REF -eq 'm2-c/student-json-import') { 'm2c3' } elseif (
+                $env:GITHUB_HEAD_REF -eq 'm2-d/offline-data-protection' -or
+                $env:GITHUB_REF_NAME -eq 'm2-d/offline-data-protection') { 'm2d' } else { 'mvp' }
           $root = Join-Path $env:RUNNER_TEMP "supervisor-$kind-portable-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           if (Test-Path -LiteralPath $root) { throw 'Portable output directory already exists.' }
           New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
@@ -115,7 +117,7 @@ jobs:
             const assetsPattern = /^dist\/assets\/[A-Za-z0-9_.-]+\.(?:js|css)$/;
             const buildFiles = ["build/main.js", "build/preload.js", "build/contracts.js", "build/database.js",
               "build/database-lifecycle.js", "build/worklog.js", "build/growth-profile.js",
-              "build/student-intake.js", "build/intake-format.js"];
+              "build/student-intake.js", "build/intake-format.js", "build/offline-protection.js", "build/profile-activation.js"];
             const allowed = new Set(["package.json", "build", "dist", "dist/assets", "dist/index.html", ...buildFiles]);
             for (const path of contents) {
               assert(allowed.has(path) || assetsPattern.test(path), "Unexpected ASAR member: " + path);
@@ -135,7 +137,7 @@ jobs:
           }
 
           const runtimeFiles = new Set([
-            executable, "resources/app.asar", "resources.pak", "icudtl.dat", "chrome_100_percent.pak",
+            executable, "resources/app.asar", "resources/recovery-io.exe", "resources.pak", "icudtl.dat", "chrome_100_percent.pak",
             "chrome_200_percent.pak", "snapshot_blob.bin", "v8_context_snapshot.bin", "vk_swiftshader_icd.json",
             "LICENSE", "LICENSE.electron.txt", "LICENSES.chromium.html", "version",
           ]);
@@ -170,11 +172,14 @@ jobs:
             assert(process.env.MVP_ELECTRON_FILE_VERSION === electronVersion ||
               process.env.MVP_ELECTRON_FILE_VERSION === electronVersion + ".0", "Packaged Electron version differs from the lock");
             const archive = join(app, "resources", "app.asar");
-            for (const file of [executable, "resources/app.asar", "resources.pak", "icudtl.dat", "ffmpeg.dll",
+            for (const file of [executable, "resources/app.asar", "resources/recovery-io.exe", "resources.pak", "icudtl.dat", "ffmpeg.dll",
               "chrome_100_percent.pak", "chrome_200_percent.pak", "v8_context_snapshot.bin", "locales/en-US.pak"]) {
               requireFile(join(app, file));
             }
             verifyExecutable(join(app, executable));
+            const helper = join(app, "resources", "recovery-io.exe");
+            verifyExecutable(helper);
+            assert(readFileSync(helper).equals(readFileSync(join("build", "recovery-io.exe"))), "Recovery helper differs from CI build.");
             verifyAsar(archive);
             const files = appFiles(app).sort();
             writeFileSync(join(root, "build-info.json"), JSON.stringify({

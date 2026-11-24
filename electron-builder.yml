@@ -7,6 +7,9 @@ files:
   - build/**/*.js
   - dist/**/*
   - "!**/node_modules/**/*"
+extraResources:
+  - from: build/recovery-io.exe
+    to: recovery-io.exe
 asar: true
 npmRebuild: false
 win:

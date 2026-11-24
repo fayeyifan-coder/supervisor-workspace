@@ -202,6 +202,11 @@ export class IntakeStore {
     }));
   }
 
+  protectionConnection(): DatabaseSync {
+    if (this.writesBlocked || this.db.isTransaction) throw new WorkspaceFault("busy", "本地数据库写入状态仍待确定，无法导出。");
+    return this.db;
+  }
+
   close(): void { this.db.close(); }
 }
 
@@ -212,6 +217,10 @@ function canonical(value: unknown): string {
     return "{" + Object.keys(obj).sort().map(key => JSON.stringify(key) + ":" + canonical(obj[key])).join(",") + "}";
   }
   return JSON.stringify(value);
+}
+
+export function intakeSourceDigest(source: IntakePreview["source"]): string {
+  return createHash("sha256").update(canonical(source)).digest("hex");
 }
 
 function matches(a: IntakeTarget, b: IntakeTarget): boolean {
@@ -248,7 +257,7 @@ export class StudentIntakeService {
   register(name: string, raw: string): Extract<IntakeFile, { token: string }> {
     if (this.files.size >= 20) invalid("每批最多预览 20 份 JSON。");
     const source = parseIntake(raw);
-    const digest = createHash("sha256").update(canonical(source.source)).digest("hex");
+    const digest = intakeSourceDigest(source.source);
     const token = randomUUID();
     this.files.set(token, { source, digest });
     return { name, token, source };
@@ -399,3 +408,8 @@ export class StudentIntakeService {
     return this.store.history(studentId);
   }
 }
+
+export const intakeProtection = {
+  key: "student-intake", marker: "student-intake-v1\n", applicationId: applicationId, version: 1,
+  tables: ["intake_bindings", "intake_jobs"], ddl: ddl,
+};

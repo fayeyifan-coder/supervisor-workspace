@@ -6,6 +6,11 @@ import type { GrowthSaveInput } from "./growth-profile";
 // The sandboxed preload only imports Electron at runtime.
 const api: WorkspaceApi = {
   students: () => ipcRenderer.invoke("mvp:students"),
+  exportProtection: () => ipcRenderer.invoke("m2d:export"),
+  restoreProtection: () => ipcRenderer.invoke("m2d:restore"),
+  activationStatus: () => ipcRenderer.invoke("m2d:activation-status"),
+  activateRecovery: () => ipcRenderer.invoke("m2d:activate-recovery"),
+  returnOriginalProfile: () => ipcRenderer.invoke("m2d:return-original"),
   history: (id: string) => ipcRenderer.invoke("mvp:history", id),
   createStudent: (input: StudentInput) => ipcRenderer.invoke("mvp:create-student", input),
   addLesson: (input: LessonInput) => ipcRenderer.invoke("mvp:add-lesson", input),

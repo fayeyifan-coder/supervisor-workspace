@@ -235,7 +235,17 @@ export class WorkspaceDatabase {
     }
   }
 
+  protectionConnection(): DatabaseSync {
+    if (this.writesBlocked || this.db.isTransaction) throw new WorkspaceFault("busy", "本地数据库写入状态仍待确定，无法导出。");
+    return this.db;
+  }
+
   close(): void {
     this.db.close();
   }
 }
+
+export const m1Protection = {
+  key: "mvp", marker: "mvp-v1\n", applicationId: applicationId, version: schemaVersion,
+  tables: ["students", "learning_records"], ddl: schema.map(entry => entry[2]),
+};

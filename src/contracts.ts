@@ -14,6 +14,11 @@ export const channels = {
   prepareStudentIntake: "m2c:prepare-student-intake",
   saveStudentIntake: "m2c:save-student-intake",
   studentIntakeHistory: "m2c:student-intake-history",
+  exportProtection: "m2d:export",
+  restoreProtection: "m2d:restore",
+  activationStatus: "m2d:activation-status",
+  activateRecovery: "m2d:activate-recovery",
+  returnOriginalProfile: "m2d:return-original",
 } as const;
 
 export type { WorkChange, WorkItem, WorkItemInput, WorkStatus } from "./worklog";
@@ -52,7 +57,15 @@ export type Failure = {
 };
 export type Result<T> = { ok: true; value: T } | Failure;
 
+import type { ProtectionResult } from "./offline-protection";
+export type { ProtectionResult } from "./offline-protection";
+
 export interface WorkspaceApi {
+  exportProtection(): Promise<Result<ProtectionResult | null>>;
+  restoreProtection(): Promise<Result<ProtectionResult | null>>;
+  activationStatus(): Promise<Result<{ active: string | null; pending: boolean; location: string }>>;
+  activateRecovery(): Promise<Result<boolean>>;
+  returnOriginalProfile(): Promise<Result<boolean>>;
   students(): Promise<Result<Student[]>>;
   history(studentId: string): Promise<Result<Lesson[]>>;
   createStudent(input: StudentInput): Promise<Result<Student>>;

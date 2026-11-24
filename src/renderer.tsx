@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
+import { DataProtectionPanel } from "./DataProtectionPanel";
 import { StudentIntakeHistory, StudentIntakePanel } from "./StudentIntakePanel";
 import "./styles.css";
 
@@ -278,6 +279,7 @@ function App() {
               </div>
             </>}
           {students && <WorkLogPanel students={students} api={api} />}
+          <DataProtectionPanel api={api} />
         </div>
       </div>
     </div>
