@@ -6,7 +6,13 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
   const [subject, setSubject] = useState("");
   const [category, setCategory] = useState("");
   const [requestedMode, setMode] = useState("rate");
+  const [resetNotice, setResetNotice] = useState("");
   const view = scoreTrend(records, studentId, subject, category);
+  // Persist the reset, so a reappearing subject cannot revive its former category.
+  if (view.subjectChanged) {
+    setSubject(view.subject); setCategory(""); setMode("rate");
+    setResetNotice(subject + "学科已无有效成绩，类别筛选已清除。");
+  }
   const mode = requestedMode === "raw" && view.rawAvailable ? "raw" : "rate";
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -39,14 +45,14 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
     <div className="score-trend-controls">
       <label>学科
         <select value={view.subject} disabled={!view.subjects.length} onChange={event => {
-          setSubject(event.target.value); setCategory(""); setMode("rate");
+          setSubject(event.target.value); setCategory(""); setMode("rate"); setResetNotice("");
         }}>
           {!view.subjects.length && <option value="">暂无学科</option>}
           {view.subjects.map(item => <option key={item}>{item}</option>)}
         </select>
       </label>
       <label>考试类别
-        <select value={view.category} onChange={event => { setSubject(view.subject); setCategory(event.target.value); setMode("rate"); }}>
+        <select value={view.category} onChange={event => { setSubject(view.subject); setCategory(event.target.value); setMode("rate"); setResetNotice(""); }}>
           <option value="">全部类别</option>
           {view.category && !view.categories.includes(view.category) && <option value={view.category}>{view.category}（已无记录）</option>}
           {view.categories.map(item => <option key={item}>{item}</option>)}
@@ -59,7 +65,7 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
         </select>
       </label>
     </div>
-    {view.subjectChanged && <p role="status">原学科已无有效成绩，已切换到{view.subject || "空成绩视图"}，类别筛选已清除。</p>}
+    {resetNotice && <p role="status">{resetNotice}</p>}
     {view.invalidCount > 0 && <p role="status">{view.invalidCount} 条成绩缺少有效的学科、类别、日期或分数，未参与趋势；请核对原始记录。</p>}
     {!view.total ? <p role="status">{!view.subjects.length ? "暂无可用成绩，请先录入有效成绩。" : "当前学科和考试类别下没有成绩，请调整筛选。"}暂无可比较记录。</p> : <>
       <p className="muted">{view.subject} · {view.category || "全部类别"} · {mode === "rate" ? "得分率 = 得分 ÷ 满分" : `原始分数，满分 ${view.maximum}`} · 按考试日期排序 · 显示最近 {view.points.length} / {view.total} 次</p>
