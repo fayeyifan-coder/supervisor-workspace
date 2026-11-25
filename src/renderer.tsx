@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { LearningDayInput, Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
@@ -18,12 +18,31 @@ import { studentRecordDefinitions, type StudentRecordKind } from "./student-reco
 import "./styles.css";
 
 declare global {
-  interface Window { supervisorWorkspace: WorkspaceApi }
+  interface Window {
+    supervisorWorkspace: WorkspaceApi;
+    profileSwitchReady?: (freeze: boolean) => boolean;
+    profileSwitchCancel?: () => void;
+  }
 }
 
 type Command = { kind: "student"; input: StudentInput } | { kind: "lesson"; input: LessonInput };
 type Notice = { type: "success" | "failure" | "pending"; message: string };
 type History = { studentId: string; refresh: number; rows?: Lesson[]; error?: string };
+
+function hasUncontrolledDraft(): boolean {
+  return Array.from(document.querySelectorAll<HTMLFormElement>("[data-profile-switch-form]")).some(form =>
+    Array.from(form.elements).some(field => {
+      if (field instanceof HTMLSelectElement) {
+        const original = Array.from(field.options).find(option => option.defaultSelected) ?? field.options[0];
+        return field.value !== (original?.value ?? "");
+      }
+      if (field instanceof HTMLInputElement) {
+        return field.type === "checkbox" || field.type === "radio"
+          ? field.checked !== field.defaultChecked : field.value !== field.defaultValue;
+      }
+      return field instanceof HTMLTextAreaElement && field.value !== field.defaultValue;
+    }));
+}
 
 function today(): string {
   const date = new Date();
@@ -42,7 +61,7 @@ function StudentForm({ disabled, submit }: { disabled: boolean; submit: (input: 
 
   return <section className="panel" aria-labelledby="new-student">
     <h1 id="new-student">新建学生档案</h1>
-    <form onSubmit={onSubmit}>
+    <form data-profile-switch-form onSubmit={onSubmit}>
       <fieldset disabled={disabled}>
         <div className="field-grid">
           <label>学生代号<input name="alias" maxLength={40} required placeholder="例如 虚构学员·小岚" autoFocus /></label>
@@ -73,7 +92,7 @@ function LessonForm({ student, disabled, submit }: {
 
   return <section className="panel" aria-labelledby="add-lesson">
     <h2 id="add-lesson">添加学习记录</h2>
-    <form onSubmit={onSubmit}>
+    <form data-profile-switch-form onSubmit={onSubmit}>
       <fieldset disabled={disabled}>
         <div className="field-grid">
           <label>日期<input name="date" type="date" min="0001-01-01" max="9999-12-31" defaultValue={today()} required /></label>
@@ -261,6 +280,17 @@ function App() {
   const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
   const editorBusy = growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
+  useLayoutEffect(() => {
+    window.profileSwitchReady = freeze => {
+      if (locked || editorBusy || intakeOpen || intakeBusy || learning || growthDirty || studentEditDirty ||
+          parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty) ||
+          document.querySelector("[data-profile-switch-draft]") || hasUncontrolledDraft()) return false;
+      if (freeze) document.body.inert = true;
+      return true;
+    };
+    window.profileSwitchCancel = () => { document.body.inert = false; };
+    return () => { delete window.profileSwitchReady; delete window.profileSwitchCancel; };
+  });
   const showStudentForm = students && (creating || students.length === 0);
 
   function canLeaveStudentDrafts(): boolean {

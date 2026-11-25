@@ -24,7 +24,6 @@ export function DataProtectionPanel({ api }: { api: WorkspaceApi }) {
     try {
       const response = await api[action]();
       if (!response.ok) setFailure(response.message);
-      else if (response.value) setPending(true);
     } catch {
       setFailure("无法确认档案切换请求。请核对后再操作。");
     } finally { setBusy(false); }
@@ -54,7 +53,7 @@ export function DataProtectionPanel({ api }: { api: WorkspaceApi }) {
       {active && <button type="button" className="secondary" disabled={busy || pending} onClick={() => void schedule("returnOriginalProfile")}>返回原始档案</button>}
     </div>
     {busy && <p className="worklog-notice" role="status">正在处理离线数据，请等待结果。</p>}
-    {pending && <p className="worklog-notice" role="status">已确认下次启动切换。请保存编辑、正常关闭，再重新打开工作台。</p>}
+    {pending && <p className="worklog-notice" role="status">已确认切换，工作台正在正常关闭。请关闭后重新打开。</p>}
     {failure && <p className="notice failure" role="alert">{failure}</p>}
     {result && <div className="notice success" role="status">
       <p>{result.profileName ? "独立恢复副本已写入并核对。" : result.formatVersion === 2 ? "五库备份已写入并核对。" : "四库备份已写入并核对。"}</p>
