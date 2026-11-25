@@ -75,6 +75,8 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
   ];
   const available = tabs.filter(tab => tab.enabled);
   const [selection, setSelection] = useState<{ studentId: string; section: Section }>();
+  // Forget the prior student's explicit choice even if no tab is clicked on the next student.
+  if (selection && selection.studentId !== student.id) setSelection(undefined);
   // Derive the new student's tab during render; do not unmount the detail tree to reset it.
   const selected = selection?.studentId === student.id && available.some(tab => tab.id === selection.section)
     ? selection.section : available[0].id;

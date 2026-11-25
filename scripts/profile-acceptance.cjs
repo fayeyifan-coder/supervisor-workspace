@@ -82,9 +82,10 @@ async function profileShot(name) { await main(W+'.setSize(1100,1000);true');awai
  }
  await close();await launch();if(mode!=='legacy')await click('学生档案','nav button');await choose(a.alias);await wait(()=>ui('Boolean(document.querySelector(".student-detail-nav"))'));assert.equal(await ui('document.querySelector(".workspace").hidden'),false);
  evidence.defaultTab=await selected();evidence.navigation=await navLabels();await profileShot(mode+'-profile.png');
- if(mode==='baseline'){assert.equal(evidence.defaultTab,'成长档案');await close();evidence.completed=true;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));return;}
+ if(mode==='boundary-proof'){await click('成绩趋势');await choose(b.alias);assert.equal(await selected(),'家长诉求');await choose(a.alias);assert.equal(await selected(),'家长诉求','returning to A after visiting B must not revive A score tab');await close();evidence.completed=true;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));return;} if(mode==='baseline'){assert.equal(evidence.defaultTab,'成长档案');await close();evidence.completed=true;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));return;}
  if(mode==='legacy'){assert.deepEqual(evidence.navigation,['成长档案','学习历史','导入来源']);await click('学习历史');assert(await ui('document.querySelector("#student-section-history").innerText.includes("虚构历史任务")'));await close();evidence.completed=true;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));return;}
  assert.deepEqual(evidence.navigation,['家长诉求','成绩趋势','成长档案','提分方案','报名与到期','基础档案编辑','学习历史','导入来源']);assert.equal(evidence.defaultTab,'家长诉求');
+ await click('成绩趋势');await choose(b.alias);assert.equal(await selected(),'家长诉求');await choose(a.alias);assert.equal(await selected(),'家长诉求','A-B-A must reset the prior explicit tab');evidence.cases.push({name:'A-B-A without clicking B resets to first available tab',pass:true});
  await wait(()=>ui('document.querySelector("#student-section-parent").innerText.includes("专属诉求01")'));
  await click('学习历史');assert(await ui('document.querySelector("#student-section-history").innerText.includes("虚构历史任务")'));
  await click('导入来源');assert(await ui('document.querySelector("#student-section-sources").innerText.includes('+JSON.stringify(evidence.sourceCode)+')'));
@@ -114,6 +115,7 @@ async function profileShot(name) { await main(W+'.setSize(1100,1000);true');awai
  await choose(a.alias);await profileShot('candidate-final.png');evidence.counts={students:ok(await api('students')).length,concerns:ok(await api('parentFollowUp',a.id)).concerns.length,history:ok(await api('history',a.id)).length,sources:ok(await api('studentIntakeHistory',a.id)).entries.length};
  await close();evidence.completed=true;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify({completed:true,navigation:evidence.navigation,cases:evidence.cases,performance:evidence.performance}));
 })().catch(e=>{evidence.error=e.stack;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));console.error(e);if(child)child.kill();process.exitCode=1;});
+
 
 
 
