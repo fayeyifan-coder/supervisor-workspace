@@ -3,7 +3,7 @@ import { dirname, join, parse, relative, resolve, sep } from "node:path";
 import { verifyProfileData } from "./profile-activation";
 import { WorkspaceFault } from "./database";
 
-const productionRoot = "D:\\SupervisorWorkspace";
+export const productionInstallRoot = "D:\\SupervisorWorkspace";
 const acceptanceRoot = /^D:\\Codex-Development\\Builds\\sw-production-admission-[a-f0-9]{32}$/;
 export const primaryMarker = "production-primary.initialized";
 export const sha256Pattern = /^[a-f0-9]{64}$/;
@@ -13,7 +13,7 @@ export function productionRootOf(executable: string): string | undefined {
   const versions = dirname(version);
   const app = dirname(versions);
   const root = dirname(app);
-  if ((root !== productionRoot && !acceptanceRoot.test(root)) || !/^[a-f0-9]{40}$/.test(relative(versions, version)) ||
+  if ((root !== productionInstallRoot && !acceptanceRoot.test(root)) || !/^[a-f0-9]{40}$/.test(relative(versions, version)) ||
       executable !== join(root, "App", "Versions", relative(versions, version), "SupervisorWorkspace-MVP.exe")) return;
   return root;
 }

@@ -2,7 +2,7 @@ name: Windows verification
 
 on:
   push:
-    branches: [main, m2-b/reliability-proof, m2-c/student-growth-profile, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning, v0.2/r2-c-workday-acceptance, v0.2/r3-a-unified-student-detail, v0.2/release-hardening, v0.2/production-admission]
+    branches: [main, fix/v0.2.1-maintenance, m2-b/reliability-proof, m2-c/student-growth-profile, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning, v0.2/r2-c-workday-acceptance, v0.2/r3-a-unified-student-detail, v0.2/release-hardening, v0.2/production-admission]
   pull_request:
     branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning, v0.2/r2-c-workday-acceptance, v0.2/r3-a-unified-student-detail, v0.2/release-hardening]
 
@@ -23,6 +23,8 @@ jobs:
         with:
           node-version: '24.19.0'
           package-manager-cache: false
+      - name: Verify development Node
+        run: npm run preflight
       - name: Install locked dependencies
         run: npm ci
       - name: Type check
@@ -131,7 +133,8 @@ jobs:
               "build/database-lifecycle.js", "build/worklog.js", "build/growth-profile.js",
               "build/student-intake.js", "build/intake-format.js", "build/offline-protection.js", "build/profile-activation.js",
               "build/operations.js", "build/operations-schema.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js", "build/operations-pending.js",
-              "build/production-profile.js", "build/production-admission.js"];
+              "build/production-profile.js", "build/production-admission.js", "build/profile-write-gate.js",
+              "build/backup-status.js", "build/diagnostics.js"];
             const allowed = new Set(["package.json", "build", "dist", "dist/assets", "dist/index.html", ...buildFiles]);
             for (const path of contents) {
               assert(allowed.has(path) || assetsPattern.test(path), "Unexpected ASAR member: " + path);
@@ -219,6 +222,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Portable application verification failed.' }
           "root=$root" >> $env:GITHUB_OUTPUT
           "kind=$kind" >> $env:GITHUB_OUTPUT
+      - name: Smoke-test packaged Electron on an isolated profile
+        run: node scripts/smoke-electron.cjs (Join-Path '${{ steps.portable.outputs.root }}' 'win-unpacked/SupervisorWorkspace-MVP.exe')
       - name: Upload the MVP desktop preview
         if: steps.portable.outcome == 'success'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

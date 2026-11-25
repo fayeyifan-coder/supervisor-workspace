@@ -1,9 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, type IpcMainInvokeEvent, type Session } from "electron";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
-import { channels, type Failure, type Result } from "./contracts";
-import { failure, WorkspaceDatabase, WorkspaceFault, type M1Version } from "./database";
+import { channels, type Failure, type Result, type WorkspaceInfo } from "./contracts";
+import { failure as workspaceFailure, WorkspaceDatabase, WorkspaceFault, type M1Version } from "./database";
 import { closeStoresIndependently } from "./database-lifecycle";
 import { WorkLogDatabase, type WorkStatus } from "./worklog";
 import { GrowthProfileDatabase, GrowthProfileFault, type GrowthSaveInput } from "./growth-profile";
@@ -18,7 +19,9 @@ import { applyLearningChange, readAttendanceBoard, readLearningDay, readSchedule
 import { StudentWriteRecovery } from "./student-write-recovery";
 import { OperationsPending } from "./operations-pending";
 import { ProfileWriteGate } from "./profile-write-gate";
-import { isWithin, plainFile, productionRootOf, requireLocalDirectory, requireProductionProfile } from "./production-profile";
+import { isWithin, plainFile, productionInstallRoot, productionRootOf, requireLocalDirectory, requireProductionProfile } from "./production-profile";
+import { readBackupStatus, recordSuccessfulBackup } from "./backup-status";
+import { Diagnostics, sqliteErrorCode } from "./diagnostics";
 import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, studentServicesVersion, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
@@ -34,6 +37,14 @@ let growthProfile: GrowthProfileDatabase | undefined;
 let intakeStore: IntakeStore | undefined;
 let operations: OperationsDatabase | undefined;
 let commitSwitchOnExit: (() => void) | undefined;
+let diagnostics: Diagnostics | undefined;
+const ipcFailure = new AsyncLocalStorage<{ sqliteCode?: number }>();
+
+function failure(error: unknown): Failure {
+  const context = ipcFailure.getStore();
+  if (context) context.sqliteCode = sqliteErrorCode(error);
+  return workspaceFailure(error);
+}
 
 protocol.registerSchemesAsPrivileged([{ scheme, privileges: { standard: true, secure: true } }]);
 
@@ -189,9 +200,20 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   window.webContents.on("will-redirect", event => event.preventDefault());
   window.webContents.on("will-attach-webview", event => event.preventDefault());
 
+  function handle<T, Args extends unknown[]>(channel: string,
+    operation: (event: IpcMainInvokeEvent, ...args: Args) => Result<T> | Promise<Result<T>>) {
+    ipcMain.handle(channel, (event, ...args: Args) => ipcFailure.run({}, async () => {
+      let reply: Result<T>;
+      try { reply = await operation(event, ...args); }
+      catch (error) { reply = failure(error); }
+      if (!reply.ok) diagnostics?.record(channel, reply.code, ipcFailure.getStore()?.sqliteCode);
+      return reply;
+    }));
+  }
+
   function handleWrite<T, Args extends unknown[]>(channel: string,
     operation: (event: IpcMainInvokeEvent, ...args: Args) => Result<T> | Promise<Result<T>>) {
-    ipcMain.handle(channel, async (event, ...args: Args) => {
+    handle(channel, async (event, ...args: Args) => {
       if (!isTrusted(event, window)) return denied();
       try { return await gate.write(() => operation(event, ...args)); }
       catch (error) { return failure(error); }
@@ -207,17 +229,17 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       return failure(error);
     }
   }
-  ipcMain.handle(channels.students, event => invoke(event, store => store.students()));
-  ipcMain.handle(channels.history, (event, id: unknown) => invoke(event, store => store.history(id)));
+  handle(channels.students, event => invoke(event, store => store.students()));
+  handle(channels.history, (event, id: unknown) => invoke(event, store => store.history(id)));
   handleWrite(channels.createStudent, (event, raw: unknown) => invoke(event, store => store.createStudent(raw)));
-  ipcMain.handle(channels.studentEditAvailable, event => isTrusted(event, window)
+  handle(channels.studentEditAvailable, event => isTrusted(event, window)
     ? { ok: true, value: m1Version >= 2 && format === 2 && Boolean(database && operations) } : denied());
-  ipcMain.handle(channels.studentEdit, (event, id: unknown) => invoke(event, store => store.studentEditView(id)));
+  handle(channels.studentEdit, (event, id: unknown) => invoke(event, store => store.studentEditView(id)));
   handleWrite(channels.saveStudentEdit, (event, raw: unknown) => invoke(event, store => store.saveStudentEdit(raw)));
   handleWrite(channels.finishStudentEdit, (event, raw: unknown) => invoke(event, store => store.finishStudentEdit(raw)));
-  ipcMain.handle(channels.parentFollowUpAvailable, event => isTrusted(event, window)
+  handle(channels.parentFollowUpAvailable, event => isTrusted(event, window)
     ? { ok: true, value: format === 2 && m1Version >= 3 && Boolean(database && operations) } : denied());
-  ipcMain.handle(channels.parentFollowUp, (event, id: unknown) => invoke(event, store => store.parentFollowUp(id)));
+  handle(channels.parentFollowUp, (event, id: unknown) => invoke(event, store => store.parentFollowUp(id)));
   handleWrite(channels.createParentConcern, (event, raw: unknown) => invoke(event, store => {
     const command = store.studentWriteCommand("concern", raw);
     return studentWrites.run(store, command, () => store.createParentConcern(command.input));
@@ -226,9 +248,9 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     const command = store.studentWriteCommand("followUp", raw);
     return studentWrites.run(store, command, () => store.appendParentFollowUp(command.input));
   }));
-  ipcMain.handle(channels.studentRecordVersion, event => isTrusted(event, window)
+  handle(channels.studentRecordVersion, event => isTrusted(event, window)
     ? { ok: true, value: format === 2 && database && operations ? m1Version : 0 } : denied());
-  ipcMain.handle(channels.studentRecords, (event, kind: unknown, studentId: unknown) =>
+  handle(channels.studentRecords, (event, kind: unknown, studentId: unknown) =>
     invoke(event, store => store.studentRecords(kind, studentId)));
   handleWrite(channels.saveStudentRecord, (event, raw: unknown) => invoke(event, store => {
     const command = store.studentWriteCommand("record", raw);
@@ -237,7 +259,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   function requireStudentWriteSupport() {
     if (m1Version < 3 || format !== 2 || !operations) throw new WorkspaceFault("recovery", "当前档案没有启用学生资料请求恢复。");
   }
-  ipcMain.handle(channels.studentWriteState, event => invoke(event, store => {
+  handle(channels.studentWriteState, event => invoke(event, store => {
     requireStudentWriteSupport();
     return studentWrites.state(store);
   }));
@@ -257,12 +279,12 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     try { return { ok: true, value: operation(operations, () => m1.students()) }; }
     catch (error) { return failure(error); }
   }
-  ipcMain.handle(channels.scheduleAvailable, event => isTrusted(event, window)
+  handle(channels.scheduleAvailable, event => isTrusted(event, window)
     ? { ok: true, value: format === 2 && Boolean(operations && database) } : denied());
-  ipcMain.handle(channels.scheduleWeek, (event, raw: unknown) =>
+  handle(channels.scheduleWeek, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => listScheduleWeek(store, students, raw)));
-  ipcMain.handle(channels.attendanceBoard, event => invokeSchedule(event, readAttendanceBoard));
-  ipcMain.handle(channels.schedulePlan, (event, raw: unknown) =>
+  handle(channels.attendanceBoard, event => invokeSchedule(event, readAttendanceBoard));
+  handle(channels.schedulePlan, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => readSchedulePlan(store, students, raw)));
   function performOperation<T>(command: Record<string, unknown>, operation: () => T): T {
     const requestId = operationsPending.begin(command);
@@ -281,16 +303,16 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       const command = { ...scheduleObject(raw), command: "saveAttendancePlan" };
       return performOperation(command, () => saveSchedulePlan(store, students, command));
     }));
-  ipcMain.handle(channels.learningDay, (event, raw: unknown) =>
+  handle(channels.learningDay, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => readLearningDay(store, students, raw)));
   handleWrite(channels.applyLearningChange, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => {
       const command = scheduleObject(raw);
       return performOperation(command, () => applyLearningChange(store, students, command));
     }));
-  ipcMain.handle(channels.scheduleReceipt, (event, raw: unknown) =>
+  handle(channels.scheduleReceipt, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => readScheduleReceipt(store, students, raw)));
-  ipcMain.handle(channels.pendingOperation, event =>
+  handle(channels.pendingOperation, event =>
     invokeSchedule(event, () => operationsPending.state()));
   handleWrite(channels.acknowledgeOperation, (event, raw: unknown, reviewed: unknown) =>
     invokeSchedule(event, (store, students) => {
@@ -302,10 +324,10 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if (!workLog) return startupError;
     try { return { ok: true, value: operation(workLog) }; } catch (error) { return failure(error); }
   };
-  ipcMain.handle(channels.workItems, (event, day: string) => invokeWork(event, store => store.list(day)));
-  ipcMain.handle(channels.searchWorkItems, (event, from: string, to: string, query?: string) =>
+  handle(channels.workItems, (event, day: string) => invokeWork(event, store => store.list(day)));
+  handle(channels.searchWorkItems, (event, from: string, to: string, query?: string) =>
     invokeWork(event, store => store.search(from, to, query)));
-  ipcMain.handle(channels.workHistory, (event, id: string) => invokeWork(event, store => store.history(id)));
+  handle(channels.workHistory, (event, id: string) => invokeWork(event, store => store.history(id)));
   handleWrite(channels.saveWorkItem, (event, input: unknown) => invokeWork(event, store => store.save(input,
     studentId => Boolean(database?.students().some(student => student.id === studentId)))));
   handleWrite(channels.setWorkItemStatus, (event, id: string, status: WorkStatus) =>
@@ -321,7 +343,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       return { ok: true, value: operation(growthProfile) };
     } catch (error) { return failure(error); }
   }
-  ipcMain.handle(channels.growthProfile, (event, studentId: unknown) =>
+  handle(channels.growthProfile, (event, studentId: unknown) =>
     invokeGrowth(event, studentId, store => store.load(studentId)));
   handleWrite(channels.saveGrowthProfile, (event, raw: unknown) => {
     const studentId = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Partial<GrowthSaveInput>).studentId : undefined;
@@ -364,7 +386,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     invokeIntake(event, intake => intake.prepare(token, target)));
   handleWrite(channels.saveStudentIntake, (event, input: IntakeConfirm) =>
     invokeIntake(event, intake => intake.confirm(input)));
-  ipcMain.handle(channels.studentIntakeHistory, (event, studentId: string) =>
+  handle(channels.studentIntakeHistory, (event, studentId: string) =>
     invokeIntake(event, intake => intake.historySummary(studentId)));
 
 
@@ -403,13 +425,14 @@ async function start(owner: string, profile: string, state: ActivationState, ope
         if (window.isDestroyed() || commitSwitchOnExit !== commit) return;
         commitSwitchOnExit = undefined;
         state.pending = null;
+        diagnostics?.record("lifecycle:switch", "failed");
         void window.webContents.executeJavaScript("window.profileSwitchCancel?.()").catch(() => undefined);
         dialog.showErrorBox(title, "工作台未能正常退出，档案切换未安排。请核对当前档案后重试。");
       }, 5000).unref();
     });
   }
 
-  ipcMain.handle(channels.exportProtection, event => protect(event, async () => {
+  handle(channels.exportProtection, event => protect(event, async () => {
     const stores = completeStores(format);
     const choice = await dialog.showOpenDialog(window, {
       title: "选择新备份所在的上级目录", properties: ["openDirectory"], defaultPath: production?.exports,
@@ -427,9 +450,12 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     else if (production) requireProductionProfile(production.root);
     else checkOriginalProtectionMode(profile, format, false, m1Version);
     if (m1Version >= 3 && database) studentWrites.requireSettled(database);
-    return recoveryFiles.publish(parent, captureProtection(stores, app.getVersion(), format, m1Version));
+    const result = await recoveryFiles.publish(parent, captureProtection(stores, app.getVersion(), format, m1Version));
+    try { recordSuccessfulBackup(profile, new Date()); }
+    catch (error) { diagnostics?.record("protection:backup-status", "failed", sqliteErrorCode(error)); }
+    return result;
   }));
-  ipcMain.handle(channels.restoreProtection, event => protect(event, async () => {
+  handle(channels.restoreProtection, event => protect(event, async () => {
     const choice = await dialog.showOpenDialog(window, {
       title: "选择待验证的离线备份", properties: ["openFile"],
       filters: [{ name: "督学工作台离线备份", extensions: ["swbackup"] }],
@@ -460,9 +486,14 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     lastRecovery = restored.location;
     return restored;
   }));
-  ipcMain.handle(channels.activationStatus, event => isTrusted(event, window)
-    ? { ok: true, value: { active: state.active?.name ?? null, pending: Boolean(state.pending), location: profile } } : denied());
-  ipcMain.handle(channels.activateRecovery, event => protect(event, async () => {
+  handle(channels.activationStatus, event => isTrusted(event, window)
+    ? { ok: true, value: { active: state.active?.name ?? null, pending: Boolean(state.pending), location: profile,
+      lastSuccessfulBackupAt: readBackupStatus(profile) } } : denied());
+  handle<WorkspaceInfo, []>(channels.workspaceInfo, event => isTrusted(event, window)
+    ? { ok: true, value: { mode: production?.root === productionInstallRoot ? "production" : "synthetic",
+      backupFormat: database && workLog && growthProfile && intakeStore && (format === 1 || operations) ? format : null } }
+    : denied());
+  handle(channels.activateRecovery, event => protect(event, async () => {
     await requireSwitchReady(event);
     const choice = await dialog.showOpenDialog(window, {
       title: "选择独立恢复副本或已激活过档案中的 restore.ready", properties: ["openFile"],
@@ -496,7 +527,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     queueProfileSwitch({ kind: isRecovery ? "restore" : "resume", ...target });
     return true;
   }));
-  ipcMain.handle(channels.returnOriginalProfile, event => protect(event, async () => {
+  handle(channels.returnOriginalProfile, event => protect(event, async () => {
     if (!state.active) throw new WorkspaceFault("conflict", "当前没有可返回的原始档案切换。");
     await requireSwitchReady(event);
     const result = await dialog.showMessageBox(window, {
@@ -588,7 +619,8 @@ async function startSelected(owner: string, original: string, format: Protection
       opened = openProfile(original, format, m1Version, initializeOperations);
       if (format === 2) verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
     }
-  } catch {
+  } catch (error) {
+    diagnostics?.record("lifecycle:startup", failure(error).code, sqliteErrorCode(error));
     const closes = closeOpenStores();
     const fallback = state.pending ? state.active : null;
     const canReturn = closes.length === 0 && (fallback !== null || state.pending?.kind !== "original");
@@ -650,6 +682,7 @@ try {
   app.setPath("sessionData", userData);
   app.setPath("crashDumps", production ? join(production.logs, "Crash") : join(profile, "crash"));
   app.setAppLogsPath(production?.logs ?? join(profile, "logs"));
+  diagnostics = new Diagnostics(app.getPath("logs"), app.getVersion());
   app.commandLine.appendSwitch("disable-background-networking");
   app.commandLine.appendSwitch("disable-component-update");
 
@@ -666,18 +699,20 @@ try {
     app.on("will-quit", () => {
       const errors = closeOpenStores();
       for (const error of errors) {
-        console.error("Database close failed during application exit", error);
+        diagnostics?.record("lifecycle:close", failure(error).code, sqliteErrorCode(error));
       }
       if (commitSwitchOnExit) {
         try {
           if (errors.length > 0) throw new Error("Database close failed.");
           commitSwitchOnExit();
-        } catch {
+        } catch (error) {
+          diagnostics?.record("lifecycle:switch", failure(error).code, sqliteErrorCode(error));
           dialog.showErrorBox(title, "无法安排档案切换。请保留当前档案和恢复资料，重新打开后核对。");
         }
       }
     });
     app.whenReady().then(() => startSelected(owner, profile, format, m1Version, production)).catch(error => {
+      diagnostics?.record("lifecycle:startup", failure(error).code, sqliteErrorCode(error));
       dialog.showErrorBox(title, error instanceof WorkspaceFault ? error.message : "桌面窗口启动失败。请保留档案并检查安装。");
       app.quit();
     });
