@@ -169,6 +169,10 @@ export class IntakeStore {
       state: row.state as Job["state"], studentConfirmed: row.student_confirmed === 1 } : undefined;
   }
 
+  hasUnsettledJobs(): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM intake_jobs WHERE state<>'done' LIMIT 1").get());
+  }
+
   hasOtherUnfinished(code: string, digest: string): boolean {
     return Boolean(this.db.prepare("SELECT 1 FROM intake_jobs WHERE code=? AND digest<>? AND state<>'done'").get(code, digest));
   }

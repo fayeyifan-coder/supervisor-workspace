@@ -49,7 +49,7 @@ export function WorkLogPanel({ students, api }: { students: Student[]; api: Work
     <h2 id="worklog-heading">每日工作日志</h2>
     <p className="muted">独立本地数据库；不包含在 M2-A 备份中。</p>
     {notice && <p role="status" className="worklog-notice">{notice}</p>}
-    <form key={editing?.id ?? draftId} onSubmit={submit}>
+    <form key={editing?.id ?? draftId} data-profile-switch-form onSubmit={submit}>
       <fieldset>
         <div className="field-grid">
           <label className="wide">工作事项<input name="title" maxLength={160} required defaultValue={editing?.title ?? ""} /></label>
