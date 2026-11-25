@@ -46,9 +46,9 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
         </select>
       </label>
       <label>考试类别
-        <select value={category} onChange={event => { setCategory(event.target.value); setMode("rate"); }}>
+        <select value={view.category} onChange={event => { setSubject(view.subject); setCategory(event.target.value); setMode("rate"); }}>
           <option value="">全部类别</option>
-          {category && !view.categories.includes(category) && <option value={category}>{category}</option>}
+          {view.category && !view.categories.includes(view.category) && <option value={view.category}>{view.category}（已无记录）</option>}
           {view.categories.map(item => <option key={item}>{item}</option>)}
         </select>
       </label>
@@ -59,9 +59,10 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
         </select>
       </label>
     </div>
+    {view.subjectChanged && <p role="status">原学科已无有效成绩，已切换到{view.subject || "空成绩视图"}，类别筛选已清除。</p>}
     {view.invalidCount > 0 && <p role="status">{view.invalidCount} 条成绩缺少有效的学科、类别、日期或分数，未参与趋势；请核对原始记录。</p>}
     {!view.total ? <p role="status">{!view.subjects.length ? "暂无可用成绩，请先录入有效成绩。" : "当前学科和考试类别下没有成绩，请调整筛选。"}暂无可比较记录。</p> : <>
-      <p className="muted">{view.subject} · {category || "全部类别"} · {mode === "rate" ? "得分率 = 得分 ÷ 满分" : `原始分数，满分 ${view.maximum}`} · 按考试日期排序 · 显示最近 {view.points.length} / {view.total} 次</p>
+      <p className="muted">{view.subject} · {view.category || "全部类别"} · {mode === "rate" ? "得分率 = 得分 ÷ 满分" : `原始分数，满分 ${view.maximum}`} · 按考试日期排序 · 显示最近 {view.points.length} / {view.total} 次</p>
       {!view.rawAvailable && <p className="muted">满分不同，使用得分率观察，不比较原始分数差值。</p>}
       {view.total === 1 && <p role="status">仅有 1 条成绩，暂无可比较记录。</p>}
       <p className="muted">考试类别和难度可能不同；得分率变化仅供对照，不能据此判断学习能力提高或下降。</p>
