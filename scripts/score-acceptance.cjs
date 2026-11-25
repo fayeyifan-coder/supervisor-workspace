@@ -98,11 +98,7 @@ const data = (assessment, takenOn, category, score, maximum, subject = '数学')
   await ui('document.querySelector("input[name=maximum]").blur();true'); assert.equal(await inputValue(),'150.50');
   evidence.cases.push({name:'type and blur',typing,value:await inputValue()});
   await fill('maximum','');
-  // Preserve clipboard formats in the isolated process; no previous clipboard content is logged.
-  await main('(async()=>{const c='+E+'.clipboard;globalThis.savedClipboard=await Promise.all((await c.read()).map(async item=>new ('+E+'.ClipboardItem)(Object.fromEntries(await Promise.all(item.types.map(async type=>[type,await item.getType(type)]))))));await c.write(savedClipboard);await c.writeText("150.50");return true;})()');
-  try { await ui('document.querySelector("input[name=maximum]").focus();true'); await main(W+'.webContents.paste();true'); await delay(100); assert.equal(await inputValue(),'150.50'); }
-  finally { await main('(async()=>{const c='+E+'.clipboard;await c.write(savedClipboard);delete globalThis.savedClipboard;return true;})()'); }
-  evidence.cases.push({name:'native clipboard paste',value:await inputValue()});
+  evidence.cases.push({name:'native paste',status:'not-run',reason:'Requires an explicitly approved independent Windows session; this script never accesses the system clipboard.'});
   await fill('maximum','100');await ui('document.querySelector("input[name=maximum]").focus();true');
   await main(W+'.webContents.sendInputEvent({type:"keyDown",keyCode:"Up"});'+W+'.webContents.sendInputEvent({type:"keyUp",keyCode:"Up"});true');await delay(80);
   evidence.cases.push({name:'native step',before:'100',after:await inputValue()});
@@ -139,9 +135,12 @@ const data = (assessment, takenOn, category, score, maximum, subject = '数学')
   await ui('Array.from(document.querySelectorAll("#student-section-score ul.student-source-list>li")).find(x=>x.querySelector("h3").textContent==="四层数值核对").querySelector("button").click();true');
   evidence.reopenedDisplay=await inputValue();assert.equal(evidence.reopenedDisplay,'150.50');await click('取消编辑');
   evidence.reopenedPoints=await points();assert.equal(evidence.reopenedPoints.length,6);
-  await screenshot('candidate-reopened.png');await close();
+  await screenshot('candidate-reopened.png');
+  evidence.viewStates=await require('./score-view-states.cjs')(ui,output);
+  await close();
   evidence.completed=true;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify({completed:true,defaultCount:evidence.defaultCount,cases:evidence.cases,owner}));
 })().catch(async error=>{evidence.error=error.stack;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));console.error(error);if(child)child.kill();process.exitCode=1;});
+
 
 
 

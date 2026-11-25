@@ -139,4 +139,32 @@ test('backup import preserves manual score identities, raw strings and computed 
   assert.deepEqual(bytes, original);
 });
 
+test('disappeared selected subject clears its category before choosing a fallback', () => {
+  const view = trend([row('english', { subject: '英语', category: '日常测验' })], 'student-a', '数学', '期中考试');
+  assert.equal(view.subject, '英语'); assert.equal(view.category, ''); assert.equal(view.subjectChanged, true);
+  assert.equal(view.points.length, 1);
+  const noCategory = trend([row('math')], 'student-a', '数学', '期中考试');
+  assert.equal(noCategory.total, 0); assert.equal(noCategory.category, '期中考试');
+});
+
+test('more than twelve scores reports full count and the exact latest range', () => {
+  const records = Array.from({length:20},(_,i)=>row('exam-'+i,{takenOn:'2026-11-'+String(i+1).padStart(2,'0')}));
+  const view = trend(records,'student-a'); assert.equal(view.total,20); assert.equal(view.points.length,12);
+  assert.equal(view.points[0].record.fields.takenOn,'2026-11-09');assert.equal(view.points[11].record.fields.takenOn,'2026-11-20');
+});
+
+test('editing one same-day exam keeps every other identity and date unchanged', () => {
+  const records=[row('same-a'),row('same-b'),row('same-c')];
+  const edited=records.map(r=>r.id==='same-b'?{...r,revision:2,savedAt:99,fields:{...r.fields,score:'91.25'}}:r);
+  const view=trend(edited,'student-a');assert.equal(view.total,3);
+  assert.deepEqual(new Set(view.points.map(p=>p.record.id)),new Set(records.map(r=>r.id)));
+  assert.equal(view.points.find(p=>p.record.id==='same-b').rate,91.25);
+});
+
+test('default acceptance script contains no system clipboard access or paste command', () => {
+  const script=readFileSync(join(__dirname,'../scripts/score-acceptance.cjs'),'utf8');
+  assert.doesNotMatch(script,/\.clipboard\b|ClipboardItem|savedClipboard|\.paste\s*\(/);
+  assert.match(script,/Requires an explicitly approved independent Windows session/);
+});
+
 

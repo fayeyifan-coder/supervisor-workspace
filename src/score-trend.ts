@@ -17,10 +17,13 @@ export function scoreTrend(records: readonly StudentRecord[], studentId: string,
   const subject = subjects.includes(chosenSubject) ? chosenSubject : subjects[0] ?? "";
   const sameSubject = usable.filter(record => record.fields.subject === subject);
   const categories = [...new Set(sameSubject.map(record => record.fields.category))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  const filtered = sameSubject.filter(record => !category || record.fields.category === category)
+  // A category chosen for a disappeared subject must not silently filter its fallback.
+  const effectiveCategory = chosenSubject && chosenSubject !== subject ? "" : category;
+  const filtered = sameSubject.filter(record => !effectiveCategory || record.fields.category === effectiveCategory)
     .sort((a, b) => a.fields.takenOn.localeCompare(b.fields.takenOn) || a.savedAt - b.savedAt || a.id.localeCompare(b.id));
   const maxima = new Set(filtered.map(record => Number(record.fields.maximum)));
-  return { subjects, subject, categories, total: filtered.length, invalidCount: own.length - usable.length,
+  return { subjects, subject, categories, category: effectiveCategory, subjectChanged: Boolean(chosenSubject && chosenSubject !== subject),
+    total: filtered.length, invalidCount: own.length - usable.length,
     rawAvailable: maxima.size === 1, maximum: filtered.length ? Number(filtered[0].fields.maximum) : null,
     points: filtered.slice(-12).map(record => ({ record, rate: Number(record.fields.score) / Number(record.fields.maximum) * 100 })) };
 }
