@@ -20,7 +20,8 @@ module.exports=async function exerciseScoreStates(ui,output){
  const count=()=>ui('document.querySelectorAll("#score-view-fixture li").length');
  await render([row('daily'),row('mid',{category:'期中考试'}),row('english',{subject:'英语'})]);await change(1,'期中考试');assert.equal(await count(),1);
  await render([row('english',{subject:'英语'})]);assert.equal(await ui('document.querySelectorAll("#score-view-fixture select")[1].value'),'');assert.equal(await count(),1);
- await render([row('daily')]);assert.equal(await count(),0);assert(await ui('document.querySelector("#score-view-fixture").innerText.includes("已无记录")'));
+  await render([row('daily'),row('mid',{category:'期中考试'})]);assert.equal(await ui('document.querySelectorAll("#score-view-fixture select")[1].value'),'','cleared category must not revive when original subject returns');assert.equal(await count(),2);
+  await change(1,'期中考试');await render([row('daily')]);assert.equal(await count(),0);assert(await ui('document.querySelector("#score-view-fixture").innerText.includes("已无记录")'));
  await render([]);assert.equal(await count(),0);assert(await ui('document.querySelector("#score-view-fixture").innerText.includes("暂无可用成绩")'));
  await render([row('one')]);await change(1,'');await wait('Boolean(document.querySelector("#score-view-fixture canvas"))');assert.equal(await count(),1);
  const pixel=await ui('Array.from(document.querySelector("#score-view-fixture canvas").getContext("2d").getImageData(385,51,1,1).data)');assert.deepEqual(pixel,[23,102,77,255]);
@@ -28,5 +29,5 @@ module.exports=async function exerciseScoreStates(ui,output){
  await render([row('same-a',{score:'91.25'}),row('same-b',{score:'90'})]);assert.equal(await count(),2);assert(await ui('document.querySelector("#score-view-fixture").innerText.includes("91.25/100")'));
  await render(Array.from({length:20},(_,i)=>row('exam-'+i,{takenOn:'2026-11-'+String(i+1).padStart(2,'0')})));assert.equal(await count(),12);assert(await ui('document.querySelector("#score-view-fixture").innerText.includes("12 / 20")'));
  await ui('removeScoreFixture();delete globalThis.process;true');
- return {disappearedSubjectClearsCategory:true,missingCategoryExplained:true,emptySingleNoMatchTransitions:true,canvasSinglePointPixel:pixel,sameDayEditRetainsTwo:true,twentyRecordsShowsLastTwelve:true};
+ return {disappearedSubjectClearsCategory:true,reappearingSubjectDoesNotReviveCategory:true,missingCategoryExplained:true,emptySingleNoMatchTransitions:true,canvasSinglePointPixel:pixel,sameDayEditRetainsTwo:true,twentyRecordsShowsLastTwelve:true};
 };
