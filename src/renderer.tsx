@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import type { LearningDayInput, Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
+import type { LearningDayInput, Lesson, LessonInput, Student, StudentInput, WorkspaceApi, WorkspaceInfo } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
 import { AttendanceBoard, AttendanceOverview, useTodayAttendance } from "./AttendanceBoard";
@@ -129,6 +129,14 @@ function HistoryView({ history, reload }: { history?: History; reload: () => voi
 
 function App() {
   const api = window.supervisorWorkspace;
+  const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo>();
+  useEffect(() => {
+    let mounted = true;
+    void api.workspaceInfo().then(reply => {
+      if (mounted && reply.ok) setWorkspaceInfo(reply.value);
+    }).catch(() => undefined);
+    return () => { mounted = false; };
+  }, [api]);
   const [students, setStudents] = useState<Student[]>();
   const [scheduleEnabled, setScheduleEnabled] = useState<boolean>();
   const [page, setPage] = useState<"schedule" | "board" | "students">("schedule");
@@ -374,7 +382,8 @@ function App() {
     <header className="masthead">
       <div className="brand"><span className="brand-mark" aria-hidden="true" /><strong>督学工作台</strong></div>
       <nav className="schedule-heading-actions workspace-navigation" aria-label="工作台">
-        <span className="scope">离线验收 · 仅用虚构学生</span>
+        <span className="scope">{workspaceInfo?.mode === "production" ? "正式档案 · 本机离线" :
+          workspaceInfo?.mode === "synthetic" ? "合成验收 · 仅用虚构学生" : "档案模式待确认"}</span>
         {scheduleEnabled && <>
           <button className="secondary" type="button" ref={scheduleNav} aria-current={page === "schedule" && !learning ? "page" : undefined}
             disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("schedule")}>全局总课表</button>
@@ -437,7 +446,7 @@ function App() {
             <button className="secondary" disabled={busy} onClick={() => void save(pending)}>重试同一请求</button>
           </div>}
         </div>}
-        {intakeOpen && students && <StudentIntakePanel api={api} students={students} student={active}
+        {intakeOpen && students && <StudentIntakePanel api={api} students={students} student={active} backupFormat={workspaceInfo?.backupFormat}
           onImported={studentId => {
             setActiveId(studentId); setCreating(false); setListRefresh(value => value + 1);
           }} onBusyChange={setIntakeBusy} onClose={() => {
@@ -482,8 +491,8 @@ function App() {
                   submit={input => void save({ kind: "lesson", input })} />
                 <HistoryView history={visibleHistory} reload={() => setHistoryRefresh(value => value + 1)} />
               </div>} />}
-          {students && <WorkLogPanel students={students} api={api} />}
-          <DataProtectionPanel api={api} />
+          {students && <WorkLogPanel students={students} api={api} backupFormat={workspaceInfo?.backupFormat} />}
+          <DataProtectionPanel api={api} backupFormat={workspaceInfo?.backupFormat} />
         </div>
       </div>
     </div>

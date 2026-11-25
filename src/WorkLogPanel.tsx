@@ -7,7 +7,9 @@ const today = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-export function WorkLogPanel({ students, api }: { students: Student[]; api: WorkspaceApi }) {
+export function WorkLogPanel({ students, api, backupFormat }: {
+  students: Student[]; api: WorkspaceApi; backupFormat?: 1 | 2 | null;
+}) {
   const [rows, setRows] = useState<WorkItem[]>([]);
   const [history, setHistory] = useState<WorkItem[]>([]);
   const [selected, setSelected] = useState<WorkItem>();
@@ -47,7 +49,7 @@ export function WorkLogPanel({ students, api }: { students: Student[]; api: Work
   }
   return <section className="panel worklog" aria-labelledby="worklog-heading">
     <h2 id="worklog-heading">每日工作日志</h2>
-    <p className="muted">独立本地数据库；不包含在 M2-A 备份中。</p>
+    <p className="muted">{backupFormat ? "工作日志纳入当前档案的完整本地备份。" : "工作日志保存在本机。完整备份能力尚未确认。"}</p>
     {notice && <p role="status" className="worklog-notice">{notice}</p>}
     <form key={editing?.id ?? draftId} data-profile-switch-form onSubmit={submit}>
       <fieldset>

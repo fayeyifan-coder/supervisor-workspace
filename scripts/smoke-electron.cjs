@@ -74,6 +74,8 @@ async function launch() {
   const runtime = await main("({profile:" + E + ".app.getPath('userData'),electron:process.versions.electron,node:process.versions.node,arch:process.arch,packaged:" + E + ".app.isPackaged})");
   assert.equal(runtime.profile, join(owner, "profile", "chromium"));
   assert.equal(runtime.arch, "x64");
+  assert.equal(runtime.electron, require("../package-lock.json").packages["node_modules/electron"].version);
+  assert.equal(runtime.node, "24.22.2");
   assert.equal(runtime.packaged, !development);
   const dialogs = (path, response = 1) => main(E + ".dialog.showOpenDialog=async()=>({canceled:false,filePaths:[" + JSON.stringify(path) + "]});" +
     E + ".dialog.showMessageBox=async()=>({response:" + response + "});true");
@@ -112,7 +114,7 @@ async function pauseQuit(app) {
     E + ".dialog.showErrorBox=(_,message)=>globalThis.switchError=message;true");
 }
 
-async function verifySwitch(app, copy, original) {
+async function verifySwitch(app, copy, original, savedAt) {
   const chosen = join(copy.location, "restore.ready");
   await app.dialogs(chosen, 0);
   assert.equal(ok(await app.invoke("activateRecovery")), false);
@@ -185,6 +187,7 @@ async function verifySwitch(app, copy, original) {
   app = await launch();
   const active = ok(await app.invoke("activationStatus"));
   assert(active.active);
+  assert.equal(active.lastSuccessfulBackupAt, null);
   assert.deepEqual(ok(await app.invoke("students")).map(p => p.id), [original.id]);
   await app.dialogs(temp, 0);
   assert.equal(ok(await app.invoke("returnOriginalProfile")), false);
@@ -192,7 +195,9 @@ async function verifySwitch(app, copy, original) {
   await app.ui("void window.supervisorWorkspace.returnOriginalProfile()");
   await app.finish();
   app = await launch();
-  assert.equal(ok(await app.invoke("activationStatus")).active, null);
+  const originalState = ok(await app.invoke("activationStatus"));
+  assert.equal(originalState.active, null);
+  assert.equal(originalState.lastSuccessfulBackupAt, savedAt);
   assert.deepEqual(ok(await app.invoke("students")).map(p => p.id), [original.id]);
   return app;
 }
@@ -205,6 +210,10 @@ async function main() {
   await app.close();
   app = await launch();
   assert.deepEqual(ok(await app.invoke("students")).map(p => p.id), [original.id]);
+  if (mode !== "baseline") {
+    assert.deepEqual(ok(await app.invoke("workspaceInfo")), { mode: "synthetic", backupFormat: 2 });
+    assert.equal(ok(await app.invoke("activationStatus")).lastSuccessfulBackupAt, null);
+  }
   await app.dialogs(temp);
   const backup = ok(await app.invoke("exportProtection"));
   assert.equal(backup.formatVersion, 2);
@@ -222,14 +231,36 @@ async function main() {
     await app.close();
     return;
   }
+  const savedAt = ok(await app.invoke("activationStatus")).lastSuccessfulBackupAt;
+  assert.equal(typeof savedAt, "string");
+  assert(Number.isFinite(Date.parse(savedAt)));
+  await app.main(E + ".dialog.showOpenDialog=async()=>({canceled:true,filePaths:[]});true");
+  assert.equal(ok(await app.invoke("exportProtection")), null);
+  await app.dialogs(owner);
+  assert.equal((await app.invoke("exportProtection")).code, "invalid");
+  assert.equal(ok(await app.invoke("activationStatus")).lastSuccessfulBackupAt, savedAt);
   const { validateProtection } = require("../build/offline-protection.js");
   assert.equal(validateProtection(readFileSync(backup.location)).summary.students, 1);
-  app = await verifySwitch(app, copy, original);
+  app = await verifySwitch(app, copy, original, savedAt);
   await app.close();
+  const old = new Date(Date.now() - 4 * 86400000);
+  const { recordSuccessfulBackup } = require("../build/backup-status.js");
+  recordSuccessfulBackup(join(owner, "profile"), old); // Simulate four days passing in this fixture.
+  app = await launch();
+  assert(await waitFor(() => app.ui("document.querySelector('#protection-title')?.closest('section').textContent.includes('已超过 3 天未备份')"),
+    "Overdue backup reminder is missing."));
+  await app.close();
+  const diagnostics = readFileSync(join(owner, "profile", "logs", "diagnostics.jsonl"), "utf8").trim().split("\n")
+    .map(line => JSON.parse(line));
+  assert(diagnostics.some(row => row.channel === "m2d:export" && row.category === "invalid"));
+  for (const row of diagnostics) {
+    assert(Object.keys(row).every(field => ["time", "version", "channel", "category", "sqliteCode"].includes(field)));
+  }
   console.log(JSON.stringify({ runtime, persisted: true, format: backup.formatVersion, restored: true,
     switchCancelled: true, draftsPreserved: true, lateWritesRejected: writeMethods.length,
     pendingAndInFlightRejected: true, failedQuitRecovered: true, commitFailureReported: true,
-    interruptedBeforeQuit: true, roundTrip: true }));
+    interruptedBeforeQuit: true, roundTrip: true, backupStatusIsolated: true, backupReminder: true,
+    diagnosticsSanitized: true }));
 }
 main().catch(error => {
   console.error(error);

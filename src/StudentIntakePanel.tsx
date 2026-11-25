@@ -349,10 +349,11 @@ function IntakeEditor({ api, file, students, currentStudent, setBusy, setQueueSt
   </div>;
 }
 
-export function StudentIntakePanel({ api, students, student, onImported, onBusyChange, onClose }: {
+export function StudentIntakePanel({ api, students, student, backupFormat, onImported, onBusyChange, onClose }: {
   api: WorkspaceApi;
   students: Student[];
   student?: Student;
+  backupFormat?: 1 | 2 | null;
   onImported: (studentId: string) => void;
   onBusyChange: (busy: boolean) => void;
   onClose: () => void;
@@ -401,7 +402,10 @@ export function StudentIntakePanel({ api, students, student, onImported, onBusyC
       <h1 id="student-intake-heading">导入学生资料</h1>
       <button className="secondary" type="button" disabled={busy} onClick={() => { if (canLeave()) onClose(); }}>返回档案</button>
     </header>
-    <p className="growth-backup-warning" role="note">导入资料尚无经过验收的正式备份恢复保护。验收仅使用虚构学生资料。</p>
+    <p className="growth-backup-warning" role="note">{backupFormat === 2
+      ? "导入原文、关联及重试凭据纳入 SWBACK2 五库备份。请在离线数据保护中定期导出。"
+      : backupFormat === 1 ? "导入原文、关联及重试凭据纳入当前 SWBACK1 四库备份。"
+        : "当前档案的完整备份能力尚未确认。请先核对离线数据保护状态。"}</p>
     <div className="intake-picker">
       <button className={files.length ? "secondary" : "primary"} type="button" disabled={busy} onClick={() => void pick()}>
         {files.length ? "重新选择 JSON" : "选择 JSON"}
