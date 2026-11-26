@@ -6,8 +6,9 @@ if(Test-Path -LiteralPath $out){throw 'Output already exists; keep evidence and 
 if((& git -C $source rev-parse HEAD).Trim() -cne $SourceCommit -or (& git -C $source status --porcelain)){throw 'Source is not the fixed clean checkout'}
 if((& node --version).Trim() -cne 'v24.19.0' -or (& npm.cmd --version).Trim() -cne '11.17.0'){throw 'Locked development Node/npm required'}
 New-Item -ItemType Directory -Path $out|Out-Null
-$temp='D:\Codex-Development\Temp\sw-controlled-build-'+[guid]::NewGuid().ToString('N')
-New-Item -ItemType Directory -Path $temp|Out-Null
+$temp=if($env:GITHUB_ACTIONS -ceq 'true'){$env:RUNNER_TEMP}else{'D:\Codex-Development\Temp\supervisor-workspace-mvp\runtime'}
+if(!$temp){throw 'Approved temporary root unavailable'}
+New-Item -ItemType Directory -Path $temp -Force|Out-Null
 $saved=@{};foreach($key in @('TEMP','TMP','TMPDIR')){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');[Environment]::SetEnvironmentVariable($key,$temp,'Process')}
 function Run-Gate([string]$Name,[string]$Program,[string[]]$Arguments){& $Program @Arguments 2>&1|Tee-Object -FilePath (Join-Path $out ($Name+'.log'));if($LASTEXITCODE -ne 0){throw "Gate failed: $Name"}}
 Push-Location -LiteralPath $source
