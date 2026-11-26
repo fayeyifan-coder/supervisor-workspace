@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, fix/v0.2.1-maintenance, m2-b/reliability-proof, m2-c/student-growth-profile, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning, v0.2/r2-c-workday-acceptance, v0.2/r3-a-unified-student-detail, v0.2/release-hardening, v0.2/production-admission]
   pull_request:
-    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning, v0.2/r2-c-workday-acceptance, v0.2/r3-a-unified-student-detail, v0.2/release-hardening, release/batch1-maintenance-ux, chore/controlled-release]
+    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning, v0.2/r2-c-workday-acceptance, v0.2/r3-a-unified-student-detail, v0.2/release-hardening, release/batch1-maintenance-ux, chore/controlled-release, fix/minimal-export-readiness, feat/one-click-backup-entry]
 
 permissions:
   contents: read
