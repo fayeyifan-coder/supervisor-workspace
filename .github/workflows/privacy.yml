@@ -1,0 +1,29 @@
+name: Privacy guard
+on:
+  push:
+    branches: [main, security/public-data-guard]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24.19.0'
+      - name: Guard regression cases with synthetic data
+        run: node --test test/privacy-guard.test.cjs
+      - name: Scan tracked content
+        run: node scripts/check-sensitive-files.cjs --tracked
+      - name: Scan every PR revision, including removed content
+        if: github.event_name == 'pull_request'
+        env:
+          PRIVACY_BASE: ${{ github.event.pull_request.base.sha }}
+          PRIVACY_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-sensitive-files.cjs --history "$PRIVACY_BASE..$PRIVACY_HEAD"

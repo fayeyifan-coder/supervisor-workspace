@@ -30,6 +30,7 @@ export const channels = {
   exportProtection: "m2d:export",
   restoreProtection: "m2d:restore",
   activationStatus: "m2d:activation-status",
+  workspaceInfo: "mvp:workspace-info",
   activateRecovery: "m2d:activate-recovery",
   returnOriginalProfile: "m2d:return-original",
   scheduleAvailable: "r2b:schedule-available",
@@ -166,7 +167,13 @@ export type PendingOperationState =
   | { kind: "pending"; command: OperationCommand }
   | { kind: "damaged"; descriptor?: ScheduleReceiptInput };
 
+export interface WorkspaceInfo {
+  mode: "production" | "synthetic";
+  backupFormat: 1 | 2 | null;
+}
+
 export interface WorkspaceApi {
+  workspaceInfo(): Promise<Result<WorkspaceInfo>>;
   learningDay(input: LearningDayInput): Promise<Result<LearningDay>>;
   applyLearningChange(input: LearningChange): Promise<Result<AttendancePlan | LearningBlock>>;
   scheduleReceipt(input: ScheduleReceiptInput): Promise<Result<ScheduleReceipt | null>>;
@@ -179,7 +186,7 @@ export interface WorkspaceApi {
   saveSchedulePlan(input: ScheduleSaveInput): Promise<Result<AttendancePlan>>;
   exportProtection(): Promise<Result<ProtectionResult | null>>;
   restoreProtection(): Promise<Result<ProtectionResult | null>>;
-  activationStatus(): Promise<Result<{ active: string | null; pending: boolean; location: string }>>;
+  activationStatus(): Promise<Result<{ active: string | null; pending: boolean; location: string; lastSuccessfulBackupAt: string | null }>>;
   activateRecovery(): Promise<Result<boolean>>;
   returnOriginalProfile(): Promise<Result<boolean>>;
   students(): Promise<Result<Student[]>>;

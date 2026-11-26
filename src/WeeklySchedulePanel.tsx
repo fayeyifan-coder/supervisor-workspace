@@ -241,7 +241,8 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
       blocked={request.blocked} submit={request.run}
       leaveGuard={learningLeaveGuard} backLabel={learningFromBoard ? "返回今日到校" : undefined}
       onBack={onExitLearning} />}
-    <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}>
+    <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}
+      data-profile-switch-draft={draftDirty || busy ? "" : undefined}>
     <header className="schedule-heading">
       <div>
         <h1 id="schedule-title" tabIndex={-1}>全局总课表</h1>

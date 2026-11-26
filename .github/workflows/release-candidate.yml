@@ -1,0 +1,64 @@
+name: Controlled candidate artifact
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Reviewed full source commit SHA from this repository
+        required: true
+        type: string
+      version:
+        description: Expected packaged version
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  candidate-artifact-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+          persist-credentials: false
+      - name: Validate requested source identity
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          if ($env:SOURCE_SHA -cnotmatch '\A[0-9a-f]{40}\z') { throw 'A reviewed full SHA is required.' }
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24.19.0'
+          package-manager-cache: false
+      - name: Verify expected source and application version
+        working-directory: source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+        run: |
+          if ((git rev-parse HEAD) -cne $env:SOURCE_SHA) { throw 'Source SHA changed.' }
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($package.version -cne $env:EXPECTED_VERSION) { throw 'Version mismatch.' }
+      - name: Build, test, package, verify and smoke-test fixed source
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          & ./release-tools/scripts/Build-ControlledCandidate.ps1 -SourceRoot (Join-Path $env:GITHUB_WORKSPACE 'source') -SourceCommit $env:SOURCE_SHA -OutputRoot (Join-Path $env:RUNNER_TEMP 'controlled-candidate')
+      - name: Upload verified candidate and acceptance logs
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: controlled-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/controlled-candidate/candidate-win-x64.zip
+            ${{ runner.temp }}/controlled-candidate/candidate-identity.json
+            ${{ runner.temp }}/controlled-candidate/*.log
+          if-no-files-found: error
+          retention-days: 7

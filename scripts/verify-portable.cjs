@@ -1,0 +1,142 @@
+const assert = require("node:assert/strict");
+const { createHash } = require("node:crypto");
+const { closeSync, createReadStream, lstatSync, openSync, readFileSync, readdirSync, readSync,
+  writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const sourceRequire = require("node:module").createRequire(join(process.cwd(), "package.json"));
+const asar = sourceRequire("@electron/asar");
+const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+const actualHead = require("node:child_process").execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", windowsHide: true }).trim();
+assert(/^[a-f0-9]{40}$/.test(process.env.MVP_HEAD_SHA || "") && actualHead === process.env.MVP_HEAD_SHA, "Source HEAD mismatch");
+assert(/^[a-f0-9]{40}$/.test(process.env.MVP_TOOLING_SHA || ""), "Missing tooling identity");
+const root = process.env.MVP_PORTABLE_ROOT;
+const app = join(root, "win-unpacked");
+const executable = "SupervisorWorkspace-MVP.exe";
+const electronVersion = lock.packages["node_modules/electron"].version;
+
+function requireFile(path) {
+  const entry = lstatSync(path);
+  assert(entry.isFile() && entry.size > 0, "Missing or invalid file: " + path);
+}
+
+function verifyExecutable(path) {
+  const fd = openSync(path, "r");
+  try {
+    const header = Buffer.alloc(64);
+    assert.equal(readSync(fd, header, 0, 64, 0), 64);
+    assert.equal(header.toString("ascii", 0, 2), "MZ");
+    const pe = Buffer.alloc(6);
+    assert.equal(readSync(fd, pe, 0, 6, header.readUInt32LE(60)), 6);
+    assert.equal(pe.readUInt32LE(0), 0x4550, "Missing PE signature");
+    assert.equal(pe.readUInt16LE(4), 0x8664, "Expected a Windows x64 executable");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function verifyAsar(archive) {
+  // ASAR extraction uses native separators; keep the validation paths normalized.
+  const extractMember = path => asar.extractFile(archive, join(...path.split("/")));
+  const contents = new Set(asar.listPackage(archive).map(path => path.replace(/\\/g, "/").replace(/^\/+/, "")));
+  const appPackage = JSON.parse(extractMember("package.json").toString("utf8"));
+  assert.equal(appPackage.name, "supervisor-workspace-mvp");
+  assert.equal(appPackage.main, "build/main.js");
+  assert.equal(appPackage.version, packageJson.version);
+
+  const assetsPattern = /^dist\/assets\/[A-Za-z0-9_.-]+\.(?:js|css)$/;
+  const buildFiles = ["build/main.js", "build/preload.js", "build/contracts.js", "build/database.js", "build/workspace-fault.js", "build/parent-follow-up.js", "build/student-records.js", "build/student-write-recovery.js",
+    "build/database-lifecycle.js", "build/worklog.js", "build/growth-profile.js",
+    "build/student-intake.js", "build/intake-format.js", "build/offline-protection.js", "build/profile-activation.js",
+    "build/operations.js", "build/operations-schema.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js", "build/operations-pending.js",
+    "build/production-profile.js", "build/production-admission.js", "build/profile-write-gate.js",
+    "build/backup-status.js", "build/diagnostics.js"];
+  const allowed = new Set(["package.json", "build", "dist", "dist/assets", "dist/index.html", ...buildFiles]);
+  for (const path of contents) {
+    assert(allowed.has(path) || assetsPattern.test(path), "Unexpected ASAR member: " + path);
+  }
+  const html = extractMember("dist/index.html").toString("utf8");
+  const assets = [...html.matchAll(/\b(?:src|href)=["']\.\/(assets\/[A-Za-z0-9_.-]+\.(?:js|css))["']/g)]
+    .map(match => "dist/" + match[1]);
+  assert(assets.some(path => path.endsWith(".js")), "The packaged renderer has no local JS entry");
+  assert(assets.some(path => path.endsWith(".css")), "The packaged renderer has no local CSS entry");
+  const builtFiles = new Set([...buildFiles, "dist/index.html", ...assets,
+    ...[...contents].filter(path => assetsPattern.test(path))]);
+  for (const path of builtFiles) {
+    assert(contents.has(path), "Missing ASAR member: " + path);
+    const packaged = extractMember(path);
+    assert(packaged.length > 0 && packaged.equals(readFileSync(path)), "ASAR differs from CI build: " + path);
+  }
+}
+
+const runtimeFiles = new Set([
+  executable, "resources/app.asar", "resources/recovery-io.exe", "resources.pak", "icudtl.dat", "chrome_100_percent.pak",
+  "chrome_200_percent.pak", "snapshot_blob.bin", "v8_context_snapshot.bin", "vk_swiftshader_icd.json",
+  "LICENSE", "LICENSE.electron.txt", "LICENSES.chromium.html", "version",
+]);
+
+function appFiles(directory, prefix = "") {
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = prefix + entry.name;
+    const fullPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      assert(path === "resources" || path === "locales", "Unexpected application directory: " + path);
+      files.push(...appFiles(fullPath, path + "/"));
+    } else {
+      assert(entry.isFile() && (runtimeFiles.has(path) || /^[A-Za-z0-9_.-]+\.dll$/i.test(path) ||
+        /^locales\/[A-Za-z0-9-]+\.pak$/.test(path)), "Unexpected application file: " + path);
+      files.push("win-unpacked/" + path);
+    }
+  }
+  return files;
+}
+
+async function sha256(path) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+async function verify() {
+  assert(lstatSync(app).isDirectory(), "Missing unpacked application directory");
+  assert(!readdirSync(root).some(name => /\.(?:exe|msi|msix|appx)$/i.test(name)), "Unexpected installer output");
+  assert.equal(sourceRequire("electron/package.json").version, electronVersion);
+  assert(process.env.MVP_ELECTRON_FILE_VERSION === electronVersion ||
+    process.env.MVP_ELECTRON_FILE_VERSION === electronVersion + ".0", "Packaged Electron version differs from the lock");
+  const archive = join(app, "resources", "app.asar");
+  for (const file of [executable, "resources/app.asar", "resources/recovery-io.exe", "resources.pak", "icudtl.dat", "ffmpeg.dll",
+    "chrome_100_percent.pak", "chrome_200_percent.pak", "v8_context_snapshot.bin", "locales/en-US.pak"]) {
+    requireFile(join(app, file));
+  }
+  verifyExecutable(join(app, executable));
+  const helper = join(app, "resources", "recovery-io.exe");
+  verifyExecutable(helper);
+  assert(readFileSync(helper).equals(readFileSync(join("build", "recovery-io.exe"))), "Recovery helper differs from CI build.");
+  verifyAsar(archive);
+  const files = appFiles(app).sort();
+  writeFileSync(join(root, "build-info.json"), JSON.stringify({
+    sourceCommit: process.env.MVP_HEAD_SHA,
+    platform: "win32",
+    architecture: "x64",
+    electronVersion,
+    electronBuilderVersion: lock.packages["node_modules/electron-builder"].version,
+    buildOrigin: process.env.GITHUB_ACTIONS === "true" ? "github-actions" : "local-controlled",
+    toolingCommit: process.env.MVP_TOOLING_SHA,
+    packageLockSha256: await sha256("package-lock.json"),
+    nativeCompilerSha256: await sha256(join(process.env.SystemRoot, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe")),
+    nodeVersion: process.version,
+    candidateVersion: packageJson.version,
+    runId: process.env.GITHUB_RUN_ID,
+    runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+    applicationFiles: files.length,
+  }, null, 2) + "\n", { flag: "wx" });
+  const sums = [];
+  for (const file of ["build-info.json", "deploy/Production-Admission.ps1", ...files]) {
+    sums.push(await sha256(join(root, file)) + " *" + file);
+  }
+  writeFileSync(join(root, "SHA256SUMS.txt"), sums.join("\n") + "\n", { flag: "wx" });
+  console.log("Verified " + files.length + " application files for " + process.env.MVP_HEAD_SHA);
+}
+
+verify().catch(error => { console.error(error); process.exitCode = 1; });
