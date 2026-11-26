@@ -1,6 +1,6 @@
 // Exercises the actual packaged renderer, never injects development components.
 const assert=require('node:assert/strict');const{randomUUID}=require('node:crypto');
-module.exports=async function(ui){
+module.exports=async function(ui,capture){
  const api=(name,...args)=>ui('window.supervisorWorkspace['+JSON.stringify(name)+'](...'+JSON.stringify(args)+')');
  const ok=r=>{assert(r.ok,JSON.stringify(r));return r.value;};
  const students=ok(await api('students')),a=students.find(s=>s.alias==='虚构验收甲'),b=students.find(s=>s.alias==='虚构验收乙');assert(a&&b);
@@ -20,7 +20,10 @@ module.exports=async function(ui){
  await change('select:nth-of-type(1)','数学'); // First select belongs to the subject label.
  await ui('(()=>{const x='+scope+'.querySelectorAll("select")[1];x.value="日常测验";x.dispatchEvent(new Event("change",{bubbles:true}));return true;})()');await wait(async()=>await pointCount()==='2');
  await toggle('.score-compare-toggle input');await toggle('input[aria-label="对比 完整历史001"]');await toggle('input[aria-label="对比 完整历史003"]');assert.equal(await pointCount(),'2');assert(await ui('!'+scope+'.querySelector("option[value=raw]").disabled'));
- assert(await ui('Array.from('+scope+'.querySelectorAll("input[type=checkbox]")).every(x=>{const r=x.getBoundingClientRect();return r.width===16&&r.height===16&&getComputedStyle(x.parentElement).display==="inline-flex"&&getComputedStyle(x.parentElement).whiteSpace==="nowrap";})'));
+ const checkboxLayout=await ui('Array.from('+scope+'.querySelectorAll("input[type=checkbox]")).map(x=>{const r=x.getBoundingClientRect(),s=getComputedStyle(x.parentElement);return{width:r.width,height:r.height,display:s.display,whiteSpace:s.whiteSpace};})');
+ // A flex item blockifies inline-flex to flex in computed style.
+ assert(checkboxLayout.every(x=>x.width===16&&x.height===16&&['flex','inline-flex'].includes(x.display)&&x.whiteSpace==='nowrap'),JSON.stringify(checkboxLayout));
+ if(capture)await capture('custom-comparison-candidate.png');
  assert.deepEqual(ok(await api('studentRecords','score',a.id)),before);
  await ui('Array.from(document.querySelectorAll("#student-section-score ul.student-source-list>li")).find(x=>x.querySelector("h3").textContent==="完整历史003").querySelector("button").click();true');
  await ui('(()=>{const x=document.querySelector("#student-section-score input[name=score]");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(x,"94.25");x.dispatchEvent(new Event("input",{bubbles:true}));document.querySelector("#student-section-score form").requestSubmit();return true;})()');
