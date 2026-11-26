@@ -18,7 +18,7 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
   const fields: readonly RecordField[] = definition.fields;
   const [today, setToday] = useState(() => shanghaiParts(Date.now()).date);
   const [refresh, setRefresh] = useState(0);
-  const [loaded, setLoaded] = useState<{ refresh: number; result: Result<StudentRecordView> }>();
+  const [loaded, setLoaded] = useState<{ studentId: string; kind: StudentRecordKind; refresh: number; result: Result<StudentRecordView> }>();
   const [recordsForDetails, setRecordsForDetails] = useState<StudentRecord[]>([]);
   const [draft, setDraft] = useState<StudentRecordInput>();
   const [pending, setPending] = useState<StudentRecordInput>();
@@ -38,13 +38,13 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
     api.studentRecords(kind, studentId).then(result => {
       if (!live) return;
       if (result.ok && (result.value.studentId !== studentId || result.value.records.some(row => row.studentId !== studentId))) {
-        setLoaded({ refresh, result: { ok: false, code: "recovery", message: "记录与当前学生不一致。" } });
+        setLoaded({ studentId, kind, refresh, result: { ok: false, code: "recovery", message: "记录与当前学生不一致。" } });
       } else {
         if (result.ok) setRecordsForDetails(result.value.records);
-        setLoaded({ refresh, result });
+        setLoaded({ studentId, kind, refresh, result });
       }
     }).catch(() => {
-      if (live) setLoaded({ refresh, result: { ok: false, code: "failed", message: "读取学生记录失败。" } });
+      if (live) setLoaded({ studentId, kind, refresh, result: { ok: false, code: "failed", message: "读取学生记录失败。" } });
     });
     return () => { live = false; };
   }, [api, kind, studentId, refresh]);
@@ -64,7 +64,11 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recoveryResolution]);
 
-  const result = loaded?.refresh === refresh ? loaded.result : undefined;
+  const ownLoaded = loaded?.studentId === studentId && loaded.kind === kind ? loaded : undefined;
+  const result = ownLoaded?.refresh === refresh ? ownLoaded.result : undefined;
+  // Keep this student's overview mounted while a save is read back. A new student
+  // or a failed response must never display the prior student's cached records.
+  const overviewRecords = ownLoaded?.result.ok ? ownLoaded.result.value.records : undefined;
   const records = result?.ok ? result.value.records.filter(row => !filter || filter(row)) : [];
   const current = records.find(row => row.id === draft?.id);
 
@@ -117,12 +121,15 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
       <h2>{definition.label}</h2>
       {result?.ok && <button type="button" disabled={Boolean(draft)} onClick={() => start()}>新增{definition.item}</button>}
     </div>
+    {overview && overviewRecords && <div aria-busy={!result}>
+      {!result && <p role="status">趋势正在刷新，暂显示该学生上次已确认的记录。</p>}
+      {overview(overviewRecords)}
+    </div>}
     {message && <p role="status">{message}</p>}
     {!result ? <p role="status">正在读取…</p>
       : !result.ok ? <div className="notice failure" role="alert"><p>{result.message}</p>
         <button type="button" className="secondary" onClick={() => setRefresh(value => value + 1)}>重新读取</button></div>
       : <>
-        {overview?.(result.value.records)}
         {kind === "enrollment" && records.length > 0 && <p className="muted">每期独立计算有效期，历史期次保留当期状态。</p>}
         {records.length === 0 && <p className="muted">尚无{definition.item}记录。</p>}
         <ul className="student-source-list">

@@ -86,11 +86,11 @@ test('changed input refreshes edits and removed records without mutating source 
   assert.equal(JSON.stringify(original), snapshot);
 });
 
-test('raw scores require equal maxima across the full filtered history, not only the last 12', () => {
+test('raw scores require equal maxima across the complete filtered history', () => {
   const records = Array.from({ length: 13 }, (_, i) => row('record-' + i, { takenOn: '2026-11-' + String(i + 1).padStart(2, '0'),
     maximum: i === 0 ? '150' : '100' }));
   const view = trend(records, 'student-a');
-  assert.equal(view.points.length, 12);
+  assert.equal(view.points.length, 13);
   assert.equal(view.total, 13);
   assert.equal(view.rawAvailable, false);
   assert.equal(trend(records.slice(1), 'student-a').rawAvailable, true);
@@ -147,10 +147,35 @@ test('disappeared selected subject clears its category before choosing a fallbac
   assert.equal(noCategory.total, 0); assert.equal(noCategory.category, '期中考试');
 });
 
-test('more than twelve scores reports full count and the exact latest range', () => {
+test('more than twelve scores retains the complete exam range', () => {
   const records = Array.from({length:20},(_,i)=>row('exam-'+i,{takenOn:'2026-11-'+String(i+1).padStart(2,'0')}));
-  const view = trend(records,'student-a'); assert.equal(view.total,20); assert.equal(view.points.length,12);
-  assert.equal(view.points[0].record.fields.takenOn,'2026-11-09');assert.equal(view.points[11].record.fields.takenOn,'2026-11-20');
+  const view = trend(records,'student-a'); assert.equal(view.total,20); assert.equal(view.points.length,20);
+  assert.equal(view.points[0].record.fields.takenOn,'2026-11-01');assert.equal(view.points[19].record.fields.takenOn,'2026-11-20');
+});
+
+test('date bounds are inclusive and do not remove subject or category choices',()=>{
+ const rows=[row('old',{takenOn:'2025-12-31'}),row('new',{takenOn:'2026-01-01',category:'期中考试'}),row('later',{takenOn:'2026-01-02'})];
+ const v=trend(rows,'student-a','数学','',{from:'2026-01-01',to:'2026-01-01'});
+ assert.deepEqual(v.points.map(p=>p.record.id),['new']);assert.equal(v.subjectTotal,3);assert.equal(v.categories.length,2);
+ const empty=trend(rows,'student-a','数学','期中考试',{from:'2027-01-01'});assert.equal(empty.total,0);assert.equal(empty.subjectChanged,false);assert.equal(empty.category,'期中考试');
+});
+test('invalid or reversed date bounds give an explicit error, never an unfiltered comparison',()=>{
+ for(const opts of [{from:'2026-02-30'},{to:'0000-01-01'},{from:'2026-11-26',to:'2026-11-25'}]){const v=trend([row('a')],'student-a','','',opts);assert(v.rangeError);assert.equal(v.points.length,0);}
+});
+test('custom comparison uses only selected current-student records in the filtered scope',()=>{
+ const rows=[row('a'),row('b',{maximum:'150',score:'120'}),row('foreign',{},'student-b')];
+ const v=trend(rows,'student-a','','',{selectedIds:['a','foreign','gone']});
+ assert.equal(v.total,2);assert.deepEqual(v.points.map(p=>p.record.id),['a']);assert.equal(v.rawAvailable,true);assert.deepEqual(v.removedSelection,['foreign','gone']);
+ assert.equal(trend(rows,'student-a','','',{selectedIds:['a','b']}).rawAvailable,false);
+ assert.equal(trend(rows,'student-a','','',{selectedIds:[]}).points.length,0);
+});
+test('a thousand exams remain accessible without mutating raw values or identities',()=>{
+ const rows=Array.from({length:1000},(_,i)=>row('large-'+i));const before=JSON.stringify(rows);const v=trend(rows,'student-a');assert.equal(v.points.length,1000);assert.equal(new Set(v.points.map(p=>p.record.id)).size,1000);assert.equal(JSON.stringify(rows),before);
+});
+test('history list pagination never truncates the plotted filtered history',async()=>{
+ const rows=Array.from({length:200},(_,i)=>row('page-'+i));
+ const html=renderToStaticMarkup(React.createElement(await component(),{records:rows,studentId:'student-a'}));
+ assert.match(html,/data-point-count="200"/);assert.equal((html.match(/<li[ >]/g)||[]).length,50);assert.match(html,/第 1 \/ 4 页/);
 });
 
 test('editing one same-day exam keeps every other identity and date unchanged', () => {

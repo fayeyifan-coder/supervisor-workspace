@@ -27,7 +27,7 @@ module.exports=async function exerciseScoreStates(ui,output){
  const pixel=await ui('Array.from(document.querySelector("#score-view-fixture canvas").getContext("2d").getImageData(385,51,1,1).data)');assert.deepEqual(pixel,[23,102,77,255]);
  await render([row('same-a'),row('same-b',{score:'90'})]);assert.equal(await count(),2);
  await render([row('same-a',{score:'91.25'}),row('same-b',{score:'90'})]);assert.equal(await count(),2);assert(await ui('document.querySelector("#score-view-fixture").innerText.includes("91.25/100")'));
- await render(Array.from({length:20},(_,i)=>row('exam-'+i,{takenOn:'2026-11-'+String(i+1).padStart(2,'0')})));assert.equal(await count(),12);assert(await ui('document.querySelector("#score-view-fixture").innerText.includes("12 / 20")'));
+ await render(Array.from({length:20},(_,i)=>row('exam-'+i,{takenOn:'2026-11-'+String(i+1).padStart(2,'0')})));assert.equal(await count(),20);assert(await ui('document.querySelector("#score-view-fixture canvas").dataset.pointCount==="20"'));
  await ui('removeScoreFixture();delete globalThis.process;true');
- return {disappearedSubjectClearsCategory:true,reappearingSubjectDoesNotReviveCategory:true,missingCategoryExplained:true,emptySingleNoMatchTransitions:true,canvasSinglePointPixel:pixel,sameDayEditRetainsTwo:true,twentyRecordsShowsLastTwelve:true};
+ return {disappearedSubjectClearsCategory:true,reappearingSubjectDoesNotReviveCategory:true,missingCategoryExplained:true,emptySingleNoMatchTransitions:true,canvasSinglePointPixel:pixel,sameDayEditRetainsTwo:true,twentyRecordsShowsAll:true};
 };

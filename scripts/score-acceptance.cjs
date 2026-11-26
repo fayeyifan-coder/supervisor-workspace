@@ -137,6 +137,8 @@ const data = (assessment, takenOn, category, score, maximum, subject = '数学')
   evidence.reopenedPoints=await points();assert.equal(evidence.reopenedPoints.length,6);
   await screenshot('candidate-reopened.png');
   evidence.viewStates=await require('./score-view-states.cjs')(ui,output);
+  evidence.fullHistory=await require('./score-full-history.cjs')(ui,screenshot);
+  await screenshot('full-history-candidate.png');
   await close();
   evidence.completed=true;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify({completed:true,defaultCount:evidence.defaultCount,cases:evidence.cases,owner}));
 })().catch(async error=>{evidence.error=error.stack;fs.writeFileSync(join(output,'acceptance.json'),JSON.stringify(evidence,null,2));console.error(error);if(child)child.kill();process.exitCode=1;});
