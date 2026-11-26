@@ -1,11 +1,19 @@
 {
   "name": "supervisor-workspace-mvp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Offline Windows workspace for student learning records",
   "author": "Supervisor Workspace",
+  "engines": {
+    "node": "24.19.0"
+  },
   "main": "build/main.js",
   "scripts": {
+    "preflight": "node scripts/verify-node.cjs",
+    "pretypecheck": "npm run preflight",
+    "prebuild": "npm run preflight",
+    "pretest": "npm run preflight",
+    "prepack:win:dir": "npm run preflight",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "node scripts/build-recovery.cjs && tsc -p tsconfig.main.json && vite build --base ./",
     "test": "node scripts/build-recovery.cjs && tsc -p tsconfig.main.json && node --test test/*.test.cjs",
@@ -17,6 +25,7 @@
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

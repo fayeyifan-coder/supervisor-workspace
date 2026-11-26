@@ -5,6 +5,7 @@ import type { GrowthSaveInput } from "./growth-profile";
 
 // The sandboxed preload only imports Electron at runtime.
 const api: WorkspaceApi = {
+  workspaceInfo: () => ipcRenderer.invoke("mvp:workspace-info"),
   scheduleAvailable: () => ipcRenderer.invoke("r2b:schedule-available"),
   scheduleWeek: (input: ScheduleWeekInput) => ipcRenderer.invoke("r2b:schedule-week", input),
   attendanceBoard: () => ipcRenderer.invoke("r2b:attendance-board"),

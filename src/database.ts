@@ -337,6 +337,10 @@ export class WorkspaceDatabase {
     return this.db.prepare("SELECT " + editColumns + " FROM student_edits WHERE request_id=?").get(requestId);
   }
 
+  hasPendingStudentEdits(): boolean {
+    return this.version >= 2 && Boolean(this.db.prepare("SELECT 1 FROM student_edit_pending LIMIT 1").get());
+  }
+
   studentEditView(rawStudentId: unknown): StudentEditView {
     this.requireEditSupport();
     this.protectionConnection();

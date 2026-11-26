@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import type { LearningDayInput, Lesson, LessonInput, Student, StudentInput, WorkspaceApi } from "./contracts";
+import type { LearningDayInput, Lesson, LessonInput, Student, StudentInput, WorkspaceApi, WorkspaceInfo } from "./contracts";
 import { GrowthProfilePanel } from "./GrowthProfilePanel";
 import { WorkLogPanel } from "./WorkLogPanel";
 import { AttendanceBoard, AttendanceOverview, useTodayAttendance } from "./AttendanceBoard";
@@ -18,12 +18,31 @@ import { studentRecordDefinitions, type StudentRecordKind } from "./student-reco
 import "./styles.css";
 
 declare global {
-  interface Window { supervisorWorkspace: WorkspaceApi }
+  interface Window {
+    supervisorWorkspace: WorkspaceApi;
+    profileSwitchReady?: (freeze: boolean) => boolean;
+    profileSwitchCancel?: () => void;
+  }
 }
 
 type Command = { kind: "student"; input: StudentInput } | { kind: "lesson"; input: LessonInput };
 type Notice = { type: "success" | "failure" | "pending"; message: string };
 type History = { studentId: string; refresh: number; rows?: Lesson[]; error?: string };
+
+function hasUncontrolledDraft(): boolean {
+  return Array.from(document.querySelectorAll<HTMLFormElement>("[data-profile-switch-form]")).some(form =>
+    Array.from(form.elements).some(field => {
+      if (field instanceof HTMLSelectElement) {
+        const original = Array.from(field.options).find(option => option.defaultSelected) ?? field.options[0];
+        return field.value !== (original?.value ?? "");
+      }
+      if (field instanceof HTMLInputElement) {
+        return field.type === "checkbox" || field.type === "radio"
+          ? field.checked !== field.defaultChecked : field.value !== field.defaultValue;
+      }
+      return field instanceof HTMLTextAreaElement && field.value !== field.defaultValue;
+    }));
+}
 
 function today(): string {
   const date = new Date();
@@ -42,7 +61,7 @@ function StudentForm({ disabled, submit }: { disabled: boolean; submit: (input: 
 
   return <section className="panel" aria-labelledby="new-student">
     <h1 id="new-student">新建学生档案</h1>
-    <form onSubmit={onSubmit}>
+    <form data-profile-switch-form onSubmit={onSubmit}>
       <fieldset disabled={disabled}>
         <div className="field-grid">
           <label>学生代号<input name="alias" maxLength={40} required placeholder="例如 虚构学员·小岚" autoFocus /></label>
@@ -73,7 +92,7 @@ function LessonForm({ student, disabled, submit }: {
 
   return <section className="panel" aria-labelledby="add-lesson">
     <h2 id="add-lesson">添加学习记录</h2>
-    <form onSubmit={onSubmit}>
+    <form data-profile-switch-form onSubmit={onSubmit}>
       <fieldset disabled={disabled}>
         <div className="field-grid">
           <label>日期<input name="date" type="date" min="0001-01-01" max="9999-12-31" defaultValue={today()} required /></label>
@@ -110,6 +129,14 @@ function HistoryView({ history, reload }: { history?: History; reload: () => voi
 
 function App() {
   const api = window.supervisorWorkspace;
+  const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo>();
+  useEffect(() => {
+    let mounted = true;
+    void api.workspaceInfo().then(reply => {
+      if (mounted && reply.ok) setWorkspaceInfo(reply.value);
+    }).catch(() => undefined);
+    return () => { mounted = false; };
+  }, [api]);
   const [students, setStudents] = useState<Student[]>();
   const [scheduleEnabled, setScheduleEnabled] = useState<boolean>();
   const [page, setPage] = useState<"schedule" | "board" | "students">("schedule");
@@ -261,6 +288,17 @@ function App() {
   const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
   const editorBusy = growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
+  useLayoutEffect(() => {
+    window.profileSwitchReady = freeze => {
+      if (locked || editorBusy || intakeOpen || intakeBusy || learning || growthDirty || studentEditDirty ||
+          parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty) ||
+          document.querySelector("[data-profile-switch-draft]") || hasUncontrolledDraft()) return false;
+      if (freeze) document.body.inert = true;
+      return true;
+    };
+    window.profileSwitchCancel = () => { document.body.inert = false; };
+    return () => { delete window.profileSwitchReady; delete window.profileSwitchCancel; };
+  });
   const showStudentForm = students && (creating || students.length === 0);
 
   function canLeaveStudentDrafts(): boolean {
@@ -344,7 +382,8 @@ function App() {
     <header className="masthead">
       <div className="brand"><span className="brand-mark" aria-hidden="true" /><strong>督学工作台</strong></div>
       <nav className="schedule-heading-actions workspace-navigation" aria-label="工作台">
-        <span className="scope">离线验收 · 仅用虚构学生</span>
+        <span className="scope">{workspaceInfo?.mode === "production" ? "正式档案 · 本机离线" :
+          workspaceInfo?.mode === "synthetic" ? "合成验收 · 仅用虚构学生" : "档案模式待确认"}</span>
         {scheduleEnabled && <>
           <button className="secondary" type="button" ref={scheduleNav} aria-current={page === "schedule" && !learning ? "page" : undefined}
             disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("schedule")}>全局总课表</button>
@@ -407,7 +446,7 @@ function App() {
             <button className="secondary" disabled={busy} onClick={() => void save(pending)}>重试同一请求</button>
           </div>}
         </div>}
-        {intakeOpen && students && <StudentIntakePanel api={api} students={students} student={active}
+        {intakeOpen && students && <StudentIntakePanel api={api} students={students} student={active} backupFormat={workspaceInfo?.backupFormat}
           onImported={studentId => {
             setActiveId(studentId); setCreating(false); setListRefresh(value => value + 1);
           }} onBusyChange={setIntakeBusy} onClose={() => {
@@ -437,7 +476,7 @@ function App() {
                 .filter(kind => kind !== "training" && studentRecordDefinitions[kind].version <= studentRecordVersion).map(kind => ({
                   id: kind, label: studentRecordDefinitions[kind].label,
                   content: <StudentRecordsPanel key={active.id + kind} studentId={active.id} kind={kind} api={api}
-                    onActivity={onRecordActivity} onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} overview={kind === "score" ? records => <ScoreTrend records={records} /> : undefined}
+                    onActivity={onRecordActivity} onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} overview={kind === "score" ? records => <ScoreTrend records={records} studentId={active.id} /> : undefined}
                     after={kind === "improvement" ? plans => plans.length > 0 &&
                       <TrainingForPlan api={api} studentId={active.id} plans={plans} onActivity={onRecordActivity}
                         onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} /> : undefined} />,
@@ -452,8 +491,8 @@ function App() {
                   submit={input => void save({ kind: "lesson", input })} />
                 <HistoryView history={visibleHistory} reload={() => setHistoryRefresh(value => value + 1)} />
               </div>} />}
-          {students && <WorkLogPanel students={students} api={api} />}
-          <DataProtectionPanel api={api} />
+          {students && <WorkLogPanel students={students} api={api} backupFormat={workspaceInfo?.backupFormat} />}
+          <DataProtectionPanel api={api} backupFormat={workspaceInfo?.backupFormat} />
         </div>
       </div>
     </div>
