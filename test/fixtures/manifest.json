@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "policy": "Reviewed hashes are declarations requiring human provenance review; labels alone never authorize private data.",
+  "entries": {
+    "test/fixtures/synthetic-intake-001.json": {
+      "kind": "synthetic-json",
+      "sha256": "de0a4a745a1dd217d1ae6c35e19d9143cf658be7b82676b48a8c31183066e1ff",
+      "purpose": "Synthetic student-intake validation fixture",
+      "provenance": "Authored synthetic DEMO intake example; identity extraction disabled and reviewed without real student database comparison.",
+      "realStudentData": false,
+      "reviewed": true
+    },
+    "test/fixtures/synthetic-intake-002.json": {
+      "kind": "synthetic-json",
+      "sha256": "ab387b8f96fab6e0f9c5abb6172255ce92999a7887efb74dc7468ed5e9cf10ec",
+      "purpose": "Synthetic student-intake validation fixture",
+      "provenance": "Authored synthetic DEMO intake example; identity extraction disabled and reviewed without real student database comparison.",
+      "realStudentData": false,
+      "reviewed": true
+    },
+    "docs/evidence/phase1a/before.png": {
+      "kind": "synthetic-image",
+      "sha256": "06e5440062bb772d82038075b9712774e86a049ebc11b7c1a0be86d24e73c395",
+      "purpose": "Synthetic Windows UI acceptance evidence",
+      "provenance": "Reviewed public Git fixture and screenshot construction against scripts/profile-acceptance.cjs and scripts/score-acceptance.cjs; images only permitted at these reviewed hashes.",
+      "realStudentData": false,
+      "reviewed": true
+    },
+    "docs/evidence/phase1a/after.png": {
+      "kind": "synthetic-image",
+      "sha256": "bea7435c7ef1770f98634c7a41f19c4006d56f912ab9c33b47d89a5ca2e55eaa",
+      "purpose": "Synthetic Windows UI acceptance evidence",
+      "provenance": "Reviewed public Git fixture and screenshot construction against scripts/profile-acceptance.cjs and scripts/score-acceptance.cjs; images only permitted at these reviewed hashes.",
+      "realStudentData": false,
+      "reviewed": true
+    },
+    "docs/evidence/phase2/before.png": {
+      "kind": "synthetic-image",
+      "sha256": "1b9f4c42ac88801ef452b5cab8de0a9d07c775b9d8d074f8ace90fad34d8cef7",
+      "purpose": "Synthetic Windows UI acceptance evidence",
+      "provenance": "Reviewed public Git fixture and screenshot construction against scripts/profile-acceptance.cjs and scripts/score-acceptance.cjs; images only permitted at these reviewed hashes.",
+      "realStudentData": false,
+      "reviewed": true
+    },
+    "docs/evidence/phase2/after.png": {
+      "kind": "synthetic-image",
+      "sha256": "cd196681391db27dc055a42aa987547e51dd903a01d119f43209f5db0aad9fc2",
+      "purpose": "Synthetic Windows UI acceptance evidence",
+      "provenance": "Reviewed public Git fixture and screenshot construction against scripts/profile-acceptance.cjs and scripts/score-acceptance.cjs; images only permitted at these reviewed hashes.",
+      "realStudentData": false,
+      "reviewed": true
+    }
+  }
+}

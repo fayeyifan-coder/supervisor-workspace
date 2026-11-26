@@ -109,3 +109,9 @@ Windows 本地开发验收可设置 `M2C_SYNTHETIC_TEST=1`；便携包验收可�
 `SWBACK2` 导出在 Electron 主进程同一个同步操作中取得五个库的 SQLite 写入保留锁，再读取已提交记录和 WAL 数据。源库保持独立，未跨库提交的业务事务仍可保留待处理状态。恢复前校验全部数据库身份、初始化标记、Schema、长度、SHA-256、SQLite 完整性与学生关联。
 
 历史 `SWBACK1` 可生成全新的五库恢复副本。原四库镜像保留，新增空教务库，清单记录原包摘要。激活须显式确认并正常退出和重开，应用另建活动副本。原档案可回切。威胁模型沿用可信单用户 Windows，SHA-256 提供完整性校验，包签名与同权限恶意进程防护尚未提供。正式 Profile 原位覆盖及其他旧 Schema 的升级仍为 HOLD。
+# Public repository privacy
+
+Real business data, backups, imported institution files, exports and browser profiles must stay outside this checkout. Use only reviewed synthetic fixtures in tests and screenshots. Do not attach real student information or credentials to public PRs, issues or CI logs.
+
+Before committing, run `node scripts/check-sensitive-files.cjs --staged`; use `--tracked` for the full index and `--history BASE..HEAD` for a proposed revision range. Findings are redacted. Ignore rules do not remove data from prior commits or block forced additions by themselves. See [data privacy and fixture rules](docs/data-privacy.md). This guard does not replace human review or authorize a release.
+
