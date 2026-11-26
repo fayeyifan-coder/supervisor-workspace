@@ -3,7 +3,7 @@ import type { ProtectionResult, WorkspaceApi } from "./contracts";
 
 const reminderInterval = 3 * 24 * 60 * 60 * 1000;
 
-export function DataProtectionPanel({ api, backupFormat }: { api: WorkspaceApi; backupFormat?: 1 | 2 | null }) {
+export function DataProtectionPanel({ api, backupFormat, onBusyChange }: { api: WorkspaceApi; backupFormat?: 1 | 2 | null; onBusyChange?: (busy: boolean) => void }) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
   const [result, setResult] = useState<ProtectionResult>();
@@ -12,6 +12,7 @@ export function DataProtectionPanel({ api, backupFormat }: { api: WorkspaceApi; 
   const [location, setLocation] = useState("");
   const [lastBackup, setLastBackup] = useState<string | null>();
   const [clock, setClock] = useState(Date.now);
+  useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 60_000);
@@ -71,7 +72,7 @@ export function DataProtectionPanel({ api, backupFormat }: { api: WorkspaceApi; 
     <p className="muted">历史备份时间仅表示该次导出和校验成功。请确认文件仍可用。独立介质备份需在本地导出后另行复制并核对 SHA-256。</p>
     {active !== undefined && <p>当前档案：{active ? "已激活的恢复档案" : "原始档案"}<br />{location}</p>}
     <div className="retry-actions">
-      <button type="button" className="secondary" disabled={busy} onClick={() => void run("export")}>导出完整备份</button>
+      <button type="button" className="primary" disabled={busy || !backupFormat} onClick={() => void run("export")}>一键完整备份</button>
       <button type="button" className="secondary" disabled={busy} onClick={() => void run("restore")}>验证并独立恢复</button>
       <button type="button" className="secondary" disabled={busy || pending || active === undefined} onClick={() => void schedule("activateRecovery")}>选择恢复档案</button>
       {active && <button type="button" className="secondary" disabled={busy || pending} onClick={() => void schedule("returnOriginalProfile")}>返回原始档案</button>}

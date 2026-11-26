@@ -140,6 +140,8 @@ function App() {
   const [students, setStudents] = useState<Student[]>();
   const [scheduleEnabled, setScheduleEnabled] = useState<boolean>();
   const [page, setPage] = useState<"schedule" | "board" | "students">("schedule");
+  const [protectionOpen, setProtectionOpen] = useState(false);
+  const [protectionBusy, setProtectionBusy] = useState(false);
   const [studentFilter, setStudentFilter] = useState("");
   const [learning, setLearning] = useState<LearningDayInput>();
   const learningLeaveGuard = useRef<() => boolean>(null);
@@ -384,6 +386,8 @@ function App() {
       <nav className="schedule-heading-actions workspace-navigation" aria-label="工作台">
         <span className="scope">{workspaceInfo?.mode === "production" ? "正式档案 · 本机离线" :
           workspaceInfo?.mode === "synthetic" ? "合成验收 · 仅用虚构学生" : "档案模式待确认"}</span>
+        <button className="secondary" type="button" aria-expanded={protectionOpen} aria-controls="data-export-center"
+          disabled={protectionBusy} onClick={() => setProtectionOpen(open => !open)}>数据导出与备份</button>
         {scheduleEnabled && <>
           <button className="secondary" type="button" ref={scheduleNav} aria-current={page === "schedule" && !learning ? "page" : undefined}
             disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("schedule")}>全局总课表</button>
@@ -394,6 +398,12 @@ function App() {
         </>}
       </nav>
     </header>
+    <section id="data-export-center" hidden={!protectionOpen} aria-label="数据导出与备份">
+      <div className="schedule-heading-actions"><h1>数据导出与备份</h1><button className="secondary" type="button"
+        disabled={protectionBusy} onClick={() => setProtectionOpen(false)}>收起数据面板</button></div>
+      <p className="muted">仅备份和导出已保存记录。未保存草稿仍保留在原页面，请先保存需要纳入的内容。</p>
+      <DataProtectionPanel api={api} backupFormat={workspaceInfo?.backupFormat} onBusyChange={setProtectionBusy} />
+    </section>
     {parentFollowUpEnabled && students && <StudentWriteRecoveryPanel api={api} students={students}
       refresh={studentWriteRefresh} onResolved={setWriteResolution} />}
     {!showingWorkspace && (!students || scheduleEnabled === undefined) &&
@@ -492,7 +502,6 @@ function App() {
                 <HistoryView history={visibleHistory} reload={() => setHistoryRefresh(value => value + 1)} />
               </div>} />}
           {students && <WorkLogPanel students={students} api={api} backupFormat={workspaceInfo?.backupFormat} />}
-          <DataProtectionPanel api={api} backupFormat={workspaceInfo?.backupFormat} />
         </div>
       </div>
     </div>
