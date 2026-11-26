@@ -50,7 +50,7 @@ function verifyAsar(archive) {
     "build/student-intake.js", "build/intake-format.js", "build/offline-protection.js", "build/profile-activation.js",
     "build/operations.js", "build/operations-schema.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js", "build/operations-pending.js",
     "build/production-profile.js", "build/production-admission.js", "build/profile-write-gate.js",
-    "build/backup-status.js", "build/diagnostics.js"];
+    "build/backup-status.js", "build/diagnostics.js", "build/business-export.js", "build/business-export-schema.js", "build/business-export-files.js", "build/exceljs.runtime.js"];
   const allowed = new Set(["package.json", "build", "dist", "dist/assets", "dist/index.html", ...buildFiles]);
   for (const path of contents) {
     assert(allowed.has(path) || assetsPattern.test(path), "Unexpected ASAR member: " + path);

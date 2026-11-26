@@ -44,6 +44,7 @@ test('initialization, recovery, pending journals and rotated diagnostics are ign
  const ignored=execFileSync('git',['check-ignore','--no-index','--stdin'],{cwd:path.join(__dirname,'..'),input:names.join('\n')+'\n',encoding:'utf8'}).trim().split(/\r?\n/);
  assert.deepEqual(ignored,names);
  assert.equal(inspect('src/profile-activation.ts',Buffer.from('source')).length,0);
+ for(const name of ['business-data.json','business-data.xlsx','export-manifest.json','export.complete','sw-business-export-synthetic/notes.txt']) assert(inspect(name,Buffer.from('synthetic')).some(f=>f.rule==='PRIVATE_BUSINESS_EXPORT'));
 });
 test('findings never repeat secret contents or a private filename', () => {
  const value=secret();const file=['Private','Student','Record'].join('')+'.txt';const result=JSON.stringify(inspect(file,Buffer.from(value)));

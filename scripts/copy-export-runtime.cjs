@@ -1,0 +1,10 @@
+const {readFileSync,writeFileSync,mkdirSync}=require('node:fs');
+const {join}=require('node:path');
+const root=join(__dirname,'..');
+const packageFile=require.resolve('exceljs/package.json');
+const directory=require('node:path').dirname(packageFile);
+const metadata=JSON.parse(readFileSync(packageFile,'utf8'));
+if(metadata.version!=='4.4.0')throw Error('Export runtime differs from pinned ExcelJS version');
+mkdirSync(join(root,'build'),{recursive:true});
+const license=readFileSync(join(directory,'LICENSE'),'utf8');
+writeFileSync(join(root,'build','exceljs.runtime.js'),'/*! ExcelJS '+metadata.version+'; MIT License\n'+license+'\n*/\n'+readFileSync(join(directory,'dist','exceljs.min.js'),'utf8'));

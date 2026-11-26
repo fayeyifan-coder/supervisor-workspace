@@ -15,12 +15,13 @@
     "pretest": "npm run preflight",
     "prepack:win:dir": "npm run preflight",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "node scripts/build-recovery.cjs && tsc -p tsconfig.main.json && vite build --base ./",
-    "test": "node scripts/build-recovery.cjs && tsc -p tsconfig.main.json && node --test test/*.test.cjs",
+    "build": "node scripts/build-recovery.cjs && tsc -p tsconfig.main.json && node scripts/copy-export-runtime.cjs && vite build --base ./",
+    "test": "node scripts/build-recovery.cjs && tsc -p tsconfig.main.json && node scripts/copy-export-runtime.cjs && node --test test/*.test.cjs",
     "pack:win:dir": "electron-builder --win --x64 --dir --publish never",
     "dist:win": "npm run build && npm run pack:win:dir"
   },
   "dependencies": {
+    "exceljs": "4.4.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

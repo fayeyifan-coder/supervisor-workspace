@@ -6,6 +6,7 @@ import { WorkLogPanel } from "./WorkLogPanel";
 import { AttendanceBoard, AttendanceOverview, useTodayAttendance } from "./AttendanceBoard";
 import { WeeklySchedulePanel } from "./WeeklySchedulePanel";
 import { DataProtectionPanel } from "./DataProtectionPanel";
+import { BusinessExportPanel } from "./BusinessExportPanel";
 import { StudentIntakePanel } from "./StudentIntakePanel";
 import { StudentDetail } from "./StudentDetail";
 import { StudentEditPanel } from "./StudentEditPanel";
@@ -142,6 +143,7 @@ function App() {
   const [page, setPage] = useState<"schedule" | "board" | "students">("schedule");
   const [protectionOpen, setProtectionOpen] = useState(false);
   const [protectionBusy, setProtectionBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const [studentFilter, setStudentFilter] = useState("");
   const [learning, setLearning] = useState<LearningDayInput>();
   const learningLeaveGuard = useRef<() => boolean>(null);
@@ -387,7 +389,7 @@ function App() {
         <span className="scope">{workspaceInfo?.mode === "production" ? "正式档案 · 本机离线" :
           workspaceInfo?.mode === "synthetic" ? "合成验收 · 仅用虚构学生" : "档案模式待确认"}</span>
         <button className="secondary" type="button" aria-expanded={protectionOpen} aria-controls="data-export-center"
-          disabled={protectionBusy} onClick={() => setProtectionOpen(open => !open)}>数据导出与备份</button>
+          disabled={protectionBusy || exportBusy} onClick={() => setProtectionOpen(open => !open)}>数据导出与备份</button>
         {scheduleEnabled && <>
           <button className="secondary" type="button" ref={scheduleNav} aria-current={page === "schedule" && !learning ? "page" : undefined}
             disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("schedule")}>全局总课表</button>
@@ -400,9 +402,10 @@ function App() {
     </header>
     <section id="data-export-center" hidden={!protectionOpen} aria-label="数据导出与备份">
       <div className="schedule-heading-actions"><h1>数据导出与备份</h1><button className="secondary" type="button"
-        disabled={protectionBusy} onClick={() => setProtectionOpen(false)}>收起数据面板</button></div>
+        disabled={protectionBusy || exportBusy} onClick={() => setProtectionOpen(false)}>收起数据面板</button></div>
       <p className="muted">仅备份和导出已保存记录。未保存草稿仍保留在原页面，请先保存需要纳入的内容。</p>
       <DataProtectionPanel api={api} backupFormat={workspaceInfo?.backupFormat} onBusyChange={setProtectionBusy} />
+      <BusinessExportPanel api={api} supported={workspaceInfo?.backupFormat === 2 && studentRecordVersion >= 6} onBusyChange={setExportBusy} />
     </section>
     {parentFollowUpEnabled && students && <StudentWriteRecoveryPanel api={api} students={students}
       refresh={studentWriteRefresh} onResolved={setWriteResolution} />}

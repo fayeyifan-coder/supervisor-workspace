@@ -236,6 +236,33 @@ internal static class RecoveryIo {
         }
     }
 
+    // Narrow business-output command; the SWBACK2 command and format stay unchanged.
+    static void PublishBusiness(string root, string name, int xlsxSize, int jsonSize, int manifestSize) {
+        long total = (long)xlsxSize + jsonSize + manifestSize;
+        Check(Regex.IsMatch(name, @"\Asw-business-export-[a-f0-9]{32}\z") && xlsxSize > 0 && jsonSize > 0 && manifestSize > 0 &&
+            total <= 96 * 1024 * 1024, "Invalid business export output.");
+        using (var path = new PinnedPath(root)) {
+            Check(new DriveInfo(root.Substring(0, 3)).AvailableFreeSpace >= total + 16 * 1024 * 1024, "Insufficient export space.");
+            path.Add(name, true); // Exclusive fresh directory, never an existing user destination.
+            using (var xlsx = Output(path.Current, "business-data.xlsx"))
+            using (var json = Output(path.Current, "business-data.json"))
+            using (var manifest = Output(path.Current, "export-manifest.json")) {
+                var input = Console.OpenStandardInput();
+                WriteVerified(xlsx, input, xlsxSize);
+                WriteVerified(json, input, jsonSize);
+                WriteVerified(manifest, input, manifestSize);
+                Check(input.ReadByte() == -1, "Oversized business export stream.");
+                manifest.Position = 0;
+                string digest;
+                using (var hash = SHA256.Create()) digest = BitConverter.ToString(hash.ComputeHash(manifest)).Replace("-", "").ToLowerInvariant();
+                byte[] marker = Encoding.UTF8.GetBytes("sw-business-export-v1\n" + digest + "\n");
+                using (var complete = Output(path.Current, "export.complete"))
+                using (var source = new MemoryStream(marker, false)) WriteVerified(complete, source, marker.Length);
+                new BinaryOutput().Write(marker, 0, marker.Length);
+            }
+        }
+    }
+
     static void ReadLegacy(string directory) {
         using (var path = new PinnedPath(directory))
         using (var main = Child(path.Current, "mvp.sqlite3", false, false))
@@ -365,6 +392,7 @@ internal static class RecoveryIo {
     public static int Main(string[] args) {
         try {
             if (args.Length == 4 && args[0] == "publish") Publish(args[1], args[2], Int32.Parse(args[3]));
+            else if (args.Length == 6 && args[0] == "publish-business") PublishBusiness(args[1], args[2], Int32.Parse(args[3]), Int32.Parse(args[4]), Int32.Parse(args[5]));
             else if (args.Length == 2 && args[0] == "read") ReadInput(args[1]);
             else if (args.Length == 2 && args[0] == "read-legacy") ReadLegacy(args[1]);
             else if ((args.Length == 3 || args.Length == 4 || args.Length == 5) &&

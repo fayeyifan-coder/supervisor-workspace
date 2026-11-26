@@ -28,6 +28,7 @@ function inspect(name, bytes, manifest = {}, mode = '100644') {
  if (mode === '120000' || mode === '160000') add('EXTERNAL_REFERENCE');
  if (privatePath.test(normalized) || /(^|\/)(?:\.env(?:\..*)?|id_(?:rsa|ed25519)|credentials(?:\..*)?)$/i.test(normalized)) add('PRIVATE_PATH_OR_FILE');
  if (forbiddenExtension.test(normalized)) add('PRIVATE_FILE_TYPE');
+ if (/(?:^|\/)(?:sw-business-export-[^/]+(?:\/|$)|business-data\.[^/]+$|export-manifest\.json$|export\.complete$)/i.test(normalized)) add('PRIVATE_BUSINESS_EXPORT');
  if (/(?:\.initialized$|(?:^|\/)(?:restore\.ready|activation\.approved|profile-selection-v1\.json|student-write\..+|operations-request\..+|last-verified-backup-v1\.txt|\.backup-status-.+|diagnostics(?:\.\d+)?\.jsonl)$)/i.test(normalized)) add('PRIVATE_PROFILE_STATE');
  if (bytes.subarray(0, 16).equals(Buffer.from('SQLite format 3\0')) || bytes.subarray(0, 8).equals(Buffer.from('SWBACK2\n')) || bytes.subarray(0, 8).equals(Buffer.from('SWBACK1\n')) || bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4]))) add('PRIVATE_CONTAINER_MAGIC');
  const entry = manifest.entries?.[normalized];

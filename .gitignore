@@ -34,3 +34,7 @@ last-verified-backup-v1.txt
 .backup-status-*
 diagnostics*.jsonl
 Logs/
+sw-business-export-*/
+business-data.*
+export-manifest.json
+export.complete

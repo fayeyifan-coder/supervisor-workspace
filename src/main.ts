@@ -22,6 +22,8 @@ import { ProfileWriteGate } from "./profile-write-gate";
 import { isWithin, plainFile, productionInstallRoot, productionRootOf, requireLocalDirectory, requireProductionProfile } from "./production-profile";
 import { readBackupStatus, recordSuccessfulBackup } from "./backup-status";
 import { Diagnostics, sqliteErrorCode } from "./diagnostics";
+import { BusinessExportPlans } from "./business-export";
+import { BusinessExportFiles, requireExportDestination } from "./business-export-files";
 import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, studentServicesVersion, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
@@ -391,6 +393,18 @@ async function start(owner: string, profile: string, state: ActivationState, ope
 
 
   const recoveryFiles = protectionFiles();
+  const businessPlans = new BusinessExportPlans();
+  const businessFiles = new BusinessExportFiles(app.isPackaged ? join(process.resourcesPath, "recovery-io.exe") : join(__dirname, "recovery-io.exe"));
+  const exportContext = () => profile + "|" + window.webContents.id;
+  const exportForbiddenRoots = () => [owner, dirname(app.getPath("exe")), app.getAppPath(),
+    "D:\\SupervisorWorkspace\\App", "D:\\SupervisorWorkspace\\Profiles", "D:\\SupervisorWorkspace\\Logs"];
+  function businessExportStores() {
+    if (format !== 2 || m1Version !== 6 || !database) throw new WorkspaceFault("invalid", "业务导出仅支持当前五库 v6 档案，不会自动迁移。");
+    const stores = completeStores(format);
+    if (database.hasPendingStudentEdits() || intakeStore?.hasUnsettledJobs() || operationsPending.state().kind !== "empty") throw new WorkspaceFault("recovery", "请先核对待确认的档案编辑、导入及教务请求，再生成导出。");
+    studentWrites.requireSettled(database);
+    return stores;
+  }
   const recoveryRoot = format === 2 ? owner : profileRoot;
   let lastRecovery: string | undefined;
   async function protect<T>(event: IpcMainInvokeEvent, operation: () => Promise<T>): Promise<Result<T>> {
@@ -455,6 +469,29 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     catch (error) { diagnostics?.record("protection:backup-status", "failed", sqliteErrorCode(error)); }
     return result;
   }));
+  handle(channels.prepareBusinessExport, (event, input: {includeSourceText: boolean}) => protect(event, async () => {
+    if (!input || typeof input.includeSourceText !== "boolean" || Object.keys(input).join(",") !== "includeSourceText") throw new WorkspaceFault("invalid", "请选择本次全量导出范围。");
+    const stores = businessExportStores();
+    if (profile !== join(owner, "profile")) verifyProfileData(profile, false, format, m1Version);
+    else if (production) requireProductionProfile(production.root);
+    else checkOriginalProtectionMode(profile, format, false, m1Version);
+    return businessPlans.prepare(exportContext(), captureProtection(stores, app.getVersion(), format, m1Version), input.includeSourceText);
+  }));
+  handle(channels.writeBusinessExport, (event, token: string) => protect(event, async () => {
+    businessExportStores();
+    businessPlans.peek(token, exportContext());
+    const choice = await dialog.showOpenDialog(window, {title: "选择仓库外的业务导出目录（将新建独立文件夹）", properties: ["openDirectory"], defaultPath: production?.exports ?? "D:\\Codex-Development\\Exports"});
+    if (!isTrusted(event, window)) throw new WorkspaceFault("invalid", "工作窗口已经变化，请重新预览。");
+    if (choice.canceled) return null;
+    const parent = choice.filePaths[0];
+    if (production && isWithin(production.root, parent) && !isWithin(production.exports, parent)) throw new WorkspaceFault("invalid", "请选择正式档案和程序以外的导出位置，或使用专用 Exports 目录。");
+    requireExportDestination(parent, exportForbiddenRoots());
+    return businessFiles.publish(parent, businessPlans.take(token, exportContext()), exportForbiddenRoots());
+  }));
+  handle(channels.cancelBusinessExport, (event, token: string) => {
+    if (!isTrusted(event, window)) return denied();
+    businessPlans.cancel(token, exportContext()); return {ok: true, value: null};
+  });
   handle(channels.restoreProtection, event => protect(event, async () => {
     const choice = await dialog.showOpenDialog(window, {
       title: "选择待验证的离线备份", properties: ["openFile"],

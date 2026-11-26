@@ -28,6 +28,9 @@ export const channels = {
   saveStudentIntake: "m2c:save-student-intake",
   studentIntakeHistory: "m2c:student-intake-history",
   exportProtection: "m2d:export",
+  prepareBusinessExport: "m2e:prepare-export",
+  writeBusinessExport: "m2e:write-export",
+  cancelBusinessExport: "m2e:cancel-export",
   restoreProtection: "m2d:restore",
   activationStatus: "m2d:activation-status",
   workspaceInfo: "mvp:workspace-info",
@@ -173,6 +176,9 @@ export interface WorkspaceInfo {
 }
 
 export interface WorkspaceApi {
+  prepareBusinessExport(input: {includeSourceText: boolean}): Promise<Result<import("./business-export").BusinessExportPreview>>;
+  writeBusinessExport(token: string): Promise<Result<import("./business-export").BusinessExportResult | null>>;
+  cancelBusinessExport(token: string): Promise<Result<null>>;
   workspaceInfo(): Promise<Result<WorkspaceInfo>>;
   learningDay(input: LearningDayInput): Promise<Result<LearningDay>>;
   applyLearningChange(input: LearningChange): Promise<Result<AttendancePlan | LearningBlock>>;
