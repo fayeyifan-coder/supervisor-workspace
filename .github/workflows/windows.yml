@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, fix/v0.2.1-maintenance, m2-b/reliability-proof, m2-c/student-growth-profile, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning, v0.2/r2-c-workday-acceptance, v0.2/r3-a-unified-student-detail, v0.2/release-hardening, v0.2/production-admission]
   pull_request:
-    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning, v0.2/r2-c-workday-acceptance, v0.2/r3-a-unified-student-detail, v0.2/release-hardening]
+    branches: [main, pr/1a-windows-desktop-shell, mvp/v0.1, m2-b/daily-work-log, m2-b/reliability-proof, m2-c/student-growth-profile, m2-c/student-json-import, m2-d/offline-data-protection, v0.2/r2-a-operations-protection, v0.2/r2-b-weekly-schedule, v0.2/r2-b-attendance-learning, v0.2/r2-c-workday-acceptance, v0.2/r3-a-unified-student-detail, v0.2/release-hardening, release/batch1-maintenance-ux, chore/controlled-release]
 
 permissions:
   contents: read
@@ -42,6 +42,7 @@ jobs:
         if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
         env:
           MVP_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          MVP_TOOLING_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           $sourceCommit = git rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $sourceCommit -cne $env:MVP_HEAD_SHA) {
@@ -87,152 +88,9 @@ jobs:
           $env:MVP_PORTABLE_ROOT = $root
           $exe = Get-Item -LiteralPath (Join-Path $root 'win-unpacked\SupervisorWorkspace-MVP.exe') -ErrorAction Stop
           $env:MVP_ELECTRON_FILE_VERSION = $exe.VersionInfo.ProductVersion
-          @'
-          const assert = require("node:assert/strict");
-          const { createHash } = require("node:crypto");
-          const { closeSync, createReadStream, lstatSync, openSync, readFileSync, readdirSync, readSync,
-            writeFileSync } = require("node:fs");
-          const { join } = require("node:path");
-          const asar = require("@electron/asar");
-          const lock = require("./package-lock.json");
-          const root = process.env.MVP_PORTABLE_ROOT;
-          const app = join(root, "win-unpacked");
-          const executable = "SupervisorWorkspace-MVP.exe";
-          const electronVersion = lock.packages["node_modules/electron"].version;
-
-          function requireFile(path) {
-            const entry = lstatSync(path);
-            assert(entry.isFile() && entry.size > 0, "Missing or invalid file: " + path);
-          }
-
-          function verifyExecutable(path) {
-            const fd = openSync(path, "r");
-            try {
-              const header = Buffer.alloc(64);
-              assert.equal(readSync(fd, header, 0, 64, 0), 64);
-              assert.equal(header.toString("ascii", 0, 2), "MZ");
-              const pe = Buffer.alloc(6);
-              assert.equal(readSync(fd, pe, 0, 6, header.readUInt32LE(60)), 6);
-              assert.equal(pe.readUInt32LE(0), 0x4550, "Missing PE signature");
-              assert.equal(pe.readUInt16LE(4), 0x8664, "Expected a Windows x64 executable");
-            } finally {
-              closeSync(fd);
-            }
-          }
-
-          function verifyAsar(archive) {
-            // ASAR extraction uses native separators; keep the validation paths normalized.
-            const extractMember = path => asar.extractFile(archive, join(...path.split("/")));
-            const contents = new Set(asar.listPackage(archive).map(path => path.replace(/\\/g, "/").replace(/^\/+/, "")));
-            const appPackage = JSON.parse(extractMember("package.json").toString("utf8"));
-            assert.equal(appPackage.name, "supervisor-workspace-mvp");
-            assert.equal(appPackage.main, "build/main.js");
-
-            const assetsPattern = /^dist\/assets\/[A-Za-z0-9_.-]+\.(?:js|css)$/;
-            const buildFiles = ["build/main.js", "build/preload.js", "build/contracts.js", "build/database.js", "build/workspace-fault.js", "build/parent-follow-up.js", "build/student-records.js", "build/student-write-recovery.js",
-              "build/database-lifecycle.js", "build/worklog.js", "build/growth-profile.js",
-              "build/student-intake.js", "build/intake-format.js", "build/offline-protection.js", "build/profile-activation.js",
-              "build/operations.js", "build/operations-schema.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js", "build/operations-pending.js",
-              "build/production-profile.js", "build/production-admission.js", "build/profile-write-gate.js",
-              "build/backup-status.js", "build/diagnostics.js"];
-            const allowed = new Set(["package.json", "build", "dist", "dist/assets", "dist/index.html", ...buildFiles]);
-            for (const path of contents) {
-              assert(allowed.has(path) || assetsPattern.test(path), "Unexpected ASAR member: " + path);
-            }
-            const html = extractMember("dist/index.html").toString("utf8");
-            const assets = [...html.matchAll(/\b(?:src|href)=["']\.\/(assets\/[A-Za-z0-9_.-]+\.(?:js|css))["']/g)]
-              .map(match => "dist/" + match[1]);
-            assert(assets.some(path => path.endsWith(".js")), "The packaged renderer has no local JS entry");
-            assert(assets.some(path => path.endsWith(".css")), "The packaged renderer has no local CSS entry");
-            const builtFiles = new Set([...buildFiles, "dist/index.html", ...assets,
-              ...[...contents].filter(path => assetsPattern.test(path))]);
-            for (const path of builtFiles) {
-              assert(contents.has(path), "Missing ASAR member: " + path);
-              const packaged = extractMember(path);
-              assert(packaged.length > 0 && packaged.equals(readFileSync(path)), "ASAR differs from CI build: " + path);
-            }
-          }
-
-          const runtimeFiles = new Set([
-            executable, "resources/app.asar", "resources/recovery-io.exe", "resources.pak", "icudtl.dat", "chrome_100_percent.pak",
-            "chrome_200_percent.pak", "snapshot_blob.bin", "v8_context_snapshot.bin", "vk_swiftshader_icd.json",
-            "LICENSE", "LICENSE.electron.txt", "LICENSES.chromium.html", "version",
-          ]);
-
-          function appFiles(directory, prefix = "") {
-            const files = [];
-            for (const entry of readdirSync(directory, { withFileTypes: true })) {
-              const path = prefix + entry.name;
-              const fullPath = join(directory, entry.name);
-              if (entry.isDirectory()) {
-                assert(path === "resources" || path === "locales", "Unexpected application directory: " + path);
-                files.push(...appFiles(fullPath, path + "/"));
-              } else {
-                assert(entry.isFile() && (runtimeFiles.has(path) || /^[A-Za-z0-9_.-]+\.dll$/i.test(path) ||
-                  /^locales\/[A-Za-z0-9-]+\.pak$/.test(path)), "Unexpected application file: " + path);
-                files.push("win-unpacked/" + path);
-              }
-            }
-            return files;
-          }
-
-          async function sha256(path) {
-            const hash = createHash("sha256");
-            for await (const chunk of createReadStream(path)) hash.update(chunk);
-            return hash.digest("hex");
-          }
-
-          async function verify() {
-            assert(lstatSync(app).isDirectory(), "Missing unpacked application directory");
-            assert(!readdirSync(root).some(name => /\.(?:exe|msi|msix|appx)$/i.test(name)), "Unexpected installer output");
-            assert.equal(require("electron/package.json").version, electronVersion);
-            assert(process.env.MVP_ELECTRON_FILE_VERSION === electronVersion ||
-              process.env.MVP_ELECTRON_FILE_VERSION === electronVersion + ".0", "Packaged Electron version differs from the lock");
-            const archive = join(app, "resources", "app.asar");
-            for (const file of [executable, "resources/app.asar", "resources/recovery-io.exe", "resources.pak", "icudtl.dat", "ffmpeg.dll",
-              "chrome_100_percent.pak", "chrome_200_percent.pak", "v8_context_snapshot.bin", "locales/en-US.pak"]) {
-              requireFile(join(app, file));
-            }
-            verifyExecutable(join(app, executable));
-            const helper = join(app, "resources", "recovery-io.exe");
-            verifyExecutable(helper);
-            assert(readFileSync(helper).equals(readFileSync(join("build", "recovery-io.exe"))), "Recovery helper differs from CI build.");
-            verifyAsar(archive);
-            const files = appFiles(app).sort();
-            writeFileSync(join(root, "build-info.json"), JSON.stringify({
-              sourceCommit: process.env.MVP_HEAD_SHA,
-              platform: "win32",
-              architecture: "x64",
-              electronVersion,
-              electronBuilderVersion: lock.packages["node_modules/electron-builder"].version,
-              runId: process.env.GITHUB_RUN_ID,
-              runAttempt: process.env.GITHUB_RUN_ATTEMPT,
-              applicationFiles: files.length,
-            }, null, 2) + "\n", { flag: "wx" });
-            const sums = [];
-            for (const file of ["build-info.json", "deploy/Production-Admission.ps1", ...files]) {
-              sums.push(await sha256(join(root, file)) + " *" + file);
-            }
-            writeFileSync(join(root, "SHA256SUMS.txt"), sums.join("\n") + "\n", { flag: "wx" });
-            console.log("Verified " + files.length + " application files for " + process.env.MVP_HEAD_SHA);
-          }
-
-          verify().catch(error => { console.error(error); process.exitCode = 1; });
-          '@ | node -
+          node scripts/verify-portable.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Portable application verification failed.' }
           "root=$root" >> $env:GITHUB_OUTPUT
           "kind=$kind" >> $env:GITHUB_OUTPUT
       - name: Smoke-test packaged Electron on an isolated profile
         run: node scripts/smoke-electron.cjs (Join-Path '${{ steps.portable.outputs.root }}' 'win-unpacked/SupervisorWorkspace-MVP.exe')
-      - name: Upload the MVP desktop preview
-        if: steps.portable.outcome == 'success'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: supervisor-workspace-${{ steps.portable.outputs.kind }}-win-x64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ steps.portable.outputs.root }}/win-unpacked
-            ${{ steps.portable.outputs.root }}/SHA256SUMS.txt
-            ${{ steps.portable.outputs.root }}/build-info.json
-            ${{ steps.portable.outputs.root }}/deploy/Production-Admission.ps1
-          if-no-files-found: error
-          retention-days: 7
