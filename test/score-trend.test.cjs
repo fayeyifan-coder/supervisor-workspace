@@ -172,6 +172,27 @@ test('custom comparison uses only selected current-student records in the filter
 test('a thousand exams remain accessible without mutating raw values or identities',()=>{
  const rows=Array.from({length:1000},(_,i)=>row('large-'+i));const before=JSON.stringify(rows);const v=trend(rows,'student-a');assert.equal(v.points.length,1000);assert.equal(new Set(v.points.map(p=>p.record.id)).size,1000);assert.equal(JSON.stringify(rows),before);
 });
+
+test('recent 12 and 30 use the latest filtered exam dates, retain same-day identities and keep all-history default',()=>{
+ const rows=Array.from({length:40},(_,i)=>({...row('recent-'+String(i).padStart(2,'0'),{takenOn:i<10?'2025-12-31':'2026-01-01'}),savedAt:i}));
+ const original=JSON.stringify(rows);
+ for(const recent of [12,30]){
+  const v=trend([...rows].reverse(),'student-a','','',{recent});
+  assert.equal(v.rangeTotal,40);assert.equal(v.points.length,recent);
+  assert.deepEqual(v.points.map(p=>p.record.id),rows.slice(-recent).map(r=>r.id));
+ }
+ assert.equal(trend(rows,'student-a').points.length,40);
+ assert.equal(trend(rows,'student-a','','',{to:'2025-12-31',recent:12}).points.length,10);
+ assert.equal(JSON.stringify(rows),original);
+});
+
+test('zero comparison participants never imply different maxima',()=>{
+ const rows=[row('a'),row('b',{maximum:'150',score:'120'})];
+ const none=trend(rows,'student-a','','',{selectedIds:[]});
+ assert.equal(none.total,2);assert.equal(none.points.length,0);assert.equal(none.mixedMaxima,false);assert.equal(none.maximum,null);
+ assert.equal(trend(rows,'student-a').mixedMaxima,true);
+ assert.equal(trend(rows,'student-a','','',{selectedIds:['a']}).mixedMaxima,false);
+});
 test('history list pagination never truncates the plotted filtered history',async()=>{
  const rows=Array.from({length:200},(_,i)=>row('page-'+i));
  const html=renderToStaticMarkup(React.createElement(await component(),{records:rows,studentId:'student-a'}));

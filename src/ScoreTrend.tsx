@@ -13,11 +13,13 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
   const [compare, setCompare] = useState(false);
   const [selection, setSelection] = useState<{ id: string; revision: number }[]>([]);
   const [page, setPage] = useState(0);
+  const [recent, setRecent] = useState<12 | 30>();
   if (owner !== studentId) {
     setOwner(studentId); setSubject(""); setCategory(""); setMode("rate"); setResetNotice("");
     setFrom(""); setTo(""); setCompare(false); setSelection([]); setPage(0);
+    setRecent(undefined);
   }
-  const view = scoreTrend(records, studentId, subject, category, { from, to, selectedIds: compare ? selection.map(row => row.id) : undefined });
+  const view = scoreTrend(records, studentId, subject, category, { from, to, recent, selectedIds: compare ? selection.map(row => row.id) : undefined });
   const currentSelection = selection.flatMap(item => {
     const row = view.filtered.find(record => record.id === item.id);
     return row ? [{ id: row.id, revision: row.revision }] : [];
@@ -90,6 +92,10 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
       <label>开始日期（含）<input type="date" aria-label="开始日期" value={from} onChange={event => { setFrom(event.target.value); setPage(0); }} /></label>
       <label>结束日期（含）<input type="date" aria-label="结束日期" value={to} onChange={event => { setTo(event.target.value); setPage(0); }} /></label>
       <button type="button" onClick={() => { setFrom(""); setTo(""); setCategory(""); setPage(0); }}>清除时间及类别筛选</button>
+      <div className="retry-actions" role="group" aria-label="成绩快捷范围">
+        {([12, 30, undefined] as const).map(value => <button type="button" key={value ?? "all"} aria-pressed={recent === value}
+          onClick={() => { setRecent(value); setPage(0); }}>{value ? `最近${value}次` : "全部成绩"}</button>)}
+      </div>
       <label className="score-compare-toggle"><input type="checkbox" checked={compare} onChange={event => setCompare(event.target.checked)} />自定义考试对比</label>
     </div>
     {resetNotice && <p role="status">{resetNotice}</p>}
@@ -98,7 +104,8 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
     {view.invalidCount > 0 && <p role="status">{view.invalidCount} 条成绩缺少有效的学科、类别、日期或分数，未参与趋势；请核对原始记录。</p>}
     {!view.total ? <p role="status">{!view.subjects.length ? "暂无可用成绩，请先录入有效成绩。" : "当前学科和考试类别下没有成绩，请调整筛选。"}暂无可比较记录。</p> : <>
       <p className="muted">{view.subject} · {view.category || "全部类别"} · {mode === "rate" ? "得分率 = 得分 ÷ 满分" : `原始分数，满分 ${view.maximum}`} · 按考试日期排序的考试序列（等间距不代表日期间隔） · 学科全部 {view.subjectTotal} 次 / 筛选 {view.total} 次 / 绘图 {view.points.length} 次</p>
-      {!view.rawAvailable && <p className="muted">满分不同，使用得分率观察，不比较原始分数差值。</p>}
+      {recent && <p className="muted">时间及类别筛选共 {view.rangeTotal} 次，当前查看最近 {recent} 次；按考试日期选取，同日合法记录独立保留。</p>}
+      {view.mixedMaxima && <p className="muted">满分不同，使用得分率观察，不比较原始分数差值。</p>}
       {view.points.length === 1 && <p role="status">仅有 1 条成绩，暂无可比较记录。</p>}
       <p className="muted">考试类别和难度可能不同；得分率变化仅供对照，不能据此判断学习能力提高或下降。</p>
       <div className="score-trend-plot"><canvas ref={canvas} width={720} height={250} data-point-count={view.points.length} aria-hidden="true" /></div>

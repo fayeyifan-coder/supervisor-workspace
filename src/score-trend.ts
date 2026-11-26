@@ -6,7 +6,7 @@ function validDate(value: string): boolean {
   const date = new Date(value + "T00:00:00Z");
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
-export interface TrendOptions { from?: string; to?: string; selectedIds?: readonly string[] }
+export interface TrendOptions { from?: string; to?: string; selectedIds?: readonly string[]; recent?: 12 | 30 }
 function valid(record: StudentRecord): boolean {
   const { subject, category, takenOn, score, maximum } = record.fields;
   if (!subject?.trim() || !category?.trim() || !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(takenOn ?? "") ||
@@ -28,15 +28,16 @@ export function scoreTrend(records: readonly StudentRecord[], studentId: string,
   const { from = "", to = "", selectedIds } = options;
   const rangeError = (from && !validDate(from)) || (to && !validDate(to))
     ? "请输入有效的起止日期。" : from && to && from > to ? "开始日期不能晚于结束日期。" : "";
-  const filtered = sameSubject.filter(record => !rangeError && (!effectiveCategory || record.fields.category === effectiveCategory) &&
+  const matched = sameSubject.filter(record => !rangeError && (!effectiveCategory || record.fields.category === effectiveCategory) &&
     (!from || record.fields.takenOn >= from) && (!to || record.fields.takenOn <= to))
     .sort((a, b) => a.fields.takenOn.localeCompare(b.fields.takenOn) || a.savedAt - b.savedAt || a.id.localeCompare(b.id));
+  const filtered = options.recent ? matched.slice(-options.recent) : matched;
   const selected = selectedIds === undefined ? undefined : new Set(selectedIds);
   const participating = filtered.filter(record => !selected || selected.has(record.id));
   const maxima = new Set(participating.map(record => Number(record.fields.maximum)));
   return { subjects, subject, categories, category: effectiveCategory, subjectChanged: Boolean(chosenSubject && chosenSubject !== subject),
-    subjectTotal: sameSubject.length, total: filtered.length, filtered, rangeError,
+    subjectTotal: sameSubject.length, rangeTotal: matched.length, total: filtered.length, filtered, rangeError,
     removedSelection: selectedIds?.filter(id => !filtered.some(record => record.id === id)) ?? [], invalidCount: own.length - usable.length,
-    rawAvailable: maxima.size === 1, maximum: participating.length ? Number(participating[0].fields.maximum) : null,
+    rawAvailable: maxima.size === 1, mixedMaxima: maxima.size > 1, maximum: participating.length ? Number(participating[0].fields.maximum) : null,
     points: participating.map(record => ({ record, rate: Number(record.fields.score) / Number(record.fields.maximum) * 100 })) };
 }
