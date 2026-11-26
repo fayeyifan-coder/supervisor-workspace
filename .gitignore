@@ -24,3 +24,13 @@ attachments/
 private-data/
 work/
 outputs/
+*.initialized
+restore.ready
+activation.approved
+profile-selection-v1.json
+student-write.*
+operations-request.*
+last-verified-backup-v1.txt
+.backup-status-*
+diagnostics*.jsonl
+Logs/

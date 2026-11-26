@@ -37,6 +37,14 @@ test('unreviewed binary and LFS pointers fail closed', () => {
  assert(inspect('note.txt',Buffer.from([1,0,2])).some(f => f.rule === 'UNREVIEWED_BINARY'));
  assert(inspect('note.txt',Buffer.from('version https://git-lfs.github.com/spec/v1\noid sha256:0')).some(f => f.rule === 'UNINSPECTED_LFS_OBJECT'));
 });
+
+test('initialization, recovery, pending journals and rotated diagnostics are ignored and blocked when forced', () => {
+ const names=['mvp.initialized','restore.ready','activation.approved','profile-selection-v1.json','student-write.pending','student-write.json','operations-request.guard','last-verified-backup-v1.txt','.backup-status-synthetic','diagnostics.jsonl','diagnostics.2.jsonl'];
+ for(const name of names) assert(inspect(name,Buffer.from('synthetic')).some(f=>f.rule==='PRIVATE_PROFILE_STATE'));
+ const ignored=execFileSync('git',['check-ignore','--no-index','--stdin'],{cwd:path.join(__dirname,'..'),input:names.join('\n')+'\n',encoding:'utf8'}).trim().split(/\r?\n/);
+ assert.deepEqual(ignored,names);
+ assert.equal(inspect('src/profile-activation.ts',Buffer.from('source')).length,0);
+});
 test('findings never repeat secret contents or a private filename', () => {
  const value=secret();const file=['Private','Student','Record'].join('')+'.txt';const result=JSON.stringify(inspect(file,Buffer.from(value)));
  assert(!result.includes(value));assert(!result.includes(file));assert(result.includes('fileId'));

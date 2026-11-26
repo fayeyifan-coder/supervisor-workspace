@@ -2,7 +2,7 @@
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
-const privatePath = /(^|\/)(?:profiles?|backups?|imports?|exports?|attachments?|private-data|work|outputs|release|dist|build|node_modules)(?:\/|$)/i;
+const privatePath = /(^|\/)(?:profiles?|backups?|imports?|exports?|attachments?|private-data|logs?|work|outputs|release|dist|build|node_modules)(?:\/|$)/i;
 const forbiddenExtension = /\.(?:sqlite(?:3)?(?:-(?:wal|shm|journal))?|db(?:-(?:wal|shm|journal))?|swbackup|swback|docx?|xlsx?|xlsm|csv|pdf|zip|7z|tar|gz|pem|p12|pfx|key)$/i;
 const mediaExtension = /\.(?:png|jpe?g|webp|gif|bmp|svg|json)$/i;
 const configJson = new Set(['package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.main.json', 'test/fixtures/manifest.json']);
@@ -28,6 +28,7 @@ function inspect(name, bytes, manifest = {}, mode = '100644') {
  if (mode === '120000' || mode === '160000') add('EXTERNAL_REFERENCE');
  if (privatePath.test(normalized) || /(^|\/)(?:\.env(?:\..*)?|id_(?:rsa|ed25519)|credentials(?:\..*)?)$/i.test(normalized)) add('PRIVATE_PATH_OR_FILE');
  if (forbiddenExtension.test(normalized)) add('PRIVATE_FILE_TYPE');
+ if (/(?:\.initialized$|(?:^|\/)(?:restore\.ready|activation\.approved|profile-selection-v1\.json|student-write\..+|operations-request\..+|last-verified-backup-v1\.txt|\.backup-status-.+|diagnostics(?:\.\d+)?\.jsonl)$)/i.test(normalized)) add('PRIVATE_PROFILE_STATE');
  if (bytes.subarray(0, 16).equals(Buffer.from('SQLite format 3\0')) || bytes.subarray(0, 8).equals(Buffer.from('SWBACK2\n')) || bytes.subarray(0, 8).equals(Buffer.from('SWBACK1\n')) || bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4]))) add('PRIVATE_CONTAINER_MAGIC');
  const entry = manifest.entries?.[normalized];
  const needsReview = mediaExtension.test(normalized) && !configJson.has(normalized);
