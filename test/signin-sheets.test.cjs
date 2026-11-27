@@ -150,6 +150,7 @@ test("weekday preview defaults to unconfirmed flexible candidates, combines sour
   const workbook = new Excel.Workbook();
   await workbook.xlsx.load(await signinWorkbook(await fakeSigninTemplate("weekday"),preview));
   const sheet = workbook.worksheets[0];
+  assert.equal(sheet.getCell("G3").value, "名单来源");
   for (const [student, code] of [[combined,"规"],[flexOnly,"候"],[manual,"补"]]) {
     const item = preview.groups[0].members.findIndex(row=>row.studentId===student.id) + 5;
     assert.equal(sheet.getCell(item,7).value.split(" ")[0],code);

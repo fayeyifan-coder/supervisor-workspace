@@ -168,7 +168,7 @@ export async function signinWorkbook(template: Buffer, preview: SigninPreview): 
     const sourceCodes: Record<SigninSource, string> = {appointment: "排", rule: "规", flex: "候", manual: "补"};
     if (isWeekday) {
       sheet.mergeCells("G3:G4");
-      sheet.getCell("G3").value = "来源（按日期）";
+      sheet.getCell("G3").value = "名单来源";
     }
     sheet.getCell("A1").value = signinLabels[preview.input.kind];
     sheet.getCell("A2").value = preview.input.period + " · " + group.label + " · " + (isWeekday
