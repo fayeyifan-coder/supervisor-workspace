@@ -7,7 +7,7 @@ import { operationsProtectionFor, verifyOperationsStudentLinks, type OperationsL
 import { currentRules, dateApplies, persistCycleRule, persistScheduleHours, rangeFitsHours,
   recurringConfiguration, scheduleCommand, stableScheduleId, storedScheduleHours,
   type CycleKind, type CycleResult, type DayException, type DayExceptionAction, type FlexWindow, type GenerationResult, type ScheduleConfiguration, type ScheduleOrigin } from "./recurring-schedule";
-import { minute, openingHours, shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
+import { isExpectedVisit, minute, openingHours, shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
 
 export { operationsProtection, verifyOperationsStudentLinks } from "./operations-schema";
 
@@ -344,6 +344,40 @@ export class OperationsDatabase {
       }
     }
     return pending.sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.id.localeCompare(b.id));
+  }
+
+  // Print previews use recorded plans first. Future occurrences can be previewed without creating attendance rows.
+  plannedSigninVisits(from: string, to: string, now = Date.now()) {
+    if (!this.flexibilityEnabled) recovery("当前档案尚未启用签到表。");
+    const range = scheduleCommand({ action: "generate", from, to });
+    if (range.action !== "generate") invalid("签到表日期无效。");
+    const fromAt = shanghaiMinute(range.from, "00:00")!, toAt = shanghaiMinute(shiftDate(range.to, 1), "00:00")!;
+    const plans = this.listAttendancePlans(fromAt, toAt);
+    const visits = plans.filter(isExpectedVisit).map(({ studentId, startAt, endAt }) => ({ studentId, startAt, endAt }));
+    const occupying = plans.filter(plan => plan.status !== "cancelled" && plan.status !== "absent")
+      .map(({ studentId, startAt, endAt }) => ({ studentId, startAt, endAt }));
+    const conflicts: { studentId: string; startAt: number; endAt: number }[] = [];
+    const active = new Set(this.m1.students().filter(row => row.lifecycleStatus === "active").map(row => row.id));
+    const config = this.scheduleConfiguration();
+    const originExists = this.db.prepare("SELECT 1 FROM schedule_origins WHERE plan_id=?");
+    for (const rule of currentRules(config.rules)) {
+      if (rule.kind === "flex" || rule.paused || !active.has(rule.studentId)) continue;
+      for (let date = range.from; date <= range.to; date = shiftDate(date, 1)) {
+        for (const slot of rule.slots.filter(item => dateApplies(rule, date, item))) {
+          const startAt = shanghaiMinute(date, slot.start)!, endAt = shanghaiMinute(date, slot.end)!;
+          if (startAt <= now || originExists.get(stableScheduleId("plan", rule.id, slot.id, date))) continue;
+          const visit = { studentId: rule.studentId, startAt, endAt };
+          if (!rangeFitsHours(startAt, endAt, config.hours) ||
+            occupying.some(plan => plan.studentId === rule.studentId && plan.startAt < endAt && plan.endAt > startAt)) {
+            conflicts.push(visit);
+          } else {
+            visits.push(visit);
+            occupying.push(visit);
+          }
+        }
+      }
+    }
+    return { visits, conflicts };
   }
 
   private recordException(change: ChangeInput, action: DayExceptionAction, reason: string, now: number) {

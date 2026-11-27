@@ -3,6 +3,7 @@ import type { AttendancePlan, Failure, LearningDayInput, ScheduleSaveInput, Stud
 import { attendanceCounts, attendanceSummary, minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange, type ScheduleHours } from "./schedule-calendar";
 import type { FlexWindow, ScheduleConfiguration } from "./recurring-schedule";
 import { FlexibleWindowCard, WalkInForm } from "./ScheduleArrivals";
+import { SigninSheetPanel } from "./SigninSheetPanel";
 import { RecurringSchedulePanel } from "./RecurringSchedulePanel";
 import { AttendanceLearningPanel } from "./AttendanceLearningPanel";
 import { usePendingOperation } from "./use-pending-operation";
@@ -290,6 +291,7 @@ export function WeeklySchedulePanel({ api, recurringEnabled, flexEnabled, studen
     {summary}
     {recurringEnabled && <RecurringSchedulePanel api={api} configuration={configuration} students={students} week={week}
       studentId={studentId} flexEnabled={flexEnabled} blocked={busy || request.blocked} onChanged={refresh} />}
+    {flexEnabled && <SigninSheetPanel api={api} students={students} studentId={studentId} day={day} />}
     {flexEnabled && <WalkInForm api={api} students={students} initial={studentId} blocked={busy || request.blocked} onSaved={onVisit} />}
     <div className="schedule-toolbar">
       <div className="schedule-period">

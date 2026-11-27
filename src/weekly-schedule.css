@@ -77,3 +77,12 @@
 .recurring-editor fieldset > label { margin-block: 6px; }
 
 .flex-window { display: grid; gap: 4px; padding: 8px; border: 1px dashed var(--line); border-radius: 6px; }
+
+.signin-panel { margin-block: 12px; }
+.signin-panel fieldset { border: 0; padding: 0; margin: 12px 0; }
+.signin-preview, .signin-group { display: grid; gap: 12px; margin-block: 14px 0; }
+.signin-table { max-height: 24rem; overflow: auto; }
+.signin-table table { border-collapse: collapse; width: 100%; }
+.signin-table :is(th, td) { padding: 8px 12px; border-bottom: 1px solid #d6dce2; text-align: center; white-space: nowrap; }
+.signin-table th:first-child { text-align: left; }
+.signin-table input[type=checkbox] { margin: 0; width: 16px; height: 16px; }

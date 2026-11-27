@@ -26,6 +26,8 @@ import { readBackupStatus, recordSuccessfulBackup } from "./backup-status";
 import { Diagnostics, sqliteErrorCode } from "./diagnostics";
 import { BusinessExportPlans } from "./business-export";
 import { BusinessExportFiles, requireExportDestination } from "./business-export-files";
+import { adjustSigninPlan, loadSigninTemplate, readSigninPlan, signinPlanKey, signinWorkbook, writeSigninFile } from "./signin-sheets";
+import { signinLabels } from "./signin-calendar";
 import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, studentServicesVersion, originalProfileSegments, readActivation, recoveryName, restoredStudentVersion, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
@@ -497,6 +499,36 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     try { recordSuccessfulBackup(profile, new Date()); }
     catch (error) { diagnostics?.record("protection:backup-status", "failed", sqliteErrorCode(error)); }
     return result;
+  }));
+  handle(channels.previewSignin, (event, input: unknown) => invokeSchedule(event, (store, students) => {
+    if (state.pending) throw new WorkspaceFault("busy", "当前档案即将切换，请重新打开课表。");
+    const preview = readSigninPlan(store, students(), input);
+    return { preview, key: signinPlanKey(preview) };
+  }));
+  handle(channels.exportSignin, (event, raw: unknown) => protect(event, async () => {
+    const store = operations, m1 = database;
+    if (!store?.flexibilityEnabled || !m1 || state.pending || operationsPending.state().kind !== "empty") {
+      throw new WorkspaceFault("recovery", "请先核对未决教务操作，再导出签到表。");
+    }
+    const { input, changes, key } = scheduleObject(raw);
+    const students = m1.students();
+    const preview = readSigninPlan(store, students, input);
+    if (key !== signinPlanKey(preview)) throw new WorkspaceFault("conflict", "预计名单已变化，请重新预览并核对。");
+    adjustSigninPlan(preview, students, changes);
+    const filter = [{ name: "Excel 工作簿", extensions: ["xlsx"] }];
+    const source = await dialog.showOpenDialog(window, { title: "选择本机签到表原始模板", properties: ["openFile"], filters: filter });
+    if (source.canceled) return null;
+    const destination = await dialog.showSaveDialog(window, { title: "保存预计签到表", filters: filter,
+      defaultPath: join(production?.exports ?? "D:\\Codex-Development\\Exports", signinLabels[preview.input.kind] + "-" + preview.input.period + ".xlsx") });
+    if (destination.canceled || !destination.filePath) return null;
+    if (!isTrusted(event, window)) throw new WorkspaceFault("conflict", "工作窗口已变化，请重新预览。");
+    const output = destination.filePath;
+    if (production && isWithin(production.root, output) && !isWithin(production.exports, output)) {
+      throw new WorkspaceFault("invalid", "请选择正式档案和程序以外的导出位置。");
+    }
+    requireExportDestination(dirname(output), exportForbiddenRoots());
+    const content = await signinWorkbook(await loadSigninTemplate(source.filePaths[0]), preview);
+    return writeSigninFile(output, content, preview, exportForbiddenRoots());
   }));
   handle(channels.prepareBusinessExport, (event, input: {includeSourceText: boolean}) => protect(event, async () => {
     if (!input || typeof input.includeSourceText !== "boolean" || Object.keys(input).join(",") !== "includeSourceText") throw new WorkspaceFault("invalid", "请选择本次全量导出范围。");

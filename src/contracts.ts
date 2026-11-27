@@ -31,6 +31,8 @@ export const channels = {
   saveStudentIntake: "m2c:save-student-intake",
   studentIntakeHistory: "m2c:student-intake-history",
   exportProtection: "m2d:export",
+  previewSignin: "r3:preview-signin",
+  exportSignin: "r3:export-signin",
   prepareBusinessExport: "m2e:prepare-export",
   writeBusinessExport: "m2e:write-export",
   cancelBusinessExport: "m2e:cancel-export",
@@ -185,6 +187,8 @@ export interface WorkspaceInfo {
 }
 
 export interface WorkspaceApi {
+  previewSignin(input: import("./signin-calendar").SigninInput): Promise<Result<{preview: import("./signin-calendar").SigninPreview; key: string}>>;
+  exportSignin(input: {input: import("./signin-calendar").SigninInput; key: string; changes: import("./signin-calendar").SigninChange[]}): Promise<Result<import("./signin-calendar").SigninResult | null>>;
   prepareBusinessExport(input: {includeSourceText: boolean}): Promise<Result<import("./business-export").BusinessExportPreview>>;
   writeBusinessExport(token: string): Promise<Result<import("./business-export").BusinessExportResult | null>>;
   cancelBusinessExport(token: string): Promise<Result<null>>;

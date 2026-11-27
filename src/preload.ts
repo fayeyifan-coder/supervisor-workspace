@@ -22,6 +22,8 @@ const api: WorkspaceApi = {
     ipcRenderer.invoke("r2b:acknowledge-operation", requestId, reviewed),
   students: () => ipcRenderer.invoke("mvp:students"),
   exportProtection: () => ipcRenderer.invoke("m2d:export"),
+  previewSignin: input => ipcRenderer.invoke("r3:preview-signin", input),
+  exportSignin: input => ipcRenderer.invoke("r3:export-signin", input),
   prepareBusinessExport: input => ipcRenderer.invoke("m2e:prepare-export", input),
   writeBusinessExport: token => ipcRenderer.invoke("m2e:write-export", token),
   cancelBusinessExport: token => ipcRenderer.invoke("m2e:cancel-export", token),
