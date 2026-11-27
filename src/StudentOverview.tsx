@@ -70,8 +70,11 @@ export function StudentOverview({ api, studentId, openSource, openVisit }: {
       {view.attendance.length ? <ul>{view.attendance.map(row => {
         const start = shanghaiParts(row.startAt);
         return <li key={row.id}><button className="schedule-profile-link" type="button" onClick={event =>
-          openVisit({ studentId, attendanceId: row.id }, event.currentTarget)}>{start.date} · {start.time}–{shanghaiParts(row.endAt).time}</button></li>;
+          openVisit({ studentId, attendanceId: row.id }, event.currentTarget)}>{start.date} · {start.time}–{shanghaiParts(row.endAt).time}{row.cycleKind && " · " +
+            ({ long_term: "长期在校", fixed: "固定到课", flex: "弹性已预约" }[row.cycleKind])}</button></li>;
       })}</ul> : <p className="muted">近期预计到课尚未登记。</p>}
+      {Boolean(view.flexWindows?.length) && <ul aria-label="近期弹性窗口">{view.flexWindows?.map(row => <li key={row.id}>
+        {row.date} · {row.start}–{row.end} · 弹性待确认 · 预计 {row.durationMinutes} 分钟</li>)}</ul>}
       {view.tasks.length ? <ul>{view.tasks.map(task => <li key={task.id}><button className="schedule-profile-link" type="button" onClick={event =>
         openVisit({ studentId, attendanceId: task.visitId }, event.currentTarget, task.id)}>
         {task.subject ? task.subject + " · " : ""}{task.content}</button><p className="muted">{shanghaiParts(task.at).date} · {task.status === "in_progress" ? "进行中" : "待开始"}</p></li>)}</ul>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import type { AttendancePlan, Failure, LearningDayInput, ScheduleSaveInput, Student, WorkspaceApi } from "./contracts";
-import { attendanceCounts, minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange, type ScheduleHours } from "./schedule-calendar";
+import { attendanceCounts, attendanceSummary, minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange, type ScheduleHours } from "./schedule-calendar";
 import type { FlexWindow, ScheduleConfiguration } from "./recurring-schedule";
 import { FlexibleWindowCard, WalkInForm } from "./ScheduleArrivals";
 import { RecurringSchedulePanel } from "./RecurringSchedulePanel";
@@ -247,7 +247,9 @@ export function WeeklySchedulePanel({ api, recurringEnabled, flexEnabled, studen
   for (const plan of current?.rows ?? []) plansByDay.get(shanghaiParts(plan.startAt).date)?.push(plan);
   const hasMonday = Boolean(plansByDay.get(week)?.length || configuration?.hours[1].length);
   const shownDays = mode === "day" ? [day] : hasMonday ? days : days.slice(1);
-  const listed = attendanceCounts(shownDays.flatMap(date => plansByDay.get(date) ?? []));
+  const displayedPlans = shownDays.flatMap(date => plansByDay.get(date) ?? []);
+  const listed = attendanceCounts(displayedPlans);
+  const totals = attendanceSummary(displayedPlans);
   const readOnly = Boolean(draft?.original && !canEdit(draft.original));
   const exception = draft && outsideHours(draft, configuration?.hours);
 
@@ -337,14 +339,14 @@ export function WeeklySchedulePanel({ api, recurringEnabled, flexEnabled, studen
         </label>
         <label>到校日期<input required type="date" value={draft.date} onChange={event => {
           const date = event.target.value;
-          changeWindow({ date, ...(!draft.original && shanghaiMinute(date, "00:00") !== null ? defaults(date, draft.kind) : {}) });
+          changeWindow({ date, ...(!draft.original && shanghaiMinute(date, "00:00") !== null ? defaults(date, draft.kind, configuration?.hours) : {}) });
         }} /></label>
         <label>开始时间<input required type="time" value={draft.start} onChange={event => changeWindow({ start: event.target.value })} /></label>
         <label>结束时间<input required type="time" value={draft.end} onChange={event => changeWindow({ end: event.target.value })} /></label>
         <label>到校类型
           <select value={draft.kind} onChange={event => {
             const kind = event.target.value === "whole_day" ? "whole_day" : "regular";
-            changeWindow({ kind, ...(!draft.original && shanghaiMinute(draft.date, "00:00") !== null ? defaults(draft.date, kind) : {}) });
+            changeWindow({ kind, ...(!draft.original && shanghaiMinute(draft.date, "00:00") !== null ? defaults(draft.date, kind, configuration?.hours) : {}) });
           }}>
             <option value="regular">普通</option><option value="whole_day">全天</option>
           </select>
@@ -374,18 +376,19 @@ export function WeeklySchedulePanel({ api, recurringEnabled, flexEnabled, studen
       {current.error} <button type="button" className="secondary" onClick={refresh}>重新读取</button>
     </div>}
     {current?.rows && <p className="muted schedule-counts" aria-live="polite">
-      排课 {listed.students} 人 · {listed.visits} 人次（含取消）
+      {flexEnabled ? <>预计 {totals.expected.students} 人 · {totals.expected.visits} 次；实际 {totals.actual.students} 人 · {totals.actual.visits} 次；在校 {totals.onsiteMinutes} 分钟（已签退）</>
+        : <>排课 {listed.students} 人 · {listed.visits} 人次（含取消）</>}
     </p>}
     <div className={"schedule-days" + (mode === "day" ? " schedule-single-day" : hasMonday ? " schedule-days-extra" : "")}>
       {shownDays.map(date => {
         const day = weekday(date);
-        const hours = openingHours(date);
+        const hours = windowsOf(date, configuration?.hours);
         const plans = plansByDay.get(date)!;
         return <section key={date} className={"schedule-day" + (day === 0 || day === 6 ? " schedule-weekend" : "")}
           aria-label={dayNames[day] + " " + date}>
           <header className="schedule-day-heading" aria-current={date === today ? "date" : undefined}>
             <h2>{dayNames[day]} <time dateTime={date}>{date.slice(5).replace("-", "/")}</time></h2>
-            <p>{hours ? hours.start + "–" + hours.end : "周一默认停排 · 仅显示例外"}</p>
+            <p>{hours.length ? hours.map(slot => slot.start + "–" + slot.end).join(" / ") : "未配置营业时段 · 仅显示例外"}</p>
           </header>
           {windows.some(window => window.date === date) && <ul className="schedule-card-list" aria-label="待确认弹性窗口">
             {windows.filter(window => window.date === date).map(window => <FlexibleWindowCard key={window.id} api={api} window={window}

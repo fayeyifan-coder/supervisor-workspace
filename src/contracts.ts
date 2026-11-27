@@ -138,9 +138,10 @@ export interface LearningDayInput {
   studentId: string;
 }
 
-export type AttendanceBoardStatus = "upcoming" | "unchecked" | "checked_in" | "learning" | "checked_out" | "absent" | "cancelled";
+export type AttendanceBoardStatus = "upcoming" | "unchecked" | "checked_in" | "learning" | "checked_out" | "absent" | "cancelled" | "leave";
 export interface AttendanceBoardDay {
   date: string;
+  flexWindows?: import("./recurring-schedule").FlexWindow[];
   entries: { plan: AttendancePlan; status: AttendanceBoardStatus }[];
 }
 

@@ -5,8 +5,37 @@ export function attendanceCounts(plans: readonly { studentId: string }[]): { stu
   return { students: new Set(plans.map(plan => plan.studentId)).size, visits: plans.length };
 }
 
-export function isLateArrival(plan: { startAt: number; checkInAt: number | null }): boolean {
-  return plan.checkInAt !== null && Math.floor(plan.checkInAt / minute) > Math.floor(plan.startAt / minute);
+export function isExpectedVisit(plan: { actualOnly?: boolean; status: string }): boolean {
+  return !plan.actualOnly && plan.status !== "cancelled";
+}
+
+export function attendanceSummary(plans: readonly {
+  studentId: string; status: string; actualOnly?: boolean; checkInAt: number | null; checkOutAt: number | null;
+}[]) {
+  const actual = plans.filter(plan => plan.checkInAt !== null);
+  const perStudent = new Map<string, { start: number; end: number }[]>();
+  let open = 0;
+  for (const { studentId, checkInAt, checkOutAt } of actual) {
+    if (checkOutAt === null) { open++; continue; }
+    if (checkInAt === null || checkOutAt < checkInAt) continue;
+    const intervals = perStudent.get(studentId) ?? [];
+    intervals.push({ start: checkInAt, end: checkOutAt });
+    perStudent.set(studentId, intervals);
+  }
+  let elapsed = 0;
+  for (const intervals of perStudent.values()) {
+    let last = -Infinity;
+    for (const { start, end } of intervals.sort((a, b) => a.start - b.start)) {
+      elapsed += Math.max(0, end - Math.max(start, last));
+      last = Math.max(last, end);
+    }
+  }
+  return { expected: attendanceCounts(plans.filter(isExpectedVisit)), actual: attendanceCounts(actual),
+    open, onsiteMinutes: Math.floor(elapsed / minute), effectiveLearningMinutes: null };
+}
+
+export function isLateArrival(plan: { startAt: number; checkInAt: number | null; actualOnly?: boolean }): boolean {
+  return !plan.actualOnly && plan.checkInAt !== null && Math.floor(plan.checkInAt / minute) > Math.floor(plan.startAt / minute);
 }
 const institution = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",

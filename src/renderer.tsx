@@ -441,7 +441,7 @@ function App() {
         </section>} />
     </div>}
     {scheduleEnabled && students && <div hidden={page !== "board" || Boolean(learning)}>
-      <AttendanceBoard result={attendance.result} reload={attendance.reload} students={students}
+      <AttendanceBoard api={api} result={attendance.result} reload={attendance.reload} students={students}
         onStudent={(id, trigger) => openLinkedStudent(id, "board", trigger)} onLearning={openLearning} />
     </div>}
     <div className="workspace" hidden={!showingWorkspace || Boolean(learning)}>

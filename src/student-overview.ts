@@ -2,6 +2,7 @@ import type { AttendancePlan, LearningBlock, Lesson } from "./contracts";
 import type { GrowthProfileView } from "./growth-profile";
 import type { ParentFollowUpView } from "./parent-follow-up";
 import type { StudentRecord } from "./student-records";
+import type { FlexWindow } from "./recurring-schedule";
 import { scoreRank, scoreTrend } from "./score-trend";
 
 export interface OverviewSources {
@@ -12,11 +13,12 @@ export interface OverviewSources {
   history: Lesson[];
   visits: { plan: AttendancePlan; blocks: LearningBlock[] }[];
   now: number;
+  flexWindows?: FlexWindow[];
 }
 
 export type StudentOverviewData = ReturnType<typeof summarizeStudentOverview>;
 
-export function summarizeStudentOverview({ studentId, concerns, scores, growth, history, visits, now }: OverviewSources) {
+export function summarizeStudentOverview({ studentId, concerns, scores, growth, history, visits, now, flexWindows }: OverviewSources) {
   const followUps = concerns.studentId === studentId ? concerns.concerns.filter(row => row.studentId === studentId).map(row => {
     const latest = row.followUps.find(item => item.studentId === studentId && item.concernId === row.requestId);
     return { id: row.requestId, concern: row.concern, status: latest?.status ?? "open" as const,
@@ -40,8 +42,9 @@ export function summarizeStudentOverview({ studentId, concerns, scores, growth, 
   const situation = growth.studentId === studentId ? growth.currentSituation : "";
   const ownVisits = visits.filter(({ plan }) => plan.studentId === studentId && (plan.status === "planned" || plan.status === "confirmed" ||
     (plan.status === "attended" && plan.checkOutAt === null)));
-  const attendance = ownVisits.filter(({ plan }) => plan.status !== "attended" && plan.endAt > now)
-    .slice(0, 3).map(({ plan }) => ({ id: plan.id, startAt: plan.startAt, endAt: plan.endAt }));
+  const attendance = ownVisits.filter(({ plan }) => !plan.actualOnly && plan.status !== "attended" && plan.endAt > now)
+    .slice(0, 3).map(({ plan }) => ({ id: plan.id, startAt: plan.startAt, endAt: plan.endAt,
+      ...(plan.cycleKind ? { cycleKind: plan.cycleKind } : {}) }));
   const tasks = ownVisits.flatMap(({ plan, blocks }) => blocks
     .filter(block => block.studentId === studentId && block.attendancePlanId === plan.id && (block.status === "planned" || block.status === "in_progress"))
     .flatMap(block => block.tasks.filter(task => task.status === "planned" || task.status === "in_progress")
@@ -50,5 +53,6 @@ export function summarizeStudentOverview({ studentId, concerns, scores, growth, 
   const latestAction = history.find(row => row.studentId === studentId && row.nextStep.trim());
   const nextAction = latestAction ? { id: latestAction.id, text: latestAction.nextStep, date: latestAction.date } : undefined;
   return { studentId, concerns: selectedConcerns, openConcerns: outstanding.length, recentScore, recentTrend,
-    goals, situation, attendance, tasks, nextAction };
+    goals, situation, attendance, tasks, nextAction,
+    ...(flexWindows ? { flexWindows: flexWindows.filter(row => row.studentId === studentId).slice(0, 3) } : {}) };
 }

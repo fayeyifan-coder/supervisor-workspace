@@ -274,7 +274,8 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     const visits = ops.listAttendancePlans(start, end, studentId).map(plan =>
       ({ plan, blocks: ops.learningBlocksForAttendance(plan.id) }));
     return summarizeStudentOverview({ studentId, concerns, visits, now, scores: store.studentRecords("score", studentId).records,
-      growth: growth.load(studentId), history: store.history(studentId) });
+      growth: growth.load(studentId), history: store.history(studentId),
+      flexWindows: ops.flexibilityEnabled ? ops.flexWindows(date, shiftDate(date, 13), studentId) : undefined });
   }));
   handleWrite(channels.saveStudentLifecycle, (event, raw: unknown) => invoke(event, store => {
     const command = store.studentWriteCommand("lifecycle", raw);

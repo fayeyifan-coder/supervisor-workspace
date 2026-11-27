@@ -34,6 +34,7 @@ export function readLearningDay(store: OperationsDatabase, students: StudentList
 }
 
 function boardStatus(plan: AttendancePlan, now: number, activeLearning: () => boolean): AttendanceBoardStatus {
+  if (plan.status === "cancelled" && plan.dayException?.action === "leave") return "leave";
   if (plan.status === "cancelled" || plan.status === "absent") return plan.status;
   if (plan.checkOutAt !== null) return "checked_out";
   if (plan.checkInAt !== null) return activeLearning() ? "learning" : "checked_in";
@@ -51,7 +52,7 @@ export function readAttendanceBoard(store: OperationsDatabase, students: Student
     if (!studentIds.has(plan.studentId)) invalid("今日到校记录与学生档案不一致。");
     return { plan, status: boardStatus(plan, now, () => store.hasLearningInProgress(plan.id)) };
   });
-  return { date, entries };
+  return { date, entries, ...(store.flexibilityEnabled ? { flexWindows: store.flexWindows(date, date) } : {}) };
 }
 
 function optionalText(value: unknown, max: number): string | undefined {
