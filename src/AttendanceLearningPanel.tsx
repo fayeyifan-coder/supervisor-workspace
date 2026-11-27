@@ -151,7 +151,7 @@ function TaskRow({ task, block, target, locked, submit }: {
     submit({ ...change(target, block.id, result?.revision ?? block.revision), command: "recordTaskOutcome",
       taskId: task.id, status, resultNotes: result?.text ?? task.resultNotes ?? undefined }, () => setResult(undefined));
   }
-  return <li className="learning-task">
+  return <li className="learning-task" id={"learning-task-" + task.id} tabIndex={-1}>
     <div className="learning-task-head">
       <h4>{categoryLabels[task.category]}{task.subject && " · " + task.subject}</h4>
       <span className="learning-status">{taskLabels[task.status]}</span>
@@ -220,9 +220,9 @@ function BlockCard({ block, target, locked, checkedOut, submit, onEdit }: {
   </article>;
 }
 
-export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, leaveGuard, backLabel = "返回课表" }: {
+export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, leaveGuard, focusTaskId, backLabel = "返回课表" }: {
   api: WorkspaceApi; target: LearningDayInput; alias: string; reloadVersion: number; confirmedRequestId?: string; blocked: boolean;
-  submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void; backLabel?: string;
+  submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void; backLabel?: string; focusTaskId?: string;
   leaveGuard: Ref<() => boolean>;
 }) {
   const [data, setData] = useState<LearningDay>();
@@ -260,6 +260,13 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
     return () => { ignore = true; };
   }, [api, queryKey, target.attendanceId, target.studentId, confirmedRequestId]);
   function reread() { setReload(value => value + 1); }
+
+  useEffect(() => {
+    if (!focusTaskId || !data || data.attendance.id !== target.attendanceId) return;
+    const task = document.getElementById("learning-task-" + focusTaskId);
+    task?.scrollIntoView({ block: "center" });
+    task?.focus({ preventScroll: true });
+  }, [focusTaskId, data, target.attendanceId]);
 
   const plan = data?.attendance;
   const locked = blocked || busy || loadedKey !== queryKey || Boolean(readError);

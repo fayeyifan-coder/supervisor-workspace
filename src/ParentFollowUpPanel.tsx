@@ -183,7 +183,7 @@ export function ParentFollowUpPanel({ studentId, api, onDirtyChange, onBusyChang
       <ol className="parent-concern-list">{view.concerns.map(row => {
         const last = row.followUps[0];
         const nextOn = last ? last.nextOn : row.nextOn;
-        return <li key={row.requestId}>
+        return <li key={row.requestId} id={"student-source-parent-" + row.requestId} tabIndex={-1}>
           <div className="student-source-heading">
             <h3>{parentCategories[row.category]}</h3>
             <span className="student-source-status">{parentStatuses[last?.status ?? "open"]}</span>

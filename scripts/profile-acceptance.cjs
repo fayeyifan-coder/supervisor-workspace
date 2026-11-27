@@ -12,7 +12,7 @@ const exe = fs.realpathSync.native(resolve(exeArg));
 assert(!/^D:\\SupervisorWorkspace\\/i.test(exe));
 assert.equal(process.platform, 'win32');
 const output = resolve(outputArg); fs.mkdirSync(output, { recursive: true });
-const profile = (mode === 'legacy' ? 'phase2-legacy-' : 'sw-services-v6-phase2-') + randomUUID().replaceAll('-', '');
+const profile = (mode === 'legacy' ? 'phase2-legacy-' : mode === 'student-management' ? 'sw-services-v8-management-' : 'sw-services-v6-phase2-') + randomUUID().replaceAll('-', '');
 const owner = mode === 'legacy' ? join('D:\\Codex-Development\\Temp',profile) : join('D:\\Codex-Development\\Temp\\sw-student-services-profiles', profile);
 assert(!fs.existsSync(owner));
 const E = "process.mainModule.require('electron')", W = E + '.BrowserWindow.getAllWindows()[0]';
@@ -68,7 +68,12 @@ const selected = () => ui('document.querySelector(".student-detail-nav [aria-pre
 async function choose(alias) { await ui('Array.from(document.querySelectorAll("aside button")).find(x=>x.textContent.includes('+JSON.stringify(alias)+')).click();true');await delay(80); }
 async function profileShot(name) { await main(W+'.setSize(1100,1000);true');await ui('window.scrollTo(0,0);true');await delay(120);await main(W+'.capturePage().then(i=>process.mainModule.require("node:fs").writeFileSync('+JSON.stringify(join(output,name))+',i.toPNG())).then(()=>true)'); }
 (async()=>{
- await launch();const students=[];
+ await launch();
+ if (mode === 'student-management') {
+  evidence.management = await require('./student-management-acceptance.cjs')({ main, ui, api, ok, wait, click, choose, profileShot, E });
+  await close(); evidence.completed = true; fs.writeFileSync(join(output, 'acceptance.json'), JSON.stringify(evidence, null, 2)); return;
+ }
+ const students=[];
  for(let i=1;i<=20;i++){
   const s=ok(await api('createStudent',{id:randomUUID(),alias:'虚构学生'+String(i).padStart(2,'0'),grade:'七年级',subjects:'数学',goal:'既有阶段目标'+i,notes:''}));students.push(s);
   if(mode!=='legacy'){const c=ok(await api('createParentConcern',{requestId:randomUUID(),studentId:s.id,reportedOn:'2026-11-25',role:'mother',category:'academic',concern:'专属诉求'+String(i).padStart(2,'0'),nextOn:''}));ok(await api('resolveStudentWrite','confirm',c.requestId));}

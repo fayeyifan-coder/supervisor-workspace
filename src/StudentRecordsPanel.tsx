@@ -133,7 +133,7 @@ export function StudentRecordsPanel({ api, studentId, kind, recordVersion = 0, o
         {kind === "enrollment" && records.length > 0 && <p className="muted">每期独立计算有效期，历史期次保留当期状态。</p>}
         {records.length === 0 && <p className="muted">尚无{definition.item}记录。</p>}
         <ul className="student-source-list">
-          {records.map(row => <li key={row.id}>
+          {records.map(row => <li key={row.id} id={`student-source-${kind}-${row.id}`} tabIndex={-1}>
             <div className="student-source-heading"><h3>{row.fields[fields[0].key]}</h3>
               {kind === "enrollment" && <strong className="student-source-status">{enrollmentStatus(row.fields, today)}</strong>}
               <button type="button" className="secondary" disabled={Boolean(draft)} onClick={() => start(row)}>编辑</button>

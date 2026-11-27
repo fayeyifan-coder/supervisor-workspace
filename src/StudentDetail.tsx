@@ -2,9 +2,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { IntakeHistorySummary, Result, Student, WorkspaceApi } from "./contracts";
 import type { StudentRecordKind } from "./student-records";
 import { lifecycleLabels } from "./student-lifecycle";
+import type { OverviewSection } from "./StudentOverview";
 import "./student-detail.css";
 
-type Section = "lifecycle" | "growth" | "history" | "sources" | "edit" | "parent" | StudentRecordKind;
+type Section = "overview" | "lifecycle" | "growth" | "history" | "sources" | "edit" | "parent" | StudentRecordKind;
 const intakeStatus = { done: "已导入", pending: "待确认保存结果", review: "待核对" } as const;
 const intakeTime = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai", dateStyle: "medium", timeStyle: "medium",
@@ -59,12 +60,14 @@ function ImportSources({ api, student }: { api: WorkspaceApi; student: Student }
   </section>;
 }
 
-export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, lifecycle, recordPanels }: {
+export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, lifecycle, overview, overviewVisible, recordPanels }: {
   student: Student; api: WorkspaceApi; intakeOpen: boolean;
   actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode; parentFollowUp?: ReactNode; lifecycle?: ReactNode;
+  overview?: (open: (section: OverviewSection, recordId?: string) => void) => ReactNode; overviewVisible?: boolean;
   recordPanels: { id: StudentRecordKind; label: string; content: ReactNode }[];
 }) {
   const tabs: { id: Section; label: string; enabled: boolean }[] = [
+    { id: "overview", label: "综合概览", enabled: Boolean(overview) },
     { id: "parent", label: "家长诉求", enabled: Boolean(parentFollowUp) },
     { id: "score", label: "成绩趋势", enabled: recordPanels.some(panel => panel.id === "score") },
     { id: "growth", label: "成长档案", enabled: true },
@@ -83,7 +86,20 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
   const selected = selection?.studentId === student.id && available.some(tab => tab.id === selection.section)
     ? selection.section : available[0].id;
 
-  return <article className="student-detail" aria-labelledby="student-detail-heading">
+  function openSource(section: OverviewSection, recordId?: string) {
+    if (!available.some(tab => tab.id === section)) return;
+    setSelection({ studentId: student.id, section });
+    requestAnimationFrame(() => {
+      const detail = document.querySelector(".student-detail");
+      if (!(detail instanceof HTMLElement) || detail.dataset.studentId !== student.id) return;
+      const record = recordId ? document.getElementById(`student-source-${section}-${recordId}`) : null;
+      const target = record ?? document.getElementById("student-section-" + section);
+      target?.scrollIntoView({ block: "start" });
+      if (record) record.focus({ preventScroll: true });
+    });
+  }
+
+  return <article className="student-detail" data-student-id={student.id} aria-labelledby="student-detail-heading">
     <header className="panel student-overview">
       <div className="student-overview-heading">
         <h1 id="student-detail-heading" tabIndex={-1}>{student.alias}</h1>
@@ -101,6 +117,9 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
       {available.map(({ id, label }) => <button key={id} type="button" aria-controls={"student-section-" + id}
         aria-pressed={selected === id} onClick={() => setSelection({ studentId: student.id, section: id })}>{label}</button>)}
     </nav>
+    {overview && <div id="student-section-overview" hidden={selected !== "overview"}>
+      {selected === "overview" && overviewVisible && !intakeOpen && overview(openSource)}
+    </div>}
     <div id="student-section-growth" hidden={selected !== "growth"}>{!intakeOpen && growth}</div>
     <div id="student-section-history" hidden={selected !== "history"}>{history}</div>
     <div id="student-section-sources" hidden={selected !== "sources"}>

@@ -151,7 +151,7 @@ export function GrowthProfilePanel({ student, api, onDirtyChange, onBusyChange }
       <div className="growth-current" aria-label="当前重点">
         <div><h3>当前学情</h3><p>{view.currentSituation || "尚未记录"}</p></div>
         <div><h3>提分目标</h3>{view.goals.length
-          ? <ul>{view.goals.map(goal => <li key={goal.id}>
+          ? <ul>{view.goals.map(goal => <li key={goal.id} id={"student-source-growth-" + goal.id} tabIndex={-1}>
             <strong>{goal.subject}</strong> · 目标 {goal.targetScore} 分 · 截止 {goal.deadline} · {goalStatusLabels[goal.status]}
           </li>)}</ul> : <p>尚未设定</p>}</div>
         <div><h3>当前优势</h3><p>{view.strengths || "尚未记录"}</p></div>

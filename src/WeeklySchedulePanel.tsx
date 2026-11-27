@@ -61,10 +61,10 @@ function exceptionText(draft: Draft): string {
     : "周一默认停排。";
 }
 
-export function WeeklySchedulePanel({ api, students, studentId, setStudentId, learning, learningFromBoard,
+export function WeeklySchedulePanel({ api, students, studentId, setStudentId, learning, learningBackLabel,
   onLearning, onExitLearning, learningLeaveGuard, onStudent, summary }: {
   api: WorkspaceApi; students: Student[]; studentId: string; setStudentId: (id: string) => void;
-  learning?: LearningDayInput; learningFromBoard: boolean;
+  learning?: LearningDayInput & { focusTaskId?: string }; learningBackLabel?: string;
   onLearning: (target: LearningDayInput, trigger: HTMLButtonElement) => void;
   onExitLearning: () => void; learningLeaveGuard: Ref<() => boolean>;
   onStudent: (studentId: string, trigger: HTMLButtonElement) => boolean;
@@ -239,7 +239,7 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
     {learning && <AttendanceLearningPanel key={learning.attendanceId} api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
       reloadVersion={learningRevision} confirmedRequestId={confirmedLearningRequest}
       blocked={request.blocked} submit={request.run}
-      leaveGuard={learningLeaveGuard} backLabel={learningFromBoard ? "返回今日到校" : undefined}
+      leaveGuard={learningLeaveGuard} backLabel={learningBackLabel} focusTaskId={learning.focusTaskId}
       onBack={onExitLearning} />}
     <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}
       data-profile-switch-draft={draftDirty || busy ? "" : undefined}>

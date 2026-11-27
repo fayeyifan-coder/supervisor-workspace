@@ -16,6 +16,7 @@ import { ScoreTrend } from "./ScoreTrend";
 import { StudentWriteRecoveryPanel, type StudentWriteResolution } from "./StudentWriteRecoveryPanel";
 import { StudentRecordsPanel } from "./StudentRecordsPanel";
 import { StudentLifecyclePanel } from "./StudentLifecyclePanel";
+import { StudentOverview } from "./StudentOverview";
 import { lifecycleLabels, type LifecycleChange, type LifecycleStatus } from "./student-lifecycle";
 import { studentRecordDefinitions, type StudentRecordKind } from "./student-records";
 import "./styles.css";
@@ -118,7 +119,7 @@ function HistoryView({ history, reload }: { history?: History; reload: () => voi
       读取失败。{history.error} <button className="secondary" onClick={reload}>重新读取</button>
     </div> : !history?.rows ? <p role="status" className="muted">正在读取学习历史…</p>
       : history.rows.length === 0 ? <p className="muted">还没有学习记录。保存后可在这里查看。</p>
-        : <ol className="lesson-list">{history.rows.map(lesson => <li key={lesson.id}>
+        : <ol className="lesson-list">{history.rows.map(lesson => <li key={lesson.id} id={"student-source-history-" + lesson.id} tabIndex={-1}>
           <div className="lesson-heading"><h3>{lesson.subject}</h3><time dateTime={lesson.date}>{lesson.date}</time></div>
           <dl>
             <div><dt>学习任务</dt><dd>{lesson.task}</dd></div>
@@ -148,7 +149,7 @@ function App() {
   const [exportBusy, setExportBusy] = useState(false);
   const [studentFilter, setStudentFilter] = useState("");
   const [rosterStatus, setRosterStatus] = useState<LifecycleStatus | "all">("active");
-  const [learning, setLearning] = useState<LearningDayInput>();
+  const [learning, setLearning] = useState<LearningDayInput & { focusTaskId?: string }>();
   const learningLeaveGuard = useRef<() => boolean>(null);
   const attendance = useTodayAttendance(api, scheduleEnabled === true);
   const [studentEditEnabled, setStudentEditEnabled] = useState(false);
@@ -342,9 +343,9 @@ function App() {
     });
   }
 
-  function openLearning(target: LearningDayInput, trigger: HTMLButtonElement) {
+  function openLearning(target: LearningDayInput, trigger: HTMLButtonElement, focusTaskId?: string) {
     entry.current = { trigger, scroll: window.scrollY };
-    setLearning(target);
+    setLearning({ ...target, focusTaskId });
     requestAnimationFrame(() => {
       window.scrollTo(0, 0);
       document.getElementById("learning-day-title")?.focus({ preventScroll: true });
@@ -430,7 +431,7 @@ function App() {
     {!showingWorkspace && !students && listError && <button type="button" className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取档案</button>}
     {scheduleEnabled && students && <div hidden={page !== "schedule" && !learning}>
       <WeeklySchedulePanel api={api} students={students} studentId={studentFilter} setStudentId={setStudentFilter}
-        learning={learning} learningFromBoard={page === "board"} onLearning={openLearning} onExitLearning={closeLearning}
+        learning={learning} learningBackLabel={page === "board" ? "返回今日到校" : page === "students" ? "返回学生概览" : undefined} onLearning={openLearning} onExitLearning={closeLearning}
         learningLeaveGuard={learningLeaveGuard} onStudent={(id, trigger) => openLinkedStudent(id, "schedule", trigger)}
         summary={<section className="schedule-attendance" aria-labelledby="schedule-attendance-title">
           <h2 id="schedule-attendance-title">今日到校{attendance.result?.ok && <> · <time dateTime={attendance.result.value.date}>{attendance.result.value.date}</time></>}</h2>
@@ -443,7 +444,7 @@ function App() {
       <AttendanceBoard result={attendance.result} reload={attendance.reload} students={students}
         onStudent={(id, trigger) => openLinkedStudent(id, "board", trigger)} onLearning={openLearning} />
     </div>}
-    <div className="workspace" hidden={!showingWorkspace}>
+    <div className="workspace" hidden={!showingWorkspace || Boolean(learning)}>
       <aside className="roster" aria-label="学生档案">
         <div className="roster-heading"><h2>学生档案</h2>
           <button className="secondary" disabled={locked || editorBusy || intakeOpen || !students} onClick={() => {
@@ -498,6 +499,9 @@ function App() {
         <div className="student-content" hidden={intakeOpen}>
           {showStudentForm ? <StudentForm key={formVersion} disabled={locked} submit={input => void save({ kind: "student", input })} />
             : active && <StudentDetail student={active} api={api} intakeOpen={intakeOpen}
+              overviewVisible={showingWorkspace && !learning}
+              overview={studentRecordVersion >= 8 ? openSource => <StudentOverview key={active.id} studentId={active.id}
+                api={api} openSource={openSource} openVisit={openLearning} /> : undefined}
               actions={scheduleEnabled && <div className="schedule-heading-actions">
                 {profileReturn && <button className="secondary" type="button" disabled={editorBusy} onClick={returnToOrigin}>
                   {profileReturn === "board" ? "返回今日到校" : "返回课表"}

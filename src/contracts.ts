@@ -14,6 +14,7 @@ export const channels = {
   studentRecords: "mvp:student-records",
   saveStudentRecord: "mvp:save-student-record",
   studentLifecycle: "mvp:student-lifecycle",
+  studentOverview: "mvp:student-overview",
   saveStudentLifecycle: "mvp:save-student-lifecycle",
   studentWriteState: "mvp:student-write-state",
   resolveStudentWrite: "mvp:resolve-student-write",
@@ -216,6 +217,7 @@ export interface WorkspaceApi {
   studentRecords(kind: StudentRecordKind, studentId: string): Promise<Result<StudentRecordView>>;
   saveStudentRecord(input: StudentRecordInput): Promise<Result<StudentRecord>>;
   studentLifecycle(studentId: string): Promise<Result<LifecycleView>>;
+  studentOverview(studentId: string): Promise<Result<import("./student-overview").StudentOverviewData>>;
   saveStudentLifecycle(input: LifecycleInput): Promise<Result<LifecycleChange>>;
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
   workItems(today: string): Promise<Result<import("./worklog").WorkItem[]>>;

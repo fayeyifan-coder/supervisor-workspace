@@ -14,6 +14,8 @@ import { maxIntakeBytes } from "./intake-format";
 import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSupportedProfileOpen, validateProtection,
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
 import { OperationsDatabase } from "./operations";
+import { summarizeStudentOverview } from "./student-overview";
+import { shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
 import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
 import { applyLearningChange, readAttendanceBoard, readLearningDay, readScheduleReceipt } from "./learning-api";
 import { StudentWriteRecovery } from "./student-write-recovery";
@@ -259,6 +261,21 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     return studentWrites.run(store, command, () => store.saveStudentRecord(command.input));
   }));
   handle(channels.studentLifecycle, (event, studentId: unknown) => invoke(event, store => store.studentLifecycle(studentId)));
+  handle(channels.studentOverview, (event, rawStudentId: unknown) => invoke(event, store => {
+    const ops = operations, growth = growthProfile;
+    if (m1Version < 8 || !ops || !growth) throw new WorkspaceFault("recovery", "当前档案尚未启用综合概览。");
+    const studentId = scheduleId(rawStudentId);
+    const concerns = store.parentFollowUp(studentId);
+    const now = Date.now(), date = shanghaiParts(now).date;
+    const start = shanghaiMinute(date, "00:00");
+    const end = shanghaiMinute(shiftDate(date, 14), "00:00");
+    if (start === null || end === null) throw new WorkspaceFault("failed", "无法确定到校查询日期。");
+    ops.protectionConnection();
+    const visits = ops.listAttendancePlans(start, end, studentId).map(plan =>
+      ({ plan, blocks: ops.learningBlocksForAttendance(plan.id) }));
+    return summarizeStudentOverview({ studentId, concerns, visits, now, scores: store.studentRecords("score", studentId).records,
+      growth: growth.load(studentId), history: store.history(studentId) });
+  }));
   handleWrite(channels.saveStudentLifecycle, (event, raw: unknown) => invoke(event, store => {
     const command = store.studentWriteCommand("lifecycle", raw);
     return studentWrites.run(store, command, () => store.saveStudentLifecycle(command.input));

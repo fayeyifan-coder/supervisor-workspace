@@ -42,6 +42,7 @@ const api: WorkspaceApi = {
   studentRecords: (kind, id) => ipcRenderer.invoke("mvp:student-records", kind, id),
   saveStudentRecord: input => ipcRenderer.invoke("mvp:save-student-record", input),
   studentLifecycle: id => ipcRenderer.invoke("mvp:student-lifecycle", id),
+  studentOverview: id => ipcRenderer.invoke("mvp:student-overview", id),
   saveStudentLifecycle: input => ipcRenderer.invoke("mvp:save-student-lifecycle", input),
   addLesson: (input: LessonInput) => ipcRenderer.invoke("mvp:add-lesson", input),
   workItems: (day: string) => ipcRenderer.invoke("m2b:work-items", day),
