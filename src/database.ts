@@ -4,12 +4,13 @@ import { DatabaseSync } from "node:sqlite";
 import type { Failure, Lesson, LessonInput, Student, StudentEditFields, StudentEditInput, StudentEditRecord, StudentEditView, StudentInput, StudentWriteCommand } from "./contracts";
 import { appendParentFollowUp, concernInput, createParentConcern, followUpInput, parentSchema, parentWriteCommitted, readParentFollowUp, verifyParentFollowUp } from "./parent-follow-up";
 import { readStudentRecords, saveStudentRecord, studentRecordCommitted, studentRecordInput, studentRecordSchema, verifyStudentRecords } from "./student-records";
+import { changeStudentLifecycle, lifecycleInput, lifecycleReceipt, lifecycleSchema, studentLifecycle, verifyStudentLifecycle } from "./student-lifecycle";
 import { WorkspaceFault } from "./workspace-fault";
 export { WorkspaceFault } from "./workspace-fault";
 
 const applicationId = 0x53574d31;
-export const latestM1Version = 7;
-export type M1Version = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export const latestM1Version = 8;
+export type M1Version = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 export function isM1Version(value: unknown): value is M1Version {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= latestM1Version;
 }
@@ -38,7 +39,7 @@ const editSchema = [
     payload TEXT NOT NULL
   ) STRICT`],
 ] as const;
-const schemaFor = (version: M1Version) => version >= 3 ? [...schema, ...editSchema, ...parentSchema, ...studentRecordSchema(version)]
+const schemaFor = (version: M1Version) => version >= 3 ? [...schema, ...editSchema, ...parentSchema, ...studentRecordSchema(version), ...(version >= 8 ? [lifecycleSchema] : [])]
   : version === 2 ? [...schema, ...editSchema] : schema;
 const markerFor = (version: M1Version) => "mvp-v" + version + "\n";
 const studentColumns = "id, alias, grade, subjects, goal, notes, created_at AS createdAt";
@@ -89,6 +90,7 @@ function checkDatabase(db: DatabaseSync, version: M1Version): void {
     "sqlite_autoindex_student_edit_pending_1", "sqlite_autoindex_student_edit_pending_2");
   if (version >= 3) automatic.push("sqlite_autoindex_parent_concerns_1", "sqlite_autoindex_parent_followups_1", "sqlite_autoindex_parent_followups_2");
   for (const [table] of studentRecordSchema(version)) automatic.push("sqlite_autoindex_" + table + "_1", "sqlite_autoindex_" + table + "_2");
+  if (version >= 8) automatic.push("sqlite_autoindex_student_lifecycle_1", "sqlite_autoindex_student_lifecycle_2");
   const expected = schemaFor(version);
   const explicitMatch = expected.every(([name, type, ddl]) => definitions.some(object =>
     object.name === name && object.type === type && typeof object.sql === "string" && canonical(object.sql) === canonical(ddl)));
@@ -100,6 +102,7 @@ function checkDatabase(db: DatabaseSync, version: M1Version): void {
   if (version >= 2) verifyStudentEdits(db);
   if (version >= 3) verifyParentFollowUp(db);
   if (version >= 4) verifyStudentRecords(db, version);
+  if (version >= 8) verifyStudentLifecycle(db);
 }
 
 function inputObject(raw: unknown): Record<string, unknown> {
@@ -251,7 +254,9 @@ export class WorkspaceDatabase {
 
   students(): Student[] {
     if (this.version >= 2) this.protectionConnection();
-    return this.db.prepare("SELECT " + studentColumns + " FROM students ORDER BY created_at DESC, id DESC")
+    const status = this.version >= 8 ? `, coalesce((SELECT status FROM student_lifecycle
+      WHERE student_id=students.id ORDER BY revision DESC LIMIT 1), 'active') AS lifecycleStatus` : "";
+    return this.db.prepare("SELECT " + studentColumns + status + " FROM students ORDER BY created_at DESC, id DESC")
       .all().map(row => ({ ...row })) as unknown as Student[];
   }
 
@@ -314,7 +319,25 @@ export class WorkspaceDatabase {
     return this.write(() => saveStudentRecord(this.db, this.version, raw));
   }
 
+  private requireLifecycleSupport() {
+    if (this.version < 8) recover("当前档案尚未启用学生跟进状态管理。");
+  }
+
+  studentLifecycle(studentId: unknown) {
+    this.requireLifecycleSupport();
+    return studentLifecycle(this.protectionConnection(), studentId);
+  }
+
+  saveStudentLifecycle(raw: unknown) {
+    this.requireLifecycleSupport();
+    return this.write(() => changeStudentLifecycle(this.db, raw));
+  }
+
   studentWriteCommand(kind: StudentWriteCommand["kind"], raw: unknown): StudentWriteCommand {
+    if (kind === "lifecycle") {
+      this.requireLifecycleSupport();
+      return { kind, input: lifecycleInput(raw) };
+    }
     if (kind === "record") return { kind, input: studentRecordInput(this.version, raw) };
     this.requireParentSupport();
     return kind === "concern" ? { kind, input: concernInput(raw) } : { kind, input: followUpInput(raw) };
@@ -322,6 +345,7 @@ export class WorkspaceDatabase {
 
   studentWriteCommitted(command: StudentWriteCommand): boolean {
     const db = this.protectionConnection();
+    if (command.kind === "lifecycle") return Boolean(lifecycleReceipt(db, command.input));
     return command.kind === "record" ? studentRecordCommitted(db, this.version, command.input)
       : parentWriteCommitted(db, command.kind, command.input);
   }
@@ -505,6 +529,6 @@ const m1ParentProtection = {
 export function m1ProtectionLayout(version: M1Version) {
   if (version <= 3) return version === 3 ? m1ParentProtection : version === 2 ? m1EditProtection : m1Protection;
   return { ...m1ParentProtection, version, marker: markerFor(version),
-    tables: [...m1ParentProtection.tables, ...studentRecordSchema(version).map(entry => entry[0])],
+    tables: [...m1ParentProtection.tables, ...studentRecordSchema(version).map(entry => entry[0]), ...(version >= 8 ? [lifecycleSchema[0]] : [])],
     ddl: schemaFor(version).map(entry => entry[2]) };
 }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Result, Student, StudentWriteAction, StudentWriteState, WorkspaceApi } from "./contracts";
 
+import { lifecycleLabels } from "./student-lifecycle";
+
 export type StudentWriteResolution = { action: "confirm" | "discard" | "archive"; requestId?: string };
 
 export function StudentWriteRecoveryPanel({ api, students, refresh, onResolved }: {
@@ -27,6 +29,7 @@ export function StudentWriteRecoveryPanel({ api, students, refresh, onResolved }
   const details = entry?.kind === "pending" ? entry.command.input : undefined;
   const student = details && students.find(item => item.id === details.studentId);
   const values: readonly [string, unknown][] = !details ? [] : "fields" in details ? Object.entries(details.fields)
+    : "reason" in details ? [["跟进状态", lifecycleLabels[details.status]], ["变更原因", details.reason]]
     : "concern" in details ? [["诉求日期", details.reportedOn], ["诉求", details.concern], ["下次跟进", details.nextOn]]
       : [["跟进日期", details.followedOn], ["说明", details.note], ["下次跟进", details.nextOn]];
 

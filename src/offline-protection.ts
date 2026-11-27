@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { freemem } from "node:os";
 import { DatabaseSync } from "node:sqlite";
+import { verifyStudentLifecycle } from "./student-lifecycle";
 import { isM1Version, m1Protection, m1ProtectionLayout, verifyStudentEdits, WorkspaceFault, type M1Version } from "./database";
 import { studentRecordSchema, verifyStudentRecords } from "./student-records";
 import { verifyParentFollowUp } from "./parent-follow-up";
@@ -115,6 +116,7 @@ function checkImage(db: DatabaseSync, layout: Layout): void {
   if (layout.key === "mvp" && layout.version >= 2) verifyStudentEdits(db);
   if (layout.key === "mvp" && layout.version >= 3) verifyParentFollowUp(db);
   if (layout.key === "mvp" && layout.version >= 4) verifyStudentRecords(db, layout.version);
+  if (layout.key === "mvp" && layout.version >= 8) verifyStudentLifecycle(db);
 }
 
 function imageSize(source: DatabaseSync, layout: Layout): number {
@@ -220,6 +222,9 @@ function summary(dbs: DatabaseSync[], manifest: Omit<Manifest, "databases">): Pr
     if (studentRecordSchema(m1Version).some(([table]) => !previouslyPresent.has(table) && count(m1, table) !== 0)) {
       reject("升级新增的学生记录表必须为空。");
     }
+  }
+  if (manifest.m1UpgradedFrom && m1Version >= 8 && (manifest.m1SourceVersion ?? 1) < 8 && count(m1, "student_lifecycle") !== 0) {
+    reject("升级新增的跟进状态历史必须为空。");
   }
   return { createdAt: manifest.createdAt, applicationVersion: manifest.applicationVersion,
     formatVersion: manifest.formatVersion, m1Version,

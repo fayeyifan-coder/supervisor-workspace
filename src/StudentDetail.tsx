@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { IntakeHistorySummary, Result, Student, WorkspaceApi } from "./contracts";
 import type { StudentRecordKind } from "./student-records";
+import { lifecycleLabels } from "./student-lifecycle";
 import "./student-detail.css";
 
-type Section = "growth" | "history" | "sources" | "edit" | "parent" | StudentRecordKind;
+type Section = "lifecycle" | "growth" | "history" | "sources" | "edit" | "parent" | StudentRecordKind;
 const intakeStatus = { done: "已导入", pending: "待确认保存结果", review: "待核对" } as const;
 const intakeTime = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai", dateStyle: "medium", timeStyle: "medium",
@@ -58,9 +59,9 @@ function ImportSources({ api, student }: { api: WorkspaceApi; student: Student }
   </section>;
 }
 
-export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, recordPanels }: {
+export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, lifecycle, recordPanels }: {
   student: Student; api: WorkspaceApi; intakeOpen: boolean;
-  actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode; parentFollowUp?: ReactNode;
+  actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode; parentFollowUp?: ReactNode; lifecycle?: ReactNode;
   recordPanels: { id: StudentRecordKind; label: string; content: ReactNode }[];
 }) {
   const tabs: { id: Section; label: string; enabled: boolean }[] = [
@@ -68,6 +69,7 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
     { id: "score", label: "成绩趋势", enabled: recordPanels.some(panel => panel.id === "score") },
     { id: "growth", label: "成长档案", enabled: true },
     { id: "improvement", label: "提分方案", enabled: recordPanels.some(panel => panel.id === "improvement") },
+    { id: "lifecycle", label: "跟进状态", enabled: Boolean(lifecycle) },
     { id: "enrollment", label: "报名与到期", enabled: recordPanels.some(panel => panel.id === "enrollment") },
     { id: "edit", label: "基础档案编辑", enabled: Boolean(edit) },
     { id: "history", label: "学习历史", enabled: true },
@@ -90,6 +92,7 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
       <dl>
         <div><dt>年级</dt><dd>{student.grade}</dd></div>
         <div><dt>学科</dt><dd>{student.subjects}</dd></div>
+        {student.lifecycleStatus && <div><dt>跟进状态</dt><dd>{lifecycleLabels[student.lifecycleStatus]}</dd></div>}
         {student.goal && <div><dt>学习目标</dt><dd>{student.goal}</dd></div>}
         {student.notes && <div><dt>备注</dt><dd>{student.notes}</dd></div>}
       </dl>
@@ -103,6 +106,7 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
     <div id="student-section-sources" hidden={selected !== "sources"}>
       {!intakeOpen && <ImportSources key={student.id} api={api} student={student} />}
     </div>
+    {lifecycle && <div id="student-section-lifecycle" hidden={selected !== "lifecycle"}>{!intakeOpen && lifecycle}</div>}
     {edit && <div id="student-section-edit" hidden={selected !== "edit"}>{!intakeOpen && edit}</div>}
     {parentFollowUp && <div id="student-section-parent" hidden={selected !== "parent"}>{!intakeOpen && parentFollowUp}</div>}
     {recordPanels.map(panel => <div key={panel.id} id={"student-section-" + panel.id} hidden={selected !== panel.id}>

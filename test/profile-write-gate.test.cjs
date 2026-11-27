@@ -42,7 +42,7 @@ test("business IPC writes and mutable import previews all use the shared writer 
   const main = readFileSync(join(__dirname, "../src/main.ts"), "utf8");
   const registered = [...main.matchAll(/handleWrite\(channels\.(\w+),/g)].map(result => result[1]);
   const writes = ["createStudent", "addLesson", "saveStudentEdit", "finishStudentEdit", "createParentConcern",
-    "appendParentFollowUp", "saveStudentRecord", "resolveStudentWrite", "saveSchedulePlan", "applyLearningChange",
+    "appendParentFollowUp", "saveStudentRecord", "saveStudentLifecycle", "resolveStudentWrite", "saveSchedulePlan", "applyLearningChange",
     "acknowledgeOperation", "saveWorkItem", "setWorkItemStatus", "saveGrowthProfile", "pickStudentIntake",
     "prepareStudentIntake", "saveStudentIntake"];
   assert.deepEqual(registered.sort(), writes.sort());

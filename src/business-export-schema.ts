@@ -2,7 +2,7 @@ export type ExportRole = "business" | "history" | "internal";
 const table = (store: string, name: string, sheet: string, columns: string, role: ExportRole = "business") =>
   ({ store, name, sheet, columns: columns.split(","), role });
 
-// Versioned whitelist for SWBACK2 / M1 v6. A different layout fails instead of silently losing fields.
+// Whitelists for the supported five-store layouts. Unknown tables or fields fail export.
 export const exportTables = [
   table("mvp", "students", "学生档案", "id,alias,grade,subjects,goal,notes,created_at"),
   table("mvp", "learning_records", "学习历史", "id,student_id,study_date,subject,task,completion,assessment,next_step,created_at"),
@@ -28,6 +28,9 @@ export const exportTables = [
   table("operations", "operation_changes", "教务修订", "entity_kind,entity_id,student_id,revision,request_id,snapshot_json,changed_at", "history"),
 ] as const;
 
+const lifecycleTable = table("mvp", "student_lifecycle", "学生跟进状态历史", "request_id,student_id,revision,previous_status,status,reason,changed_at", "history");
+export const exportTablesFor = (version: number) => version >= 8 ? [...exportTables, lifecycleTable] : exportTables;
+
 export const columnLabels: Record<string, string> = {
  id: "记录身份", entity_id: "实体身份", request_id: "请求身份", student_id: "学生UUID", alias: "学生代号",
  grade: "年级", subjects: "学科", goal: "学习目标", notes: "备注", created_at: "创建时间戳", revision: "修订版本",
@@ -40,6 +43,7 @@ export const columnLabels: Record<string, string> = {
  completed_at: "完成时间", learning_characteristics: "学习特点", communication_preferences: "沟通偏好",
  current_situation: "当前情况", strengths: "优势", weak_areas: "薄弱点", target_score: "目标成绩",
  deadline: "目标期限", strategy: "教学措施", observed_on: "观察日期", content: "内容", code: "来源代号",
+ previous_status: "变更前状态", reason: "状态变更原因",
  digest: "来源摘要", source_json: "导入原文", plan_json: "已确认导入方案", state: "导入原状态",
  student_confirmed: "身份已确认", start_at: "预计开始", end_at: "预计结束", kind: "安排类型",
  check_in_at: "实际签到", check_out_at: "实际签退", outside_window: "超出预计时段", exception_reason: "例外原因",

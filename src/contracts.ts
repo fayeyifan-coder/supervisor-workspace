@@ -13,6 +13,8 @@ export const channels = {
   studentRecordVersion: "mvp:student-record-version",
   studentRecords: "mvp:student-records",
   saveStudentRecord: "mvp:save-student-record",
+  studentLifecycle: "mvp:student-lifecycle",
+  saveStudentLifecycle: "mvp:save-student-lifecycle",
   studentWriteState: "mvp:student-write-state",
   resolveStudentWrite: "mvp:resolve-student-write",
   addLesson: "mvp:add-lesson",
@@ -75,7 +77,8 @@ export interface LessonInput {
   nextStep: string;
 }
 
-export type Student = StudentInput & { createdAt: number };
+import type { LifecycleChange, LifecycleInput, LifecycleStatus, LifecycleView } from "./student-lifecycle";
+export type Student = StudentInput & { createdAt: number; lifecycleStatus?: LifecycleStatus };
 export type StudentEditFields = Omit<StudentInput, "id">;
 export interface StudentEditInput {
   studentId: string;
@@ -102,7 +105,8 @@ import type { StudentRecord, StudentRecordInput, StudentRecordKind, StudentRecor
 export type StudentWriteCommand =
   | { kind: "concern"; input: ParentConcernInput }
   | { kind: "followUp"; input: ParentFollowUpInput }
-  | { kind: "record"; input: StudentRecordInput };
+  | { kind: "record"; input: StudentRecordInput }
+  | { kind: "lifecycle"; input: LifecycleInput };
 export type StudentWriteState =
   | { kind: "empty" }
   | { kind: "damaged"; requestId?: string }
@@ -211,6 +215,8 @@ export interface WorkspaceApi {
   studentRecordVersion(): Promise<Result<number>>;
   studentRecords(kind: StudentRecordKind, studentId: string): Promise<Result<StudentRecordView>>;
   saveStudentRecord(input: StudentRecordInput): Promise<Result<StudentRecord>>;
+  studentLifecycle(studentId: string): Promise<Result<LifecycleView>>;
+  saveStudentLifecycle(input: LifecycleInput): Promise<Result<LifecycleChange>>;
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
   workItems(today: string): Promise<Result<import("./worklog").WorkItem[]>>;
   searchWorkItems(from: string, to: string, query?: string): Promise<Result<import("./worklog").WorkItem[]>>;

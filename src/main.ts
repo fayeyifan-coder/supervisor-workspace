@@ -258,6 +258,11 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     const command = store.studentWriteCommand("record", raw);
     return studentWrites.run(store, command, () => store.saveStudentRecord(command.input));
   }));
+  handle(channels.studentLifecycle, (event, studentId: unknown) => invoke(event, store => store.studentLifecycle(studentId)));
+  handleWrite(channels.saveStudentLifecycle, (event, raw: unknown) => invoke(event, store => {
+    const command = store.studentWriteCommand("lifecycle", raw);
+    return studentWrites.run(store, command, () => store.saveStudentLifecycle(command.input));
+  }));
   function requireStudentWriteSupport() {
     if (m1Version < 3 || format !== 2 || !operations) throw new WorkspaceFault("recovery", "当前档案没有启用学生资料请求恢复。");
   }

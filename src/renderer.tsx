@@ -15,6 +15,8 @@ import { TrainingForPlan } from "./TrainingForPlan";
 import { ScoreTrend } from "./ScoreTrend";
 import { StudentWriteRecoveryPanel, type StudentWriteResolution } from "./StudentWriteRecoveryPanel";
 import { StudentRecordsPanel } from "./StudentRecordsPanel";
+import { StudentLifecyclePanel } from "./StudentLifecyclePanel";
+import { lifecycleLabels, type LifecycleChange, type LifecycleStatus } from "./student-lifecycle";
 import { studentRecordDefinitions, type StudentRecordKind } from "./student-records";
 import "./styles.css";
 
@@ -145,6 +147,7 @@ function App() {
   const [protectionBusy, setProtectionBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [studentFilter, setStudentFilter] = useState("");
+  const [rosterStatus, setRosterStatus] = useState<LifecycleStatus | "all">("active");
   const [learning, setLearning] = useState<LearningDayInput>();
   const learningLeaveGuard = useRef<() => boolean>(null);
   const attendance = useTodayAttendance(api, scheduleEnabled === true);
@@ -171,6 +174,14 @@ function App() {
   const [pending, setPending] = useState<Command>();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>();
+  const [lifecycleDirty, setLifecycleDirty] = useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const lifecycleActivity = useCallback((dirty: boolean, working: boolean) => {
+    setLifecycleDirty(dirty); setLifecycleBusy(working);
+  }, []);
+  function updateLifecycle(change: LifecycleChange) {
+    setStudents(previous => previous?.map(student => student.id === change.studentId ? { ...student, lifecycleStatus: change.status } : student));
+  }
   const [growthDirty, setGrowthDirty] = useState(false);
   const [growthBusy, setGrowthBusy] = useState(false);
   const [studentEditDirty, setStudentEditDirty] = useState(false);
@@ -205,7 +216,7 @@ function App() {
       if (!current) return;
       if (!result.ok) { setListError(result.message); return; }
       setStudents(result.value);
-      setActiveId(previous => result.value.some(student => student.id === previous) ? previous : result.value[0]?.id);
+      setActiveId(previous => result.value.some(student => student.id === previous) ? previous : result.value.find(student => (student.lifecycleStatus ?? "active") === "active")?.id);
     }).catch(() => { if (current) setListError("无法读取本地档案，请重试。"); });
     return () => { current = false; };
   }, [api, listRefresh]);
@@ -234,6 +245,7 @@ function App() {
     } else {
       setStudents(previous => [row, ...(previous ?? []).filter(student => student.id !== row.id)]);
       setActiveId(row.id);
+      setRosterStatus("active");
       setCreating(false);
     }
     setFormVersion(value => value + 1);
@@ -291,10 +303,10 @@ function App() {
   const active = students?.find(student => student.id === activeId);
   const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
-  const editorBusy = growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
+  const editorBusy = lifecycleBusy || growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
   useLayoutEffect(() => {
     window.profileSwitchReady = freeze => {
-      if (locked || editorBusy || intakeOpen || intakeBusy || learning || growthDirty || studentEditDirty ||
+      if (locked || editorBusy || intakeOpen || intakeBusy || learning || lifecycleDirty || growthDirty || studentEditDirty ||
           parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty) ||
           document.querySelector("[data-profile-switch-draft]") || hasUncontrolledDraft()) return false;
       if (freeze) document.body.inert = true;
@@ -304,11 +316,13 @@ function App() {
     return () => { delete window.profileSwitchReady; delete window.profileSwitchCancel; };
   });
   const showStudentForm = students && (creating || students.length === 0);
+  const rosterStudents = students?.filter(student => rosterStatus === "all" || (student.lifecycleStatus ?? "active") === rosterStatus);
 
   function canLeaveStudentDrafts(): boolean {
     if (editorBusy) return false;
-    if ((growthDirty || studentEditDirty || parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty)) &&
+    if ((lifecycleDirty || growthDirty || studentEditDirty || parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty)) &&
         !window.confirm("学生档案有未保存输入，确定离开并放弃吗？")) return false;
+    setLifecycleDirty(false);
     setGrowthDirty(false);
     setStudentEditDirty(false);
     setParentFollowUpDirty(false);
@@ -408,7 +422,9 @@ function App() {
       <BusinessExportPanel api={api} supported={workspaceInfo?.backupFormat === 2 && studentRecordVersion >= 6} onBusyChange={setExportBusy} />
     </section>
     {parentFollowUpEnabled && students && <StudentWriteRecoveryPanel api={api} students={students}
-      refresh={studentWriteRefresh} onResolved={setWriteResolution} />}
+      refresh={studentWriteRefresh} onResolved={resolution => {
+        setWriteResolution(resolution); setListRefresh(value => value + 1);
+      }} />}
     {!showingWorkspace && (!students || scheduleEnabled === undefined) &&
       <p className="schedule-page" role="status">{listError || "正在读取课表…"}</p>}
     {!showingWorkspace && !students && listError && <button type="button" className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取档案</button>}
@@ -443,12 +459,25 @@ function App() {
         {!listError && !students && <p role="status" className="muted">正在读取档案…</p>}
         {listError && <div className="notice failure" role="alert">{listError} <button className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取</button></div>}
         {students?.length === 0 && <p className="muted">还没有学生档案。</p>}
-        <ul className="student-list">{students?.map(student => <li key={student.id}>
+        {studentRecordVersion >= 8 && <label className="student-roster-filter">名单状态
+          <select value={rosterStatus} disabled={locked || editorBusy || intakeOpen} onChange={event => {
+            const status = event.target.value as LifecycleStatus | "all";
+            const filtered = students?.filter(student => status === "all" || (student.lifecycleStatus ?? "active") === status);
+            if (!creating && filtered?.some(student => student.id === activeId)) { setRosterStatus(status); return; }
+            if (!canLeaveStudentDrafts()) return;
+            setRosterStatus(status); setActiveId(filtered?.[0]?.id); setCreating(false); setNotice(undefined);
+          }}>
+            {(Object.keys(lifecycleLabels) as LifecycleStatus[]).map(status => <option key={status} value={status}>{lifecycleLabels[status]}</option>)}
+            <option value="all">全部状态</option>
+          </select>
+        </label>}
+        {students?.length !== 0 && rosterStudents?.length === 0 && <p className="muted">当前状态下没有学生档案。</p>}
+        <ul className="student-list">{rosterStudents?.map(student => <li key={student.id}>
           <button disabled={locked || editorBusy || intakeOpen} aria-pressed={!creating && student.id === activeId} onClick={() => {
             if (student.id === activeId && !creating) return;
             if (!canLeaveStudentDrafts()) return;
             setActiveId(student.id); setCreating(false); setNotice(undefined);
-          }}><strong>{student.alias}</strong><span>{student.grade} · {student.subjects}</span></button>
+          }}><strong>{student.alias}</strong><span>{student.grade} · {student.subjects}{rosterStatus === "all" && student.lifecycleStatus && ` · ${lifecycleLabels[student.lifecycleStatus]}`}</span></button>
         </li>)}</ul>
       </aside>
       <div className="detail">
@@ -482,6 +511,8 @@ function App() {
                     window.scrollTo(0, 0);
                   }}>查看该学生排课</button>
               </div>}
+              lifecycle={studentRecordVersion >= 8 && <StudentLifecyclePanel key={active.id} studentId={active.id} api={api}
+                onSaved={updateLifecycle} onActivity={lifecycleActivity} refreshRecovery={refreshStudentWrites} resolution={writeResolution} />}
               edit={studentEditEnabled && <StudentEditPanel key={active.id} studentId={active.id} api={api}
                 onDirtyChange={setStudentEditDirty} onBusyChange={setStudentEditBusy}
                 onSaved={() => setListRefresh(value => value + 1)} />}

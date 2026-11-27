@@ -1,3 +1,4 @@
+.student-roster-filter { display: grid; gap: .35rem; margin: .75rem 0; }
 .student-detail { max-width: 980px; min-width: 0; }
 .student-overview-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 .student-overview-heading h1 { overflow-wrap: anywhere; }

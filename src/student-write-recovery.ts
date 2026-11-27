@@ -44,7 +44,7 @@ export class StudentWriteRecovery {
       const body = read(this.body);
       if (requestId && body && header.sha256 === hash(body)) {
         const raw = JSON.parse(body);
-        if (raw.kind === "record" || raw.kind === "concern" || raw.kind === "followUp") {
+        if (raw.kind === "record" || raw.kind === "concern" || raw.kind === "followUp" || raw.kind === "lifecycle") {
           const command = store.studentWriteCommand(raw.kind, raw.input);
           if (command.input.requestId === requestId && JSON.stringify(command) === body) return { kind: "pending", command };
         }
@@ -113,6 +113,7 @@ export class StudentWriteRecovery {
       this.run(store, command, () => {
         if (command.kind === "concern") store.createParentConcern(command.input);
         else if (command.kind === "followUp") store.appendParentFollowUp(command.input);
+        else if (command.kind === "lifecycle") store.saveStudentLifecycle(command.input);
         else store.saveStudentRecord(command.input);
       }, true);
       return null;
