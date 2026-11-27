@@ -67,3 +67,11 @@
   padding: 2px 3px; background: transparent; color: var(--green); font: inherit;
   text-decoration: underline; text-underline-offset: 3px; text-align: start; overflow-wrap: anywhere;
 }
+
+.recurring-panel { margin: 12px 0; }
+.recurring-panel > summary { cursor: pointer; font-weight: 600; }
+.recurring-panel .schedule-buttons { margin-block: 10px; }
+.recurring-generate { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; margin-block: 10px; }
+.recurring-generate label, .recurring-editor label { display: grid; gap: 4px; }
+.recurring-editor { margin-block: 12px; }
+.recurring-editor fieldset > label { margin-block: 6px; }

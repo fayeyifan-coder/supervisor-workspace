@@ -12,7 +12,7 @@ import { intakeProtection, intakeSourceDigest } from "./student-intake";
 import { parseIntake } from "./intake-format";
 import { worklogProtection } from "./worklog";
 
-import { operationsProtection, verifyOperationsStudentLinks } from "./operations-schema";
+import { operationsProtection, operationsProtectionFor, verifyOperationsStudentLinks, type OperationsLayout } from "./operations-schema";
 
 const fourLayouts = [m1Protection, worklogProtection, growthProtection, intakeProtection] as const;
 const fiveLayouts = [...fourLayouts, operationsProtection] as const;
@@ -20,7 +20,7 @@ export type ProtectionFormat = 1 | 2;
 function layoutsFor(format: ProtectionFormat, m1Version: M1Version = 1) {
   if (m1Version >= 2) {
     if (format !== 2) reject("新版学生档案只支持五库备份。");
-    return [m1ProtectionLayout(m1Version), worklogProtection, growthProtection, intakeProtection, operationsProtection];
+    return [m1ProtectionLayout(m1Version), worklogProtection, growthProtection, intakeProtection, operationsProtectionFor(m1Version)];
   }
   return format === 2 ? fiveLayouts : fourLayouts;
 }
@@ -70,7 +70,7 @@ interface Manifest {
   applicationVersion: string;
   databases: ManifestDatabase[];
 }
-type Layout = (typeof fiveLayouts)[number];
+type Layout = (typeof fiveLayouts)[number] | OperationsLayout;
 type Store = { protectionConnection(): DatabaseSync };
 
 export function requireSupportedProfileOpen(name: string, hasRestoreRecord = false): void {
@@ -203,7 +203,7 @@ function summary(dbs: DatabaseSync[], manifest: Omit<Manifest, "databases">): Pr
   if (imported.size !== count(intake, "intake_bindings")) reject("存在没有导入请求的代号绑定。");
   if (operations) {
     verifyOperationsStudentLinks(operations, students);
-    if (manifest.upgradedFrom && operationsProtection.tables.some(table => count(operations, table) !== 0)) {
+    if (manifest.upgradedFrom && operationsProtectionFor(Number(m1.prepare("PRAGMA user_version").get()?.user_version)).tables.some(table => count(operations, table) !== 0)) {
       reject("从四库备份升级的教务库必须为空。");
     }
   }
@@ -321,15 +321,20 @@ export function prepareProtectionRestore(bytes: Buffer, format: ProtectionFormat
     } finally { m1.close(); }
   }
 
-  if (manifest.formatVersion === 1) {
+  const oldOperations = operationsProtectionFor(sourceVersion);
+  const newOperations = operationsProtectionFor(m1Version);
+  if (manifest.formatVersion === 1 || oldOperations.version !== newOperations.version) {
     const db = new DatabaseSync(":memory:", { allowExtension: false, enableForeignKeyConstraints: true });
     try {
-      for (const ddl of operationsProtection.ddl) db.exec(ddl);
-      db.exec(`PRAGMA application_id=${operationsProtection.applicationId}; PRAGMA user_version=${operationsProtection.version}`);
-      const empty = snapshot(db, operationsProtection);
-      nextImages.push(empty);
-      nextManifest.databases.push(manifestDatabase(operationsProtection, empty, 2));
-      nextManifest.upgradedFrom = sourceDigest;
+      const isNew = manifest.formatVersion === 1;
+      if (!isNew) db.deserialize(Buffer.from(images[4]));
+      db.exec("PRAGMA trusted_schema=OFF");
+      for (const ddl of newOperations.ddl.slice(isNew ? 0 : oldOperations.ddl.length)) db.exec(ddl);
+      db.exec(`PRAGMA application_id=${newOperations.applicationId}; PRAGMA user_version=${newOperations.version}`);
+      const prepared = snapshot(db, newOperations);
+      nextImages[4] = prepared;
+      nextManifest.databases[4] = manifestDatabase(newOperations, prepared, 2);
+      if (isNew) nextManifest.upgradedFrom = sourceDigest;
     } finally { db.close(); }
   }
   const upgraded = encodeProtection(nextManifest, nextImages);

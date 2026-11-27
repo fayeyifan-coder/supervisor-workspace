@@ -40,6 +40,8 @@ export const channels = {
   activateRecovery: "m2d:activate-recovery",
   returnOriginalProfile: "m2d:return-original",
   scheduleAvailable: "r2b:schedule-available",
+  scheduleConfiguration: "r3:schedule-configuration",
+  changeCycleSchedule: "r3:change-cycle-schedule",
   scheduleWeek: "r2b:schedule-week",
   schedulePlan: "r2b:schedule-plan",
   attendanceBoard: "r2b:attendance-board",
@@ -191,6 +193,8 @@ export interface WorkspaceApi {
   pendingOperation(): Promise<Result<PendingOperationState>>;
   acknowledgeOperation(requestId: string, reviewed?: boolean): Promise<Result<null>>;
   scheduleAvailable(): Promise<Result<boolean>>;
+  scheduleConfiguration(): Promise<Result<import("./recurring-schedule").ScheduleConfiguration>>;
+  changeCycleSchedule(input: import("./recurring-schedule").CycleCommand): Promise<Result<import("./recurring-schedule").CycleResult>>;
   scheduleWeek(input: ScheduleWeekInput): Promise<Result<AttendancePlan[]>>;
   attendanceBoard(): Promise<Result<AttendanceBoardDay>>;
   schedulePlan(id: string): Promise<Result<AttendancePlan | null>>;

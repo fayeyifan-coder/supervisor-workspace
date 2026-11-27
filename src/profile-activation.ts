@@ -5,7 +5,7 @@ import { isM1Version, m1Protection, m1ProtectionLayout, WorkspaceFault, type M1V
 import { growthProtection } from "./growth-profile";
 import { worklogProtection } from "./worklog";
 import { intakeProtection } from "./student-intake";
-import { operationsProtection } from "./operations-schema";
+import { operationsProtectionFor } from "./operations-schema";
 import type { ProtectionFormat } from "./offline-protection";
 
 export const recoveryName = /^sw-m2d-restore-[a-f0-9]{32}$/;
@@ -153,7 +153,8 @@ export function isParentFollowUpProfile(name: string): boolean {
   return /^sw-parent-[a-z0-9-]+$/.test(name);
 }
 
-export function studentServicesVersion(name: string): 4 | 5 | 6 | 7 | 8 | undefined {
+export function studentServicesVersion(name: string): 4 | 5 | 6 | 7 | 8 | 9 | undefined {
+  if (/^sw-services-v9-[a-z0-9-]+$/.test(name)) return 9;
   if (/^sw-services-v8-[a-z0-9-]+$/.test(name)) return 8;
   if (/^sw-services-v7-[a-z0-9-]+$/.test(name)) return 7;
   if (/^sw-services-v6-[a-z0-9-]+$/.test(name)) return 6;
@@ -195,7 +196,7 @@ export function verifyProfileData(profile: string, firstOpen = false, format: Pr
     invalid("数据库目录缺失或路径异常。请保留现场。");
   }
   const names = new Set(readdirSync(data));
-  for (const { key, marker } of format === 2 ? [...stores, operationsProtection] : stores) {
+  for (const { key, marker } of format === 2 ? [...stores, operationsProtectionFor(m1Version)] : stores) {
     const main = key + ".sqlite3";
     const metadata = key + ".initialized";
     plainFile(join(data, main));

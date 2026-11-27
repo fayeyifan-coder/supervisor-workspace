@@ -29,7 +29,13 @@ export const exportTables = [
 ] as const;
 
 const lifecycleTable = table("mvp", "student_lifecycle", "学生跟进状态历史", "request_id,student_id,revision,previous_status,status,reason,changed_at", "history");
-export const exportTablesFor = (version: number) => version >= 8 ? [...exportTables, lifecycleTable] : exportTables;
+const recurringTables = [
+  table("operations", "schedule_rule_revisions", "周期排课修订", "id,revision,student_id,request_id,definition_json,changed_at", "history"),
+  table("operations", "schedule_hours_revisions", "营业时段修订", "revision,request_id,definition_json,changed_at", "history"),
+  table("operations", "schedule_origins", "单次安排来源", "plan_id,rule_id,rule_revision,slot_id,occurrence_date"),
+];
+export const exportTablesFor = (version: number) =>
+  [...exportTables, ...(version >= 8 ? [lifecycleTable] : []), ...(version >= 9 ? recurringTables : [])];
 
 export const columnLabels: Record<string, string> = {
  id: "记录身份", entity_id: "实体身份", request_id: "请求身份", student_id: "学生UUID", alias: "学生代号",
@@ -43,6 +49,8 @@ export const columnLabels: Record<string, string> = {
  completed_at: "完成时间", learning_characteristics: "学习特点", communication_preferences: "沟通偏好",
  current_situation: "当前情况", strengths: "优势", weak_areas: "薄弱点", target_score: "目标成绩",
  deadline: "目标期限", strategy: "教学措施", observed_on: "观察日期", content: "内容", code: "来源代号",
+ definition_json: "原规则内容", plan_id: "单日安排身份", rule_id: "来源规则", rule_revision: "来源规则版本",
+ slot_id: "来源时段身份", occurrence_date: "规则日期",
  previous_status: "变更前状态", reason: "状态变更原因",
  digest: "来源摘要", source_json: "导入原文", plan_json: "已确认导入方案", state: "导入原状态",
  student_confirmed: "身份已确认", start_at: "预计开始", end_at: "预计结束", kind: "安排类型",

@@ -98,7 +98,7 @@ async function launch() {
 const ok = reply => { assert.equal(reply.ok, true, JSON.stringify(reply)); return reply.value; };
 
 const writeMethods = ["createStudent", "addLesson", "saveStudentEdit", "finishStudentEdit", "createParentConcern",
-  "appendParentFollowUp", "saveStudentRecord", "saveStudentLifecycle", "resolveStudentWrite", "saveSchedulePlan", "applyLearningChange",
+  "appendParentFollowUp", "saveStudentRecord", "saveStudentLifecycle", "changeCycleSchedule", "resolveStudentWrite", "saveSchedulePlan", "applyLearningChange",
   "acknowledgeOperation", "saveWorkItem", "setWorkItemStatus", "saveGrowthProfile", "pickStudentIntake",
   "prepareStudentIntake", "saveStudentIntake"];
 

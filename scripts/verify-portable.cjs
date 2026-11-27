@@ -48,7 +48,7 @@ function verifyAsar(archive) {
   const buildFiles = ["build/main.js", "build/preload.js", "build/contracts.js", "build/database.js", "build/workspace-fault.js", "build/parent-follow-up.js", "build/student-records.js", "build/student-write-recovery.js", "build/student-lifecycle.js",
     "build/database-lifecycle.js", "build/worklog.js", "build/growth-profile.js",
     "build/student-intake.js", "build/intake-format.js", "build/offline-protection.js", "build/profile-activation.js",
-    "build/operations.js", "build/operations-schema.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js", "build/operations-pending.js",
+    "build/operations.js", "build/operations-schema.js", "build/recurring-schedule.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js", "build/operations-pending.js",
     "build/production-profile.js", "build/production-admission.js", "build/profile-write-gate.js",
     "build/backup-status.js", "build/diagnostics.js", "build/score-trend.js", "build/student-overview.js", "build/business-export.js", "build/business-export-schema.js", "build/business-export-files.js", "build/exceljs.runtime.js"];
   const allowed = new Set(["package.json", "build", "dist", "dist/assets", "dist/index.html", ...buildFiles]);

@@ -3,8 +3,11 @@ import { closeSync, lstatSync, openSync, readFileSync, readSync, realpathSync, w
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { WorkspaceFault, type WorkspaceDatabase } from "./database";
-import { operationsProtection, verifyOperationsStudentLinks } from "./operations-schema";
-import { minute, openingHours, shanghaiParts } from "./schedule-calendar";
+import { operationsProtectionFor, verifyOperationsStudentLinks, type OperationsLayout } from "./operations-schema";
+import { currentRules, dateApplies, persistCycleRule, persistScheduleHours, rangeFitsHours,
+  recurringConfiguration, scheduleCommand, stableScheduleId, storedScheduleHours,
+  type CycleKind, type CycleResult, type GenerationResult, type ScheduleConfiguration, type ScheduleOrigin } from "./recurring-schedule";
+import { minute, openingHours, shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
 
 export { operationsProtection, verifyOperationsStudentLinks } from "./operations-schema";
 
@@ -40,6 +43,8 @@ export interface SaveAttendancePlanInput extends ChangeInput {
 }
 
 export interface AttendancePlan {
+  cycleKind?: CycleKind;
+  cycleOrigin?: ScheduleOrigin;
   id: string;
   studentId: string;
   startAt: number;
@@ -138,13 +143,13 @@ function plainFile(path: string): boolean {
   return true;
 }
 
-function verifySchema(db: DatabaseSync): void {
+function verifySchema(db: DatabaseSync, layout: OperationsLayout): void {
   const schema = "SELECT type,name,tbl_name,sql FROM main.sqlite_schema ORDER BY type,name";
   const expected = new DatabaseSync(":memory:");
   try {
-    for (const sql of operationsProtection.ddl) expected.exec(sql);
-    if (db.prepare("PRAGMA application_id").get()?.application_id !== operationsProtection.applicationId ||
-        db.prepare("PRAGMA user_version").get()?.user_version !== operationsProtection.version ||
+    for (const sql of layout.ddl) expected.exec(sql);
+    if (db.prepare("PRAGMA application_id").get()?.application_id !== layout.applicationId ||
+        db.prepare("PRAGMA user_version").get()?.user_version !== layout.version ||
         JSON.stringify(db.prepare(schema).all()) !== JSON.stringify(expected.prepare(schema).all()) ||
         db.prepare("PRAGMA quick_check(1)").get()?.quick_check !== "ok" || db.prepare("PRAGMA foreign_key_check").get()) {
       recovery("教务数据库身份、Schema 或完整性无法确认。");
@@ -152,24 +157,28 @@ function verifySchema(db: DatabaseSync): void {
   } finally { expected.close(); }
 }
 
-function verifyHeader(path: string): void {
+function verifyHeader(path: string, layout: OperationsLayout): void {
   const fd = openSync(path, "r");
   try {
     const header = Buffer.alloc(100);
     if (readSync(fd, header, 0, header.length, 0) !== header.length ||
         header.toString("ascii", 0, 16) !== "SQLite format 3\0" ||
-        header.readUInt32BE(68) !== operationsProtection.applicationId ||
-        header.readUInt32BE(60) !== operationsProtection.version) recovery("教务数据库身份无法确认。");
+        header.readUInt32BE(68) !== layout.applicationId ||
+        header.readUInt32BE(60) !== layout.version) recovery("教务数据库身份无法确认。");
   } finally { closeSync(fd); }
 }
 
-// Desktop startup uses this store only in the isolated five-store synthetic mode.
+type ScheduleStudents = Pick<WorkspaceDatabase, "students"> & Partial<Pick<WorkspaceDatabase, "version">>;
+
 export class OperationsDatabase {
   private writesBlocked = false;
 
-  private constructor(private readonly db: DatabaseSync, private readonly m1: Pick<WorkspaceDatabase, "students">) {}
+  private constructor(private readonly db: DatabaseSync, private readonly m1: ScheduleStudents) {}
 
-  static open(dataDirectory: string, m1: Pick<WorkspaceDatabase, "students">, allowInitialize = false): OperationsDatabase {
+  get recurringEnabled(): boolean { return (this.m1.version ?? 0) >= 9; }
+
+  static open(dataDirectory: string, m1: ScheduleStudents, allowInitialize = false): OperationsDatabase {
+    const layout = operationsProtectionFor(m1.version ?? 1);
     const directory = resolve(dataDirectory);
     const entry = lstatSync(directory, { throwIfNoEntry: false });
     if (!entry?.isDirectory() || entry.isSymbolicLink() || realpathSync.native(directory) !== directory) {
@@ -182,9 +191,9 @@ export class OperationsDatabase {
       recovery("教务库初始化文件不完整，请保留主库、标记和侧车。");
     }
     if (exists) {
-      if (lstatSync(marker).size !== operationsProtection.marker.length ||
-          readFileSync(marker, "utf8") !== operationsProtection.marker) recovery("教务库初始化标记无效。");
-      verifyHeader(path);
+      if (lstatSync(marker).size !== layout.marker.length ||
+          readFileSync(marker, "utf8") !== layout.marker) recovery("教务库初始化标记无效。");
+      verifyHeader(path, layout);
     } else closeSync(openSync(path, "wx"));
 
     const db = new DatabaseSync(path, { allowExtension: false, enableForeignKeyConstraints: true, timeout: 1500 });
@@ -193,18 +202,18 @@ export class OperationsDatabase {
       if (!exists) {
         db.exec("BEGIN IMMEDIATE");
         try {
-          for (const sql of operationsProtection.ddl) db.exec(sql);
-          db.exec(`PRAGMA application_id=${operationsProtection.applicationId}; PRAGMA user_version=${operationsProtection.version}`);
-          verifySchema(db);
+          for (const sql of layout.ddl) db.exec(sql);
+          db.exec(`PRAGMA application_id=${layout.applicationId}; PRAGMA user_version=${layout.version}`);
+          verifySchema(db, layout);
           db.exec("COMMIT");
         } catch (error) {
           if (db.isTransaction) db.exec("ROLLBACK");
           throw error;
         }
-      } else verifySchema(db);
+      } else verifySchema(db, layout);
       verifyOperationsStudentLinks(db, new Set(m1.students().map(student => student.id)));
       if (db.prepare("PRAGMA journal_mode=WAL").get()?.journal_mode !== "wal") recovery("无法启用教务数据库 WAL。");
-      if (!initialized) writeFileSync(marker, operationsProtection.marker, { flag: "wx", flush: true });
+      if (!initialized) writeFileSync(marker, layout.marker, { flag: "wx", flush: true });
       return new OperationsDatabase(db, m1);
     } catch (error) {
       db.close();
@@ -214,7 +223,7 @@ export class OperationsDatabase {
 
   attendancePlan(planId: string): AttendancePlan | undefined {
     const row = this.db.prepare("SELECT " + planColumns + " FROM attendance_plans WHERE id=?").get(id(planId));
-    return row ? { ...row } as unknown as AttendancePlan : undefined;
+    return row ? this.withScheduleOrigin({ ...row } as unknown as AttendancePlan) : undefined;
   }
 
   listAttendancePlans(startAt: number, endAt: number, studentId?: string): AttendancePlan[] {
@@ -222,20 +231,80 @@ export class OperationsDatabase {
     const criteria = studentId === undefined ? "" : " AND student_id=?";
     const params = studentId === undefined ? [endAt, startAt] : [endAt, startAt, id(studentId)];
     return this.db.prepare("SELECT " + planColumns + " FROM attendance_plans WHERE start_at<? AND end_at>?" +
-      criteria + " ORDER BY start_at,id").all(...params).map(row => ({ ...row })) as unknown as AttendancePlan[];
+      criteria + " ORDER BY start_at,id").all(...params).map(row => this.withScheduleOrigin({ ...row } as unknown as AttendancePlan));
   }
 
-  saveAttendancePlan(input: SaveAttendancePlanInput): AttendancePlan {
+  private withScheduleOrigin(plan: AttendancePlan): AttendancePlan {
+    if (!this.recurringEnabled) return plan;
+    const origin = this.db.prepare(`SELECT rule_id AS ruleId,rule_revision AS revision,slot_id AS slotId,occurrence_date AS date,
+      json_extract(definition_json,'$.kind') AS kind FROM schedule_origins o
+      JOIN schedule_rule_revisions r ON r.id=o.rule_id AND r.revision=o.rule_revision
+      WHERE o.plan_id=?`).get(plan.id);
+    if (!origin) return plan;
+    const { kind, ...cycleOrigin } = origin;
+    return { ...plan, cycleKind: kind as CycleKind, cycleOrigin: cycleOrigin as unknown as ScheduleOrigin };
+  }
+
+  scheduleConfiguration(): ScheduleConfiguration {
+    if (!this.recurringEnabled) recovery("当前档案尚未启用周期排课。");
+    return recurringConfiguration(this.protectionConnection());
+  }
+
+  changeCycleSchedule(raw: unknown): CycleResult {
+    this.scheduleConfiguration();
+    const command = scheduleCommand(raw);
+    if (command.action === "generate") {
+      if (command.studentId && !this.m1.students().some(row => row.id === command.studentId)) invalid("找不到关联的学生。");
+      const configuration = this.scheduleConfiguration();
+      const students = new Map(this.m1.students().map(student => [student.id, student]));
+      const result: GenerationResult = { created: 0, existing: 0, inactive: 0, conflicts: 0, elapsed: 0 };
+      for (const rule of currentRules(configuration.rules)) {
+        if (command.studentId && command.studentId !== rule.studentId) continue;
+        for (let date = command.from; date <= command.to; date = shiftDate(date, 1)) {
+          for (const slot of rule.slots.filter(item => dateApplies(rule, date, item))) {
+            const origin = { ruleId: rule.id, revision: rule.revision, slotId: slot.id, date };
+            const planId = stableScheduleId("plan", rule.id, slot.id, date);
+            if (this.db.prepare("SELECT 1 FROM schedule_origins WHERE plan_id=?").get(planId)) { result.existing++; continue; }
+            if (rule.paused || students.get(rule.studentId)?.lifecycleStatus !== "active") { result.inactive++; continue; }
+            const startAt = shanghaiMinute(date, slot.start)!, endAt = shanghaiMinute(date, slot.end)!;
+            if (startAt <= Date.now()) { result.elapsed++; continue; }
+            if (!rangeFitsHours(startAt, endAt, configuration.hours)) { result.conflicts++; continue; }
+            try {
+              this.saveAttendancePlan({ id: planId, studentId: rule.studentId, expectedRevision: 0, startAt, endAt,
+                requestId: stableScheduleId("request", rule.id, slot.id, date) }, origin);
+              result.created++;
+            } catch (error) {
+              if (!(error instanceof WorkspaceFault) || error.code !== "conflict") throw error;
+              result.conflicts++;
+            }
+          }
+        }
+      }
+      return { action: "generate", result };
+    }
+    return this.transact(() => {
+      if (command.action === "hours") return { action: "hours", revision: persistScheduleHours(this.db, command, Date.now()) };
+      if (!this.m1.students().some(student => student.id === command.studentId)) invalid("找不到关联的学生。");
+      return { action: "rule", rule: persistCycleRule(this.db, command, Date.now()) };
+    });
+  }
+
+  saveAttendancePlan(input: SaveAttendancePlanInput, origin?: ScheduleOrigin): AttendancePlan {
     const change = identity(input), startAt = timestamp(input.startAt), kind = input.kind ?? "regular";
     if (kind !== "regular" && kind !== "whole_day") invalid("到校类型无效。");
     const endAt = timestamp(input.endAt ?? (kind === "regular" ? startAt + 120 * minute : undefined));
-    const inWindow = planningWindow(startAt, endAt);
+    const legacyWindow = planningWindow(startAt, endAt);
+    const inWindow = this.recurringEnabled ? rangeFitsHours(startAt, endAt, storedScheduleHours(this.db)) : legacyWindow;
     let exceptionReason: string | null = null;
     if (!inWindow) {
       if (input.exception?.confirmed !== true) invalid("默认时段外的单次排课需要明确确认。");
       exceptionReason = text(input.exception.reason, 500, true);
     }
-    return this.write("saveAttendancePlan", "attendance", change, { startAt, endAt, kind, exceptionReason }, now => {
+    return this.write(origin ? "generateScheduleOccurrence" : "saveAttendancePlan", "attendance", change,
+      { startAt, endAt, kind, exceptionReason, ...(origin ? { origin } : {}) }, now => {
+      if (origin && !this.m1.students().some(student => student.id === change.studentId && student.lifecycleStatus === "active")) {
+        conflict("该学生已暂停或归档，请人工核对既有安排。");
+      }
       const current = this.attendancePlan(change.id);
       this.checkRevision(current, change);
       if (startAt <= now || (current && (current.startAt <= now || !["planned", "confirmed"].includes(current.status)))) {
@@ -255,6 +324,8 @@ export class OperationsDatabase {
         end_at=excluded.end_at,kind=excluded.kind,outside_window=excluded.outside_window,
         exception_reason=excluded.exception_reason,revision=attendance_plans.revision+1,updated_at=excluded.updated_at`)
         .run(change.id, change.studentId, startAt, endAt, kind, Number(!inWindow), exceptionReason, now, now);
+      if (origin) this.db.prepare("INSERT INTO schedule_origins VALUES(?,?,?,?,?)")
+        .run(change.id, origin.ruleId, origin.revision, origin.slotId, origin.date);
       return this.attendancePlan(change.id)!;
     });
   }
@@ -451,11 +522,8 @@ export class OperationsDatabase {
 
   private write<T extends AttendancePlan | LearningBlock>(command: string, entity: "attendance" | "block",
       change: ChangeInput, payload: unknown, apply: (now: number) => T): T {
-    if (this.writesBlocked) recovery("教务库结果待确认，请关闭重开。");
     const digest = createHash("sha256").update(JSON.stringify({ ...change, payload })).digest("hex");
-    this.db.exec("BEGIN IMMEDIATE");
-    let committing = false;
-    try {
+    return this.transact(() => {
       if (!this.m1.students().some(student => student.id === change.studentId)) invalid("找不到关联的 M1 学生。");
       const prior = this.db.prepare("SELECT command,payload_sha256,result_json FROM operation_requests WHERE request_id=?")
         .get(change.requestId);
@@ -471,6 +539,16 @@ export class OperationsDatabase {
         this.db.prepare("INSERT INTO operation_changes VALUES(?,?,?,?,?,?,?)")
           .run(entity, result.id, result.studentId, result.revision, change.requestId, snapshot, now);
       }
+      return result;
+    });
+  }
+
+  private transact<T>(operation: () => T): T {
+    if (this.writesBlocked) recovery("教务库结果待确认，请关闭重开。");
+    this.db.exec("BEGIN IMMEDIATE");
+    let committing = false;
+    try {
+      const result = operation();
       committing = true;
       this.db.exec("COMMIT");
       return result;

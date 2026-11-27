@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import { WorkspaceFault } from "./database";
+import { WorkspaceFault } from "./workspace-fault";
+import { verifyRecurringHistory } from "./recurring-schedule";
 
 const ddl = [
   `CREATE TABLE attendance_plans (
@@ -61,12 +62,39 @@ export const operationsProtection = {
   ddl,
 } as const;
 
+const recurrenceTables = ["schedule_rule_revisions", "schedule_hours_revisions", "schedule_origins"] as const;
+const recurrenceDDL = [
+  `CREATE TABLE schedule_rule_revisions (
+    id TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision >= 1), student_id TEXT NOT NULL,
+    request_id TEXT NOT NULL UNIQUE, definition_json TEXT NOT NULL CHECK(json_valid(definition_json)),
+    changed_at INTEGER NOT NULL, PRIMARY KEY(id, revision)
+  ) STRICT`,
+  `CREATE TABLE schedule_hours_revisions (
+    revision INTEGER PRIMARY KEY CHECK(revision >= 1), request_id TEXT NOT NULL UNIQUE,
+    definition_json TEXT NOT NULL CHECK(json_valid(definition_json)), changed_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE TABLE schedule_origins (
+    plan_id TEXT PRIMARY KEY REFERENCES attendance_plans(id), rule_id TEXT NOT NULL,
+    rule_revision INTEGER NOT NULL, slot_id TEXT NOT NULL, occurrence_date TEXT NOT NULL,
+    UNIQUE(rule_id, slot_id, occurrence_date),
+    FOREIGN KEY(rule_id, rule_revision) REFERENCES schedule_rule_revisions(id, revision)
+  ) STRICT`
+] as const;
+
+export function operationsProtectionFor(m1Version: number) {
+  return m1Version < 9 ? operationsProtection : { ...operationsProtection, marker: "operations-v2\n", version: 2,
+    tables: [...operationsProtection.tables, ...recurrenceTables], ddl: [...operationsProtection.ddl, ...recurrenceDDL] };
+}
+export type OperationsLayout = ReturnType<typeof operationsProtectionFor>;
+
 export function verifyOperationsStudentLinks(database: DatabaseSync, m1StudentIds: ReadonlySet<string>): void {
   const students = database.prepare(`SELECT student_id FROM attendance_plans
     UNION SELECT student_id FROM learning_blocks UNION SELECT student_id FROM operation_changes`).all();
   if (students.some(row => typeof row.student_id !== "string" || !m1StudentIds.has(row.student_id))) {
     throw new WorkspaceFault("recovery", "教务数据库包含找不到对应 M1 档案的学生记录。");
   }
+
+  if (database.prepare("PRAGMA user_version").get()?.user_version === 2) verifyRecurringHistory(database, m1StudentIds);
 
   const inconsistent = database.prepare(`SELECT 1 FROM operation_changes AS change
     JOIN operation_requests AS receipt USING (request_id)

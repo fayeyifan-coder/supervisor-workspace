@@ -7,6 +7,8 @@ import type { GrowthSaveInput } from "./growth-profile";
 const api: WorkspaceApi = {
   workspaceInfo: () => ipcRenderer.invoke("mvp:workspace-info"),
   scheduleAvailable: () => ipcRenderer.invoke("r2b:schedule-available"),
+  scheduleConfiguration: () => ipcRenderer.invoke("r3:schedule-configuration"),
+  changeCycleSchedule: input => ipcRenderer.invoke("r3:change-cycle-schedule", input),
   scheduleWeek: (input: ScheduleWeekInput) => ipcRenderer.invoke("r2b:schedule-week", input),
   attendanceBoard: () => ipcRenderer.invoke("r2b:attendance-board"),
   schedulePlan: (id: string) => ipcRenderer.invoke("r2b:schedule-plan", id),

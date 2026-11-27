@@ -34,6 +34,15 @@ export function mondayOf(date: string): string {
   return shiftDate(date, -((weekday(date) + 6) % 7));
 }
 
+export interface ScheduleInterval { start: string; end: string }
+export type ScheduleHours = ScheduleInterval[][];
+
+export function defaultScheduleHours(): ScheduleHours {
+  return Array.from({ length: 7 }, (_, day) => day === 1 ? [] : day === 0 || day === 6
+    ? [{ start: "08:00", end: "12:00" }, { start: "14:00", end: "18:00" }]
+    : [{ start: "09:00", end: "12:00" }, { start: "16:00", end: "21:00" }]);
+}
+
 export function openingHours(date: string): { start: string; end: string } | null {
   switch (weekday(date)) {
     case 1: return null;

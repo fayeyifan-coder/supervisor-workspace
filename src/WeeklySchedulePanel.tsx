@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import type { AttendancePlan, Failure, LearningDayInput, ScheduleSaveInput, Student, WorkspaceApi } from "./contracts";
-import { attendanceCounts, minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange } from "./schedule-calendar";
+import { attendanceCounts, minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange, type ScheduleHours } from "./schedule-calendar";
+import type { ScheduleConfiguration } from "./recurring-schedule";
+import { RecurringSchedulePanel } from "./RecurringSchedulePanel";
 import { AttendanceLearningPanel } from "./AttendanceLearningPanel";
 import { usePendingOperation } from "./use-pending-operation";
 import "./weekly-schedule.css";
@@ -34,36 +36,41 @@ function toDraft(plan: AttendancePlan): Draft {
   };
 }
 
-function defaults(date: string, kind: Draft["kind"]) {
-  const hours = openingHours(date);
+function windowsOf(date: string, schedule?: ScheduleHours) {
+  if (schedule) return schedule[weekday(date)];
+  const legacy = openingHours(date);
+  return legacy ? [legacy] : [];
+}
+
+function defaults(date: string, kind: Draft["kind"], schedule?: ScheduleHours) {
+  const hours = windowsOf(date, schedule)[0];
   const start = hours?.start ?? "16:00";
   return { start, end: kind === "whole_day" ? hours?.end ?? "18:00"
     : shanghaiParts(shanghaiMinute(date, start)! + 120 * minute).time };
 }
 
-function nextDefaultDate(week: string): string {
+function nextDefaultDate(week: string, schedule?: ScheduleHours): string {
   const now = Date.now();
-  return Array.from({ length: 6 }, (_, index) => shiftDate(week, index + 1))
-    .find(date => shanghaiMinute(date, openingHours(date)!.start)! > now) ??
+  const days = Array.from({ length: 7 }, (_, index) => shiftDate(week, index));
+  return days.find(date => windowsOf(date, schedule).some(slot => (shanghaiMinute(date, slot.start) ?? 0) > now)) ??
     Array.from({ length: 7 }, (_, index) => shiftDate(shanghaiParts(now).date, index + 1))
-      .find(date => openingHours(date) !== null)!;
+      .find(date => windowsOf(date, schedule).length > 0) ?? shiftDate(shanghaiParts(now).date, 1);
 }
 
-function outsideHours(draft: Draft): boolean {
+function outsideHours(draft: Draft, schedule?: ScheduleHours): boolean {
   if (shanghaiMinute(draft.date, draft.start) === null || shanghaiMinute(draft.date, draft.end) === null) return false;
-  const hours = openingHours(draft.date);
-  return hours === null || draft.start < hours.start || draft.end > hours.end;
+  return !windowsOf(draft.date, schedule).some(slot => draft.start >= slot.start && draft.end <= slot.end);
 }
 
-function exceptionText(draft: Draft): string {
-  const hours = openingHours(draft.date);
-  return hours ? "这个时段超出当天开放时间 " + hours.start + "–" + hours.end + "。"
-    : "周一默认停排。";
+function exceptionText(draft: Draft, schedule?: ScheduleHours): string {
+  const hours = windowsOf(draft.date, schedule);
+  return hours.length ? "当天开放时段为 " + hours.map(slot => slot.start + "–" + slot.end).join("、") + "。"
+    : "当天未配置营业时段。";
 }
 
-export function WeeklySchedulePanel({ api, students, studentId, setStudentId, learning, learningBackLabel,
+export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId, setStudentId, learning, learningBackLabel,
   onLearning, onExitLearning, learningLeaveGuard, onStudent, summary }: {
-  api: WorkspaceApi; students: Student[]; studentId: string; setStudentId: (id: string) => void;
+  api: WorkspaceApi; recurringEnabled: boolean; students: Student[]; studentId: string; setStudentId: (id: string) => void;
   learning?: LearningDayInput & { focusTaskId?: string }; learningBackLabel?: string;
   onLearning: (target: LearningDayInput, trigger: HTMLButtonElement) => void;
   onExitLearning: () => void; learningLeaveGuard: Ref<() => boolean>;
@@ -75,6 +82,7 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
   const [day, setDay] = useState(today);
   const [mode, setMode] = useState<"week" | "day">("day");
   const [queryRevision, setQueryRevision] = useState(0);
+  const [configuration, setConfiguration] = useState<ScheduleConfiguration>();
   const [listing, setListing] = useState<{ key: string; rows?: AttendancePlan[]; error?: string }>();
   const [draft, setDraft] = useState<Draft>();
   const [draftDirty, setDraftDirty] = useState(false);
@@ -109,6 +117,13 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
     return () => { mounted = false; };
   }, [api, queryKey, queryRevision, studentId, week, learning]);
 
+  useEffect(() => {
+    if (!recurringEnabled) return;
+    let current = true;
+    api.scheduleConfiguration().then(result => { if (current && result.ok) setConfiguration(result.value); }).catch(() => undefined);
+    return () => { current = false; };
+  }, [api, recurringEnabled, queryRevision]);
+
   function refresh() { setQueryRevision(value => value + 1); }
 
   function canDiscard(): boolean {
@@ -127,10 +142,10 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
 
   function newDraft() {
     if (!canDiscard()) return;
-    const desired = shanghaiMinute(day, defaults(day, "regular").start);
-    const date = mode === "day" && desired !== null && desired > Date.now() ? day : nextDefaultDate(week);
+    const desired = shanghaiMinute(day, defaults(day, "regular", configuration?.hours).start);
+    const date = mode === "day" && desired !== null && desired > Date.now() ? day : nextDefaultDate(week, configuration?.hours);
     showDraft({ id: crypto.randomUUID(), studentId: studentId || students[0]?.id || "", date,
-      ...defaults(date, "regular"), kind: "regular", confirmed: false, reason: "" });
+      ...defaults(date, "regular", configuration?.hours), kind: "regular", confirmed: false, reason: "" });
   }
 
   function updateDraft(fields: Partial<Draft>) {
@@ -160,7 +175,7 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
       setNotice({ kind: "failure", message: "请填写有效日期和时段，结束须晚于开始。" });
       return;
     }
-    const exception = outsideHours(draft);
+    const exception = outsideHours(draft, configuration?.hours);
     if (exception && (!draft.confirmed || !draft.reason.trim())) {
       setNotice({ kind: "failure", message: "请确认本次时段例外并填写原因。" });
       return;
@@ -210,11 +225,11 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
   const days = Array.from({ length: 7 }, (_, index) => shiftDate(week, index));
   const plansByDay = new Map(days.map(date => [date, [] as AttendancePlan[]]));
   for (const plan of current?.rows ?? []) plansByDay.get(shanghaiParts(plan.startAt).date)?.push(plan);
-  const hasMonday = Boolean(plansByDay.get(week)?.length);
+  const hasMonday = Boolean(plansByDay.get(week)?.length || configuration?.hours[1].length);
   const shownDays = mode === "day" ? [day] : hasMonday ? days : days.slice(1);
   const listed = attendanceCounts(shownDays.flatMap(date => plansByDay.get(date) ?? []));
   const readOnly = Boolean(draft?.original && !canEdit(draft.original));
-  const exception = draft && outsideHours(draft);
+  const exception = draft && outsideHours(draft, configuration?.hours);
 
   return <>
     {(request.state?.kind === "pending" || request.state?.kind === "damaged" || request.issue || request.message) &&
@@ -251,6 +266,8 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
       <button type="button" className="primary schedule-primary" disabled={!students.length || busy || request.blocked} onClick={newDraft}>新建单次排课</button>
     </header>
     {summary}
+    {recurringEnabled && <RecurringSchedulePanel api={api} configuration={configuration} students={students} week={week}
+      studentId={studentId} blocked={busy || request.blocked} onChanged={refresh} />}
     <div className="schedule-toolbar">
       <div className="schedule-period">
         <div className="schedule-buttons" aria-label="课表视图">
@@ -312,7 +329,7 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
           </select>
         </label>
         {exception && <div className="schedule-exception">
-          <p>{exceptionText(draft)}</p>
+          <p>{exceptionText(draft, configuration?.hours)}</p>
           <label className="schedule-check"><input type="checkbox" checked={draft.confirmed}
             onChange={event => updateDraft({ confirmed: event.target.checked })} />确认仅本次例外</label>
           <label>例外原因<input value={draft.reason} maxLength={500}
@@ -357,7 +374,7 @@ export function WeeklySchedulePanel({ api, students, studentId, setStudentId, le
                 }}>
                 <span className="schedule-card-time">{start}–{end}</span>
                 <strong>{alias}</strong>
-                <span className="schedule-card-meta">{plan.kind === "whole_day" ? "全天" : "普通"} · {attendanceLabel(plan)}</span>
+                <span className="schedule-card-meta">{plan.cycleKind === "long_term" ? "长期在校" : plan.cycleKind === "fixed" ? "固定到课" : plan.kind === "whole_day" ? "全天" : "单次"} · {attendanceLabel(plan)}</span>
                 {plan.exceptionReason && <span className="schedule-card-exception">时段例外</span>}
               </button>
               <div className="schedule-card-actions">

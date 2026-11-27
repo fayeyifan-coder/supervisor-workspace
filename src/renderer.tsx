@@ -430,7 +430,7 @@ function App() {
       <p className="schedule-page" role="status">{listError || "正在读取课表…"}</p>}
     {!showingWorkspace && !students && listError && <button type="button" className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取档案</button>}
     {scheduleEnabled && students && <div hidden={page !== "schedule" && !learning}>
-      <WeeklySchedulePanel api={api} students={students} studentId={studentFilter} setStudentId={setStudentFilter}
+      <WeeklySchedulePanel api={api} recurringEnabled={studentRecordVersion >= 9} students={students} studentId={studentFilter} setStudentId={setStudentFilter}
         learning={learning} learningBackLabel={page === "board" ? "返回今日到校" : page === "students" ? "返回学生概览" : undefined} onLearning={openLearning} onExitLearning={closeLearning}
         learningLeaveGuard={learningLeaveGuard} onStudent={(id, trigger) => openLinkedStudent(id, "schedule", trigger)}
         summary={<section className="schedule-attendance" aria-labelledby="schedule-attendance-title">

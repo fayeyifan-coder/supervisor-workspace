@@ -305,6 +305,11 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   }
   handle(channels.scheduleAvailable, event => isTrusted(event, window)
     ? { ok: true, value: format === 2 && Boolean(operations && database) } : denied());
+  handle(channels.scheduleConfiguration, event => invokeSchedule(event, store => store.scheduleConfiguration()));
+  handleWrite(channels.changeCycleSchedule, (event, raw: unknown) => invokeSchedule(event, store => {
+    if (operationsPending.state().kind !== "empty") throw new WorkspaceFault("recovery", "请先核对原教务请求。");
+    return store.changeCycleSchedule(raw);
+  }));
   handle(channels.scheduleWeek, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => listScheduleWeek(store, students, raw)));
   handle(channels.attendanceBoard, event => invokeSchedule(event, readAttendanceBoard));
