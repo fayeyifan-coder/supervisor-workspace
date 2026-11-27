@@ -5,7 +5,7 @@ import { WorkspaceFault } from "./workspace-fault";
 export interface RecordField {
   key: string;
   label: string;
-  type?: "date" | "number" | "textarea";
+  type?: "date" | "number" | "integer" | "textarea";
   options?: readonly string[];
   optional?: boolean;
   limit?: number;
@@ -18,6 +18,13 @@ interface RecordDefinition {
   fields: readonly RecordField[];
   validate?: (fields: Record<string, string>) => void;
 }
+
+export const scoreRankFields: readonly RecordField[] = [
+  { key: "classRank", label: "班级排名", type: "integer", optional: true, limit: 16 },
+  { key: "classSize", label: "班级参考人数", type: "integer", optional: true, limit: 16 },
+  { key: "gradeRank", label: "年级排名", type: "integer", optional: true, limit: 16 },
+  { key: "gradeSize", label: "年级参考人数", type: "integer", optional: true, limit: 16 },
+];
 
 export const studentRecordDefinitions = {
   enrollment: {
@@ -92,6 +99,13 @@ export const studentRecordDefinitions = {
 } satisfies Record<string, RecordDefinition>;
 
 export type StudentRecordKind = keyof typeof studentRecordDefinitions;
+
+const rankedScoreVersion = 7;
+
+export function studentRecordFields(kind: StudentRecordKind, version: number): readonly RecordField[] {
+  const fields = studentRecordDefinitions[kind].fields;
+  return kind === "score" && version >= rankedScoreVersion ? [...fields, ...scoreRankFields] : fields;
+}
 export interface StudentRecord {
   id: string;
   studentId: string;
@@ -127,23 +141,40 @@ function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid("学生记录格式无效。");
   return value as Record<string, unknown>;
 }
-function fieldsFor(definition: RecordDefinition, raw: unknown): Record<string, string> {
+function fieldsFor(definition: RecordDefinition, raw: unknown, ranked = false): Record<string, string> {
   const input = object(raw);
-  if (Object.keys(input).length !== definition.fields.length) invalid("学生记录字段不完整。");
   const fields: Record<string, string> = {};
-  for (const field of definition.fields) {
+  const definitions = ranked ? [...definition.fields, ...scoreRankFields] : definition.fields;
+  if (Object.keys(input).some(key => !definitions.some(field => field.key === key))) invalid("学生记录包含未知字段。");
+  for (const field of definitions) {
+    const present = Object.hasOwn(input, field.key);
+    if (!present && field.type === "integer") continue;
     const value = input[field.key];
     if (typeof value !== "string" || value.length > (field.limit ?? 1000) || value.includes("\0") ||
         (!field.optional && !value.trim())) invalid("请检查" + field.label + "。");
     if (value && field.type === "number" && !/^(?:0|[1-9][0-9]{0,4})(?:\.[0-9]{1,2})?$/.test(value)) {
       invalid(field.label + "须为 0 至 99999.99 的数字，最多两位小数。");
     }
+    if (field.type === "integer") {
+      if (!value.trim()) continue;
+      if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value))) invalid(field.label + "须为正整数。");
+    }
     if (value && field.type === "date" && shanghaiMinute(value, "00:00") === null) invalid(field.label + "无效。");
     if (field.options && !field.options.includes(value)) invalid(field.label + "无效。");
     fields[field.key] = value.trim();
   }
   definition.validate?.(fields);
+  if (ranked) {
+    for (const [rank, size, label] of [["classRank", "classSize", "班级"], ["gradeRank", "gradeSize", "年级"]]) {
+      if (fields[rank] && fields[size] && Number(fields[rank]) > Number(fields[size])) invalid(label + "排名不能超过参考人数。");
+    }
+  }
   return fields;
+}
+
+function payloadFor(definition: RecordDefinition, fields: Record<string, string>): string {
+  return JSON.stringify(definition === studentRecordDefinitions.score && scoreRankFields.some(field => Object.hasOwn(fields, field.key))
+    ? { version: 2, fields } : fields);
 }
 function definitionFor(kind: unknown, version: number): RecordDefinition {
   if (typeof kind !== "string" || !Object.hasOwn(studentRecordDefinitions, kind)) invalid("学生记录类型无效。");
@@ -165,14 +196,16 @@ export function studentRecordSchema(version: number) {
 }
 
 const columns = "request_id AS requestId, entity_id AS id, student_id AS studentId, revision, payload, saved_at AS savedAt";
-function record(row: Record<string, unknown>, definition: RecordDefinition): StudentRecord {
+function record(row: Record<string, unknown>, definition: RecordDefinition, version: number): StudentRecord {
   const { id, requestId, studentId, revision, savedAt, payload } = row;
   if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1 ||
       typeof savedAt !== "number" || !Number.isSafeInteger(savedAt) || savedAt < 0 || typeof payload !== "string") {
     invalid("已有学生记录的版本、时间或内容无法验证。");
   }
-  const fields = fieldsFor(definition, JSON.parse(payload));
-  if (JSON.stringify(fields) !== payload) invalid("已有学生记录内容不符合格式。");
+  const decoded = object(JSON.parse(payload));
+  const ranked = definition === studentRecordDefinitions.score && version >= rankedScoreVersion && decoded.version === 2;
+  const fields = fieldsFor(definition, ranked ? decoded.fields : decoded, ranked);
+  if (payloadFor(definition, fields) !== payload) invalid("已有学生记录内容不符合格式。");
   return { id: uuid(id), requestId: uuid(requestId), studentId: uuid(studentId), revision, fields, savedAt };
 }
 
@@ -187,7 +220,7 @@ export function readStudentRecords(db: DatabaseSync, version: number, kind: unkn
   const records = db.prepare(`SELECT ${columns} FROM ${definition.table} saved
     WHERE student_id=? AND NOT EXISTS (SELECT 1 FROM ${definition.table} later
       WHERE later.entity_id=saved.entity_id AND later.revision>saved.revision)
-    ORDER BY saved_at DESC, entity_id`).all(studentId).map(row => record(row, definition));
+    ORDER BY saved_at DESC, entity_id`).all(studentId).map(row => record(row, definition, version));
   return { studentId, records };
 }
 
@@ -196,7 +229,7 @@ function verifyTrainingPlan(db: DatabaseSync, studentId: string, fields: Record<
   const row = db.prepare(`SELECT ${columns} FROM ${definition.table} WHERE entity_id=? AND revision=?`)
     .get(fields.planId, Number(fields.planRevision));
   if (!row || row.studentId !== studentId) invalid("训练结果须关联该学生的已保存方案版本。");
-  if (fields.trainedOn < record(row, definition).fields.startsOn) invalid("训练日期不能早于所选方案版本的开始日期。");
+  if (fields.trainedOn < record(row, definition, 6).fields.startsOn) invalid("训练日期不能早于所选方案版本的开始日期。");
 }
 
 export function studentRecordInput(version: number, raw: unknown): StudentRecordInput {
@@ -207,28 +240,28 @@ export function studentRecordInput(version: number, raw: unknown): StudentRecord
     invalid("保存版本无效。");
   }
   return { kind: input.kind as StudentRecordKind, id, studentId, requestId, expectedRevision: expected,
-    fields: fieldsFor(definition, input.fields) };
+    fields: fieldsFor(definition, input.fields, input.kind === "score" && version >= rankedScoreVersion) };
 }
-function recordReceipt(db: DatabaseSync, input: StudentRecordInput, definition: RecordDefinition): StudentRecord | undefined {
+function recordReceipt(db: DatabaseSync, input: StudentRecordInput, definition: RecordDefinition, version: number): StudentRecord | undefined {
   const existing = db.prepare(`SELECT ${columns} FROM ${definition.table} WHERE request_id=?`).get(input.requestId);
   if (!existing) return;
   if (existing.id !== input.id || existing.studentId !== input.studentId ||
-      existing.revision !== input.expectedRevision + 1 || existing.payload !== JSON.stringify(input.fields)) {
+      existing.revision !== input.expectedRevision + 1 || existing.payload !== payloadFor(definition, input.fields)) {
     conflict("此请求编号已用于其他记录。");
   }
-  return record(existing, definition);
+  return record(existing, definition, version);
 }
 export function studentRecordCommitted(db: DatabaseSync, version: number, raw: unknown): boolean {
   const input = studentRecordInput(version, raw);
-  return Boolean(recordReceipt(db, input, definitionFor(input.kind, version)));
+  return Boolean(recordReceipt(db, input, definitionFor(input.kind, version), version));
 }
 export function saveStudentRecord(db: DatabaseSync, version: number, raw: unknown): StudentRecord {
   const input = studentRecordInput(version, raw);
   const definition = definitionFor(input.kind, version);
   const { id, studentId, requestId, expectedRevision: expected, fields } = input;
-  const payload = JSON.stringify(fields);
+  const payload = payloadFor(definition, fields);
   requireStudent(db, studentId);
-  const existing = recordReceipt(db, input, definition);
+  const existing = recordReceipt(db, input, definition, version);
   if (existing) return existing;
   for (const other of definitionsAt(version)) {
     if (other !== definition && db.prepare(`SELECT 1 FROM ${other.table} WHERE request_id=?`).get(requestId)) {
@@ -256,7 +289,7 @@ export function verifyStudentRecords(db: DatabaseSync, version: number): void {
   for (const definition of definitionsAt(version)) {
     let last: StudentRecord | undefined;
     for (const row of db.prepare(`SELECT ${columns} FROM ${definition.table} ORDER BY entity_id, revision`).iterate()) {
-      const next = record(row, definition);
+      const next = record(row, definition, version);
       if (requests.has(next.requestId) ||
           (last?.id === next.id ? next.studentId !== last.studentId || next.revision !== last.revision + 1 : next.revision !== 1)) {
         invalid("学生记录的归属、版本或请求编号不一致。");

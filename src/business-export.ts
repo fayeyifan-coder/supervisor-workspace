@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { validateProtection } from "./offline-protection";
 import { WorkspaceFault } from "./workspace-fault";
 import { columnLabels, exportTables, type ExportRole } from "./business-export-schema";
-import { studentRecordDefinitions } from "./student-records";
+import { studentRecordDefinitions, studentRecordFields, type StudentRecordKind } from "./student-records";
 
 export type ExportValue = string | number | null | { sqliteInteger: string };
 export interface ExportTableSummary {
@@ -21,7 +21,7 @@ export interface BusinessExportResult {
 }
 export interface BusinessExportDocument {
  format: "sw-business-data-v1"; snapshotId: string; capturedAt: string; applicationVersion: string;
- m1Version: 6; includeSourceText: boolean; sourceImages: { file: string; sha256: string }[];
+ m1Version: 6 | 7; includeSourceText: boolean; sourceImages: { file: string; sha256: string }[];
  tables: (ExportTableSummary & { rows: Record<string, ExportValue>[] })[];
 }
 const maxJsonBytes = 32 * 1024 * 1024;
@@ -30,7 +30,8 @@ function invalid(message: string): never { throw new WorkspaceFault("invalid", m
 
 export function businessExportDocument(bytes: Buffer, includeSourceText: boolean): BusinessExportDocument {
  const checked = validateProtection(bytes);
- if (checked.summary.formatVersion !== 2 || checked.summary.m1Version !== 6) invalid("业务导出仅支持当前五库 v6 档案，不会自动迁移。请继续使用完整备份。");
+ const m1Version = checked.summary.m1Version;
+ if (checked.summary.formatVersion !== 2 || (m1Version !== 6 && m1Version !== 7)) invalid("业务导出需要五库 v6 或更新档案。请继续使用完整备份。");
  if (checked.summary.unfinishedImports) throw new WorkspaceFault("recovery", "存在未完成导入，请先核对处理，再生成业务导出。");
  const tables: BusinessExportDocument["tables"] = [];
  for (let index = 0; index < checked.images.length; index++) {
@@ -72,7 +73,7 @@ export function businessExportDocument(bytes: Buffer, includeSourceText: boolean
   } finally { db.close(); }
  }
  const result: BusinessExportDocument = {format: "sw-business-data-v1", snapshotId: hash(bytes), capturedAt: checked.summary.createdAt,
-  applicationVersion: checked.summary.applicationVersion, m1Version: 6, includeSourceText,
+  applicationVersion: checked.summary.applicationVersion, m1Version, includeSourceText,
   sourceImages: checked.manifest.databases.map(row => ({file: row.file, sha256: row.sha256})), tables};
  const size = Buffer.byteLength(JSON.stringify(result));
  if (size > maxJsonBytes || Math.min(freemem(), process.availableMemory()) < size * 16 + 128 * 1024 * 1024) {
@@ -149,9 +150,10 @@ export async function businessExportPayload(document: BusinessExportDocument, sh
   for (const column of table.sourceColumns) add(fields, [table.store, table.table, column, table.role === "internal" || !table.columns.includes(column) ? "排除" : (columnLabels[column] ?? column) + " [" + column + "]", table.reason]);
   if (table.role === "internal") continue;
   // Payload keeps its original JSON column AND decoded fields for human reading.
-  const definition = Object.values(studentRecordDefinitions).find(row => row.table === table.table);
-  const decoded = table.columns.includes("payload") && definition ? definition.fields.map(row => row.key) : [];
-  const payloadLabel = (key: string) => definition?.fields.find(row => row.key === key)?.label ?? key;
+  const kind = (Object.keys(studentRecordDefinitions) as StudentRecordKind[]).find(key => studentRecordDefinitions[key].table === table.table);
+  const payloadFields = table.columns.includes("payload") && kind ? studentRecordFields(kind, document.m1Version) : [];
+  const decoded = payloadFields.map(row => row.key);
+  const payloadLabel = (key: string) => payloadFields.find(row => row.key === key)?.label ?? key;
   for (const key of decoded) add(fields, [table.store, table.table, "payload." + key, payloadLabel(key) + " [payload." + key + "]", "从同一原始 payload 解码；完整原文列及 JSON 均保留。"]);
   const metadata = new Set(["id","entity_id","student_id","request_id","revision","created_at","updated_at","saved_at","changed_at","recorded_at","digest"]);
   const displayColumns = [...table.columns].sort((a,b) => Number(metadata.has(a)) - Number(metadata.has(b)));
@@ -159,7 +161,8 @@ export async function businessExportPayload(document: BusinessExportDocument, sh
    const name = table.sheet + (part > 1 ? "-" + part : ""); const headings = [...decoded.map(key => payloadLabel(key) + " [payload." + key + "]"), ...displayColumns.map(column => (columnLabels[column] ?? column) + " [" + column + "]")];
    const target = sheet(name, headings); workbookSheets.push({sheet: name, table: table.table, sourceStart: start, sourceEnd: Math.min(start + sheetRowLimit, table.rows.length), columns: [...decoded.map(key => "payload." + key), ...displayColumns]});
    for (const [offset, row] of table.rows.slice(start, start + sheetRowLimit).entries()) {
-    const payload = decoded.length ? JSON.parse(String(row.payload)) as Record<string, ExportValue> : {};
+    const rawPayload = decoded.length ? JSON.parse(String(row.payload)) : {};
+    const payload: Record<string, ExportValue> = kind === "score" && rawPayload.version === 2 ? rawPayload.fields : rawPayload;
     add(target, [...decoded.map(key => cellValue(payload[key] === undefined ? "" : text(payload[key]), table.table, start + offset + 1, "payload." + key)), ...displayColumns.map(column => cellValue(text(row[column]), table.table, start + offset + 1, column))]);
    }
    if (part % 2 === 0) await new Promise<void>(resolve => setImmediate(resolve));

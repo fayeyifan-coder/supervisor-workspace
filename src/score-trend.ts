@@ -16,6 +16,20 @@ function valid(record: StudentRecord): boolean {
     Number(maximum) > 0 && Number(score) <= Number(maximum);
 }
 
+export type RankDimension = "class" | "grade";
+
+export function scoreRank(record: StudentRecord, dimension: RankDimension) {
+  const rank = record.fields[dimension + "Rank"];
+  const size = record.fields[dimension + "Size"];
+  return { rank: rank ? Number(rank) : null, size: size ? Number(size) : null };
+}
+
+export function rankTrend(points: readonly { record: StudentRecord }[], dimension: RankDimension) {
+  const ranks = points.map(({ record }) => scoreRank(record, dimension).rank);
+  const available = ranks.filter((rank): rank is number => rank !== null);
+  return { ranks, count: available.length, bottom: available.reduce((maximum, rank) => Math.max(maximum, rank), 1) };
+}
+
 export function scoreTrend(records: readonly StudentRecord[], studentId: string, chosenSubject = "", category = "", options: TrendOptions = {}) {
   const own = records.filter(record => record.studentId === studentId);
   const usable = own.filter(valid);

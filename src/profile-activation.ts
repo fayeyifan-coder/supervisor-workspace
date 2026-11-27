@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { m1Protection, m1ProtectionLayout, WorkspaceFault, type M1Version } from "./database";
+import { isM1Version, m1Protection, m1ProtectionLayout, WorkspaceFault, type M1Version } from "./database";
 import { growthProtection } from "./growth-profile";
 import { worklogProtection } from "./worklog";
 import { intakeProtection } from "./student-intake";
@@ -86,6 +86,18 @@ export function saveActivation(owner: string, state: ActivationState, required =
   }
   publishSelectionFile(owner, path, JSON.stringify(state));
 }
+export function restoredStudentVersion(root: string, name: string): M1Version {
+  if (!activeName.test(name) && !recoveryName.test(name)) return invalid("恢复档案编号无效。");
+  const marker = join(root, name, "profile", recoveryName.test(name) ? "recovery" : "data", "mvp.initialized");
+  plainFile(marker, 32);
+  const contents = readFileSync(marker, "utf8");
+  const version = Number(/^mvp-v(\d+)\n$/.exec(contents)?.[1]);
+  if (!isM1Version(version) || version < 6 || contents !== m1ProtectionLayout(version).marker) {
+    return invalid("恢复档案的学生数据版本不受支持。");
+  }
+  return version;
+}
+
 export function verifyActiveProfile(root: string, active: Selection, firstOpen: boolean, format: ProtectionFormat = 1, m1Version: M1Version = 1): string {
   if (!selection(active, activeName)) return invalid("活动恢复档案编号无效。");
   const container = join(root, active.name);
@@ -141,7 +153,8 @@ export function isParentFollowUpProfile(name: string): boolean {
   return /^sw-parent-[a-z0-9-]+$/.test(name);
 }
 
-export function studentServicesVersion(name: string): 4 | 5 | 6 | undefined {
+export function studentServicesVersion(name: string): 4 | 5 | 6 | 7 | undefined {
+  if (/^sw-services-v7-[a-z0-9-]+$/.test(name)) return 7;
   if (/^sw-services-v6-[a-z0-9-]+$/.test(name)) return 6;
   if (/^sw-services-v5-[a-z0-9-]+$/.test(name)) return 5;
   if (/^sw-services-[a-z0-9-]+$/.test(name)) return 4;

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { StudentRecord } from "./student-records";
-import { scoreTrend } from "./score-trend";
+import { rankTrend, scoreRank, scoreTrend } from "./score-trend";
 
-export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; studentId: string }) {
+export function ScoreTrend({ records, studentId, ranksEnabled }: { records: StudentRecord[]; studentId: string; ranksEnabled: boolean }) {
   const [owner, setOwner] = useState(studentId);
   const [subject, setSubject] = useState("");
   const [category, setCategory] = useState("");
@@ -35,7 +35,10 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
     setSelection([]); setPage(0);
     setResetNotice(subject + "学科已无有效成绩，类别筛选已清除。");
   }
-  const mode = requestedMode === "raw" && view.rawAvailable ? "raw" : "rate";
+  const rankDimension = ranksEnabled && (requestedMode === "class" || requestedMode === "grade") ? requestedMode : null;
+  const mode = rankDimension ?? (requestedMode === "raw" && view.rawAvailable ? "raw" : "rate");
+  const rank = rankDimension ? rankTrend(view.points, rankDimension) : null;
+  const axisLabel = rankDimension === "class" ? "班级排名" : "年级排名";
   const pages = Math.max(1, Math.ceil(view.filtered.length / 50));
   const currentPage = Math.min(page, pages - 1);
   const visible = view.filtered.slice(currentPage * 50, (currentPage + 1) * 50);
@@ -45,26 +48,33 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
     if (!ctx) return;
     ctx.clearRect(0, 0, 720, 250); ctx.font = "12px system-ui"; ctx.textAlign = "right";
     const ceiling = mode === "raw" ? view.maximum! : 100;
-    for (const fraction of [1, .75, .5, .25, 0]) {
-      const y = 18 + (1 - fraction) * 165;
+    const ticks = rank
+      ? [...new Set([0, .25, .5, .75, 1].map(fraction => 1 + Math.round(fraction * (rank.bottom - 1))))]
+        .map(value => ({ y: 18 + (value - 1) * 165 / Math.max(1, rank.bottom - 1), label: "第 " + value + " 名" }))
+      : [1, .75, .5, .25, 0].map(fraction => ({ y: 18 + (1 - fraction) * 165,
+        label: mode === "raw" ? Number((ceiling * fraction).toFixed(2)) + "分" : fraction * 100 + "%" }));
+    for (const { y, label } of ticks) {
       ctx.fillStyle = "#43504c";
-      ctx.fillText(mode === "raw" ? Number((ceiling * fraction).toFixed(2)) + "分" : fraction * 100 + "%", 84, y + 5);
+      ctx.fillText(label, 84, y + 5, 82);
       ctx.strokeStyle = "#d5dfd8"; ctx.beginPath(); ctx.moveTo(94, y); ctx.lineTo(685, y); ctx.stroke();
     }
     const locations = view.points.map(({ record, rate }, index) => ({
       x: view.points.length === 1 ? 385 : 106 + index * 564 / (view.points.length - 1),
-      y: 183 - rate * 1.65, label: record.fields.takenOn,
+      y: rank ? (rank.ranks[index] === null ? null : 18 + (rank.ranks[index]! - 1) * 165 / Math.max(1, rank.bottom - 1)) : 183 - rate * 1.65,
+      label: record.fields.takenOn,
     }));
-    ctx.strokeStyle = "#17664d"; ctx.lineWidth = 2; ctx.beginPath();
-    locations.forEach(({ x, y }, i) => i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)); ctx.stroke();
+    if (!rank) {
+      ctx.strokeStyle = "#17664d"; ctx.lineWidth = 2; ctx.beginPath();
+      locations.forEach(({ x, y }, i) => i === 0 ? ctx.moveTo(x, y!) : ctx.lineTo(x, y!)); ctx.stroke();
+    }
     ctx.fillStyle = "#17664d";
     locations.forEach(({ x, y, label }, i) => {
-      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill();
+      if (y !== null) { ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill(); }
       if (i === 0 || i === locations.length - 1 || i % Math.ceil(locations.length / 4) === 0) {
         ctx.textAlign = "center"; ctx.fillText(label, x, 211);
       }
     });
-  }, [view, mode]);
+  }, [view, mode, rank]);
 
   return <section className="score-trend" aria-label="成绩趋势可视化">
     <div className="score-trend-controls">
@@ -87,6 +97,7 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
         <select value={mode} onChange={event => setMode(event.target.value)}>
           <option value="rate">得分率</option>
           <option value="raw" disabled={!view.rawAvailable}>原始分数</option>
+          {ranksEnabled && <><option value="class">班级排名</option><option value="grade">年级排名</option></>}
         </select>
       </label>
       <label>开始日期（含）<input type="date" aria-label="开始日期" value={from} onChange={event => { setFrom(event.target.value); setPage(0); }} /></label>
@@ -103,18 +114,24 @@ export function ScoreTrend({ records, studentId }: { records: StudentRecord[]; s
     {compare && <p role="status">已选择 {view.points.length} 条考试；请在下方记录中勾选至少 2 条。同一学生、同一学科内对比。</p>}
     {view.invalidCount > 0 && <p role="status">{view.invalidCount} 条成绩缺少有效的学科、类别、日期或分数，未参与趋势；请核对原始记录。</p>}
     {!view.total ? <p role="status">{!view.subjects.length ? "暂无可用成绩，请先录入有效成绩。" : "当前学科和考试类别下没有成绩，请调整筛选。"}暂无可比较记录。</p> : <>
-      <p className="muted">{view.subject} · {view.category || "全部类别"} · {mode === "rate" ? "得分率 = 得分 ÷ 满分" : `原始分数，满分 ${view.maximum}`} · 按考试日期排序的考试序列（等间距不代表日期间隔） · 学科全部 {view.subjectTotal} 次 / 筛选 {view.total} 次 / 绘图 {view.points.length} 次</p>
+      <p className="muted">{view.subject} · {view.category || "全部类别"} · {rank ? axisLabel : mode === "rate" ? "得分率 = 得分 ÷ 满分" : `原始分数，满分 ${view.maximum}`} · 按考试日期排序的考试序列（等间距不代表日期间隔） · 学科全部 {view.subjectTotal} 次 / 筛选 {view.total} 次 / 绘图 {rank?.count ?? view.points.length} 次</p>
       {recent && <p className="muted">时间及类别筛选共 {view.rangeTotal} 次，当前查看最近 {recent} 次；按考试日期选取，同日合法记录独立保留。</p>}
-      {view.mixedMaxima && <p className="muted">满分不同，使用得分率观察，不比较原始分数差值。</p>}
+      {!rank && view.mixedMaxima && <p className="muted">满分不同，使用得分率观察，不比较原始分数差值。</p>}
       {view.points.length === 1 && <p role="status">仅有 1 条成绩，暂无可比较记录。</p>}
-      <p className="muted">考试类别和难度可能不同；得分率变化仅供对照，不能据此判断学习能力提高或下降。</p>
-      <div className="score-trend-plot"><canvas ref={canvas} width={720} height={250} data-point-count={view.points.length} aria-hidden="true" /></div>
+      {rank ? <p className="muted">第一名在顶部。不同考试的参考群体可能变化，名次仅供对照。缺失名次留空，各考试名次独立显示。</p>
+        : <p className="muted">考试类别和难度可能不同，得分率变化仅供对照。</p>}
+      {rank && !rank.count && <p role="status">当前范围尚未登记{axisLabel}。</p>}
+      <div className="score-trend-plot"><canvas ref={canvas} width={720} height={250} data-point-count={rank?.count ?? view.points.length} aria-hidden="true" /></div>
       <p className="muted">记录第 {view.total ? currentPage * 50 + 1 : 0}—{Math.min((currentPage + 1) * 50, view.total)} / {view.total} 条；分页不改变绘图和对比范围。</p>
       <ol className="score-trend-points" start={currentPage * 50 + 1}>
-        {visible.map(({ id, fields, revision }) => <li key={id}>
+        {visible.map(row => { const { id, fields, revision } = row; return <li key={id}>
           {compare && <label><input type="checkbox" aria-label={`对比 ${fields.assessment}`} checked={selection.some(row => row.id === id)} onChange={event => setSelection(items => event.target.checked ? [...items, { id, revision }] : items.filter(row => row.id !== id))} />参与对比</label>}
           <time dateTime={fields.takenOn}>{fields.takenOn}</time> {fields.assessment} · {fields.category} · {fields.score}/{fields.maximum}（{(Number(fields.score) / Number(fields.maximum) * 100).toFixed(1)}%）
-        </li>)}
+          {ranksEnabled && (["class", "grade"] as const).map(dimension => {
+            const { rank, size } = scoreRank(row, dimension);
+            return <span key={dimension}> · {dimension === "class" ? "班级" : "年级"}排名 {rank ?? "未登记"}，参考人数 {size ?? "未登记"}</span>;
+          })}
+        </li>; })}
       </ol>
       {pages > 1 && <nav aria-label="成绩记录分页"><button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>上一页</button><span>第 {currentPage + 1} / {pages} 页</span><button type="button" disabled={currentPage === pages - 1} onClick={() => setPage(currentPage + 1)}>下一页</button></nav>}
     </>}

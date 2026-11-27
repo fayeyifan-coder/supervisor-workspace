@@ -488,8 +488,8 @@ function App() {
               recordPanels={(Object.keys(studentRecordDefinitions) as StudentRecordKind[])
                 .filter(kind => kind !== "training" && studentRecordDefinitions[kind].version <= studentRecordVersion).map(kind => ({
                   id: kind, label: studentRecordDefinitions[kind].label,
-                  content: <StudentRecordsPanel key={active.id + kind} studentId={active.id} kind={kind} api={api}
-                    onActivity={onRecordActivity} onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} overview={kind === "score" ? records => <ScoreTrend records={records} studentId={active.id} /> : undefined}
+                  content: <StudentRecordsPanel key={active.id + kind} studentId={active.id} kind={kind} recordVersion={studentRecordVersion} api={api}
+                    onActivity={onRecordActivity} onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} overview={kind === "score" ? records => <ScoreTrend records={records} studentId={active.id} ranksEnabled={studentRecordVersion >= 7} /> : undefined}
                     after={kind === "improvement" ? plans => plans.length > 0 &&
                       <TrainingForPlan api={api} studentId={active.id} plans={plans} onActivity={onRecordActivity}
                         onRecoveryChange={refreshStudentWrites} recoveryResolution={writeResolution} /> : undefined} />,

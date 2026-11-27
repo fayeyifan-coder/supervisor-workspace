@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Result, WorkspaceApi } from "./contracts";
-import { enrollmentStatus, studentRecordDefinitions, type RecordField, type StudentRecord, type StudentRecordInput,
+import { enrollmentStatus, studentRecordDefinitions, studentRecordFields, type StudentRecord, type StudentRecordInput,
   type StudentRecordKind, type StudentRecordView } from "./student-records";
 import type { StudentWriteResolution } from "./StudentWriteRecoveryPanel";
 import { shanghaiParts } from "./schedule-calendar";
 
-export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview, after, fixedFields, filter, onRecoveryChange, recoveryResolution }: {
-  api: WorkspaceApi; studentId: string; kind: StudentRecordKind;
+export function StudentRecordsPanel({ api, studentId, kind, recordVersion = 0, onActivity, overview, after, fixedFields, filter, onRecoveryChange, recoveryResolution }: {
+  api: WorkspaceApi; studentId: string; kind: StudentRecordKind; recordVersion?: number;
   onActivity: (kind: StudentRecordKind, dirty: boolean, busy: boolean) => void;
   overview?: (records: StudentRecord[]) => ReactNode;
   after?: (records: StudentRecord[]) => ReactNode;
@@ -15,7 +15,7 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
   onRecoveryChange: () => void; recoveryResolution?: StudentWriteResolution;
 }) {
   const definition = studentRecordDefinitions[kind];
-  const fields: readonly RecordField[] = definition.fields;
+  const fields = studentRecordFields(kind, recordVersion);
   const [today, setToday] = useState(() => shanghaiParts(Date.now()).date);
   const [refresh, setRefresh] = useState(0);
   const [loaded, setLoaded] = useState<{ studentId: string; kind: StudentRecordKind; refresh: number; result: Result<StudentRecordView> }>();
@@ -77,7 +77,7 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
     setMessage("");
     const defaults = Object.fromEntries(fields.map(field => [field.key, field.options?.[0] ?? (field.type === "date" && !field.optional ? today : "")]));
     setDraft({ kind, studentId, id: row?.id ?? crypto.randomUUID(), requestId: crypto.randomUUID(),
-      expectedRevision: row?.revision ?? 0, fields: row?.fields ?? { ...defaults, ...fixedFields } });
+      expectedRevision: row?.revision ?? 0, fields: { ...defaults, ...fixedFields, ...row?.fields } });
   }
 
   async function save(input: StudentRecordInput) {
@@ -158,7 +158,7 @@ export function StudentRecordsPanel({ api, studentId, kind, onActivity, overview
           return <label key={field.key}>{field.label}
             {field.options ? <select {...control} onChange={update}>{field.options.map(option => <option key={option}>{option}</option>)}</select>
               : field.type === "textarea" ? <textarea {...control} onChange={update} maxLength={field.limit ?? 1000} />
-                : <input {...control} onChange={update} type={field.type ?? "text"} maxLength={field.limit ?? 1000} step="any" />}
+                : <input {...control} onChange={update} type={field.type === "integer" ? "text" : field.type ?? "text"} inputMode={field.type === "integer" ? "numeric" : undefined} maxLength={field.limit ?? 1000} step="any" />}
           </label>;
         })}
       </fieldset>

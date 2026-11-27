@@ -4,7 +4,7 @@ import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import { channels, type Failure, type Result, type WorkspaceInfo } from "./contracts";
-import { failure as workspaceFailure, WorkspaceDatabase, WorkspaceFault, type M1Version } from "./database";
+import { failure as workspaceFailure, latestM1Version, WorkspaceDatabase, WorkspaceFault, type M1Version } from "./database";
 import { closeStoresIndependently } from "./database-lifecycle";
 import { WorkLogDatabase, type WorkStatus } from "./worklog";
 import { GrowthProfileDatabase, GrowthProfileFault, type GrowthSaveInput } from "./growth-profile";
@@ -24,7 +24,7 @@ import { readBackupStatus, recordSuccessfulBackup } from "./backup-status";
 import { Diagnostics, sqliteErrorCode } from "./diagnostics";
 import { BusinessExportPlans } from "./business-export";
 import { BusinessExportFiles, requireExportDestination } from "./business-export-files";
-import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, studentServicesVersion, originalProfileSegments, readActivation, recoveryName, saveActivation, verifyActiveProfile, verifyProfileData,
+import { activeName, approvedSelection, approveActiveProfile, checkOriginalProtectionMode, isParentFollowUpProfile, isStudentEditProfile, studentServicesVersion, originalProfileSegments, readActivation, recoveryName, restoredStudentVersion, saveActivation, verifyActiveProfile, verifyProfileData,
   type ActivationState } from "./profile-activation";
 
 const scheme = "supervisor-workspace-mvp";
@@ -399,7 +399,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   const exportForbiddenRoots = () => [owner, dirname(app.getPath("exe")), app.getAppPath(),
     "D:\\SupervisorWorkspace\\App", "D:\\SupervisorWorkspace\\Profiles", "D:\\SupervisorWorkspace\\Logs"];
   function businessExportStores() {
-    if (format !== 2 || m1Version !== 6 || !database) throw new WorkspaceFault("invalid", "业务导出仅支持当前五库 v6 档案，不会自动迁移。");
+    if (format !== 2 || m1Version < 6 || !database) throw new WorkspaceFault("invalid", "业务导出需要五库 v6 或更新档案。");
     const stores = completeStores(format);
     if (database.hasPendingStudentEdits() || intakeStore?.hasUnsettledJobs() || operationsPending.state().kind !== "empty") throw new WorkspaceFault("recovery", "请先核对待确认的档案编辑、导入及教务请求，再生成导出。");
     studentWrites.requireSettled(database);
@@ -500,12 +500,13 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if (choice.canceled) return null;
     const bytes = await recoveryFiles.read(choice.filePaths[0]);
     const summary = validateProtection(bytes).summary;
-    if (summary.m1Version > m1Version) throw new WorkspaceFault("invalid", "该备份使用较新的学生档案版本，不能降级恢复。");
+    const restoreVersion = production ? latestM1Version : m1Version;
+    if (summary.m1Version > restoreVersion) throw new WorkspaceFault("invalid", "该备份使用较新的学生档案版本，不能降级恢复。");
     if (format === 1 && summary.formatVersion === 2) {
       throw new WorkspaceFault("invalid", "五库备份只能恢复到支持五库的环境。");
     }
     const legacy = format === 2 && summary.formatVersion === 1;
-    const upgradeM1 = summary.m1Version < m1Version;
+    const upgradeM1 = summary.m1Version < restoreVersion;
     const result = await dialog.showMessageBox(window, {
       type: "question", title: "恢复到独立档案", message: "备份校验通过。是否写入独立恢复副本？",
       detail: "备份时间 " + summary.createdAt + "\n学生 " + summary.students + " 名 · 工作事项 " + summary.workItems +
@@ -513,13 +514,13 @@ async function start(owner: string, profile: string, state: ActivationState, ope
         " 个 · 未结束导入 " + summary.unfinishedImports + " 笔" +
         (legacy ? "\n历史四库包将生成全新的空教务库。" :
           format === 2 ? "\n到校安排 " + summary.attendancePlans + " 条" : "") +
-        (upgradeM1 ? "\n学生档案将在全新副本中升级到 Schema v" + m1Version + "，原备份不变。" : "") +
+        (upgradeM1 ? "\n学生档案将在全新副本中升级到 Schema v" + restoreVersion + "，原备份不变。" : "") +
         "\n恢复只生成副本。激活须另行确认。",
       buttons: ["取消", "写入恢复副本"], defaultId: 0, cancelId: 0, noLink: true,
     });
     if (result.response !== 1) return null;
     const restored = await recoveryFiles.restore(recoveryRoot,
-      legacy || upgradeM1 ? prepareProtectionRestore(bytes, format, m1Version) : bytes);
+      legacy || upgradeM1 ? prepareProtectionRestore(bytes, format, restoreVersion) : bytes);
     lastRecovery = restored.location;
     return restored;
   }));
@@ -545,12 +546,13 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if (!isRecovery && !isResume) {
       throw new WorkspaceFault("invalid", "请选择独立恢复副本或本工作区已激活过的档案中的 restore.ready。");
     }
-    const checked = isRecovery ? await recoveryFiles.inspect(recoveryRoot, name, format, m1Version) : undefined;
+    const targetVersion = production ? restoredStudentVersion(isRecovery ? recoveryRoot : owner, name) : m1Version;
+    const checked = isRecovery ? await recoveryFiles.inspect(recoveryRoot, name, format, targetVersion) : undefined;
     const target = checked ? { name, digest: checked.digest } : approvedSelection(owner, name);
     if (checked ? state.active?.digest === target.digest : state.active?.name === name) {
       throw new WorkspaceFault("conflict", "这份资料已经是当前活动档案。");
     }
-    if (isResume) verifyActiveProfile(owner, target, false, format, m1Version);
+    if (isResume) verifyActiveProfile(owner, target, false, format, targetVersion);
     await requireSwitchReady(event);
     const result = await dialog.showMessageBox(window, {
       type: "warning", title: "切换工作档案", message: "确认后工作台将正常关闭，下次启动时打开所选档案。",
@@ -606,7 +608,8 @@ function ensureDirectory(path: string, create: boolean): void {
   }
 }
 
-async function startSelected(owner: string, original: string, format: ProtectionFormat, m1Version: M1Version, production?: ProductionPaths) {
+async function startSelected(owner: string, original: string, format: ProtectionFormat, originalVersion: M1Version, production?: ProductionPaths) {
+  let m1Version = originalVersion;
   let state = readActivation(owner, Boolean(production));
   let profile = original;
   let opened: ReturnType<typeof openProfile>;
@@ -615,6 +618,7 @@ async function startSelected(owner: string, original: string, format: Protection
     if (state.pending?.kind === "restore") {
       const pending = state.pending;
       const files = protectionFiles();
+      if (production) m1Version = restoredStudentVersion(owner, pending.name);
       saveActivation(owner, { ...state, pending: { ...pending, kind: "opening" } }, Boolean(production));
       const checked = await files.inspect(format === 2 ? owner : profileRoot, pending.name, format, m1Version);
       if (checked.digest !== pending.digest) throw new Error("Selected recovery copy changed.");
@@ -631,6 +635,7 @@ async function startSelected(owner: string, original: string, format: Protection
       state = committed;
     } else if (state.pending?.kind === "resume") {
       const { name, digest } = state.pending;
+      if (production) m1Version = restoredStudentVersion(owner, name);
       saveActivation(owner, { ...state, pending: { kind: "resuming", name, digest } }, Boolean(production));
       const active = { name, digest };
       profile = verifyActiveProfile(owner, active, false, format, m1Version);
@@ -648,6 +653,7 @@ async function startSelected(owner: string, original: string, format: Protection
       saveActivation(owner, committed, Boolean(production));
       state = committed;
     } else if (state.active) {
+      if (production) m1Version = restoredStudentVersion(owner, state.active.name);
       profile = verifyActiveProfile(owner, state.active, false, format, m1Version);
       opened = openProfile(profile, format, m1Version);
       verifyProtectionStores(completeStores(format), app.getVersion(), format, m1Version);
