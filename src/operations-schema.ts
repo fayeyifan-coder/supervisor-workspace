@@ -82,8 +82,18 @@ const recurrenceDDL = [
 ] as const;
 
 export function operationsProtectionFor(m1Version: number) {
-  return m1Version < 9 ? operationsProtection : { ...operationsProtection, marker: "operations-v2\n", version: 2,
+  if (m1Version < 9) return operationsProtection;
+  const exceptionsDDL = `CREATE TABLE attendance_exceptions (
+    plan_id TEXT NOT NULL REFERENCES attendance_plans(id), revision INTEGER NOT NULL CHECK(revision >= 1),
+    request_id TEXT NOT NULL UNIQUE REFERENCES operation_requests(request_id) DEFERRABLE INITIALLY DEFERRED,
+    action TEXT NOT NULL CHECK(action IN ('rescheduled','leave','cancelled','walk_in')),
+    reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 1 AND 500), changed_at INTEGER NOT NULL,
+    PRIMARY KEY(plan_id, revision)
+  ) STRICT`;
+  const recurring = { ...operationsProtection, marker: "operations-v2\n", version: 2,
     tables: [...operationsProtection.tables, ...recurrenceTables], ddl: [...operationsProtection.ddl, ...recurrenceDDL] };
+  return m1Version < 10 ? recurring : { ...recurring, marker: "operations-v3\n", version: 3,
+    tables: [...recurring.tables, "attendance_exceptions"], ddl: [...recurring.ddl, exceptionsDDL] };
 }
 export type OperationsLayout = ReturnType<typeof operationsProtectionFor>;
 
@@ -94,7 +104,16 @@ export function verifyOperationsStudentLinks(database: DatabaseSync, m1StudentId
     throw new WorkspaceFault("recovery", "教务数据库包含找不到对应 M1 档案的学生记录。");
   }
 
-  if (database.prepare("PRAGMA user_version").get()?.user_version === 2) verifyRecurringHistory(database, m1StudentIds);
+  const version = Number(database.prepare("PRAGMA user_version").get()?.user_version);
+  if (version >= 2) verifyRecurringHistory(database, m1StudentIds, version >= 3);
+  if (version >= 3 && database.prepare(`SELECT 1 FROM attendance_exceptions e
+      LEFT JOIN operation_changes c ON c.entity_kind='attendance' AND c.entity_id=e.plan_id AND c.revision=e.revision
+      WHERE c.request_id IS NOT e.request_id OR c.changed_at IS NOT e.changed_at OR
+        (e.action IN ('leave','cancelled') AND json_extract(c.snapshot_json,'$.status') IS NOT 'cancelled') OR
+        (e.action='walk_in' AND json_extract(c.snapshot_json,'$.status') IS NOT 'attended')
+      LIMIT 1`).get()) {
+    throw new WorkspaceFault("recovery", "单日例外与原到校修订不一致。");
+  }
 
   const inconsistent = database.prepare(`SELECT 1 FROM operation_changes AS change
     JOIN operation_requests AS receipt USING (request_id)

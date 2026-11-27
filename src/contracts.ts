@@ -42,6 +42,7 @@ export const channels = {
   scheduleAvailable: "r2b:schedule-available",
   scheduleConfiguration: "r3:schedule-configuration",
   changeCycleSchedule: "r3:change-cycle-schedule",
+  scheduleFlexWeek: "r3:schedule-flex-week",
   scheduleWeek: "r2b:schedule-week",
   schedulePlan: "r2b:schedule-plan",
   attendanceBoard: "r2b:attendance-board",
@@ -155,7 +156,7 @@ interface LearningChangeInput extends LearningDayInput {
 }
 
 export type LearningChange = LearningChangeInput & (
-  | { command: "recordAttendance"; action: "confirm" | "checkIn" | "checkOut" | "absent" | "cancel" }
+  | { command: "recordAttendance"; action: "confirm" | "checkIn" | "checkOut" | "absent" | "cancel" | "leave"; reason?: string }
   | { command: "saveLearningBlock"; plannedStart: number; plannedEnd: number; outsideAttendanceReason?: string; notes?: string }
   | { command: "saveLearningTasks"; tasks: LearningTaskInput[] }
   | { command: "recordLearningOutcome"; action: "start" | "finish" | "cancel" }
@@ -195,6 +196,7 @@ export interface WorkspaceApi {
   scheduleAvailable(): Promise<Result<boolean>>;
   scheduleConfiguration(): Promise<Result<import("./recurring-schedule").ScheduleConfiguration>>;
   changeCycleSchedule(input: import("./recurring-schedule").CycleCommand): Promise<Result<import("./recurring-schedule").CycleResult>>;
+  scheduleFlexWeek(input: ScheduleWeekInput): Promise<Result<import("./recurring-schedule").FlexWindow[]>>;
   scheduleWeek(input: ScheduleWeekInput): Promise<Result<AttendancePlan[]>>;
   attendanceBoard(): Promise<Result<AttendanceBoardDay>>;
   schedulePlan(id: string): Promise<Result<AttendancePlan | null>>;

@@ -5,13 +5,13 @@ import { shiftDate, type ScheduleHours } from "./schedule-calendar";
 
 const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const weekdays = [1, 2, 3, 4, 5, 6, 0];
-const nameOf = (kind: CycleDefinition["kind"]) => kind === "long_term" ? "长期在校" : "固定到课";
+const nameOf = (kind: CycleDefinition["kind"]) => kind === "long_term" ? "长期在校" : kind === "flex" ? "弹性到课" : "固定到课";
 const slot = () => ({ id: crypto.randomUUID(), day: 2, start: "09:00", end: "10:30" });
 type RuleDraft = { id: string; studentId: string; revision: number; definition: CycleDefinition };
 
-export function RecurringSchedulePanel({ api, configuration, students, week, studentId, blocked, onChanged }: {
+export function RecurringSchedulePanel({ api, configuration, students, week, studentId, flexEnabled, blocked, onChanged }: {
   api: WorkspaceApi; configuration: ScheduleConfiguration | undefined; students: Student[];
-  week: string; studentId: string; blocked: boolean; onChanged: () => void;
+  week: string; studentId: string; flexEnabled: boolean; blocked: boolean; onChanged: () => void;
 }) {
   const [draft, setDraft] = useState<RuleDraft>();
   const [hoursText, setHoursText] = useState<string[]>();
@@ -47,7 +47,7 @@ export function RecurringSchedulePanel({ api, configuration, students, week, stu
       } else if (value.action === "hours") {
         setHoursText(undefined);
         setNotice({ text: "营业时间已保存。", bad: false });
-      } else {
+      } else if (value.action === "generate") {
         const { created, existing, inactive, conflicts, elapsed } = value.result;
         setNotice({ text: `已生成 ${created} 次 · 已有 ${existing} 次 · 暂停或归档 ${inactive} 次 · 冲突或时段外 ${conflicts} 次 · 已过时段 ${elapsed} 次`, bad: conflicts > 0 });
       }
@@ -115,11 +115,13 @@ export function RecurringSchedulePanel({ api, configuration, students, week, stu
             setDraft(current => current && { ...current, studentId });
           }}><option value="">请选择</option>{students.map(row => <option key={row.id} value={row.id}>{row.alias}</option>)}</select></label>
           <label>类型<select value={draft.definition.kind} onChange={event => update({ kind: event.target.value as CycleDefinition["kind"] })}>
-            <option value="fixed">固定到课</option><option value="long_term">长期在校</option>
+            <option value="fixed">固定到课</option><option value="long_term">长期在校</option>{flexEnabled && <option value="flex">弹性到课</option>}
           </select></label>
           <label>生效日期<input type="date" required value={draft.definition.startsOn} onChange={event => update({ startsOn: event.target.value })} /></label>
           <label>结束日期（可选）<input type="date" value={draft.definition.endsOn ?? ""} onChange={event => update({ endsOn: event.target.value || null })} /></label>
         </div>
+        {draft.definition.kind === "flex" && <label>预计学习分钟<input type="number" min={15} max={480} step={1} required
+          value={draft.definition.durationMinutes ?? 120} onChange={event => update({ durationMinutes: Number(event.target.value) })} /></label>}
         <label className="schedule-check"><input type="checkbox" checked={draft.definition.paused} onChange={event => update({ paused: event.target.checked })} />暂停规则</label>
         {draft.definition.slots.map((row, index) => {
           const editSlot = (fields: Partial<typeof row>) => update({ slots: draft.definition.slots.map(item => item.id === row.id ? { ...item, ...fields } : item) });

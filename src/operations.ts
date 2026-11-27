@@ -6,7 +6,7 @@ import { WorkspaceFault, type WorkspaceDatabase } from "./database";
 import { operationsProtectionFor, verifyOperationsStudentLinks, type OperationsLayout } from "./operations-schema";
 import { currentRules, dateApplies, persistCycleRule, persistScheduleHours, rangeFitsHours,
   recurringConfiguration, scheduleCommand, stableScheduleId, storedScheduleHours,
-  type CycleKind, type CycleResult, type GenerationResult, type ScheduleConfiguration, type ScheduleOrigin } from "./recurring-schedule";
+  type CycleKind, type CycleResult, type DayException, type DayExceptionAction, type FlexWindow, type GenerationResult, type ScheduleConfiguration, type ScheduleOrigin } from "./recurring-schedule";
 import { minute, openingHours, shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
 
 export { operationsProtection, verifyOperationsStudentLinks } from "./operations-schema";
@@ -40,11 +40,14 @@ export interface SaveAttendancePlanInput extends ChangeInput {
   endAt?: number;
   kind?: PlanKind;
   exception?: { confirmed: true; reason: string };
+  changeReason?: string;
 }
 
 export interface AttendancePlan {
   cycleKind?: CycleKind;
   cycleOrigin?: ScheduleOrigin;
+  dayException?: DayException;
+  actualOnly?: boolean;
   id: string;
   studentId: string;
   startAt: number;
@@ -176,6 +179,7 @@ export class OperationsDatabase {
   private constructor(private readonly db: DatabaseSync, private readonly m1: ScheduleStudents) {}
 
   get recurringEnabled(): boolean { return (this.m1.version ?? 0) >= 9; }
+  get flexibilityEnabled(): boolean { return (this.m1.version ?? 0) >= 10; }
 
   static open(dataDirectory: string, m1: ScheduleStudents, allowInitialize = false): OperationsDatabase {
     const layout = operationsProtectionFor(m1.version ?? 1);
@@ -240,9 +244,11 @@ export class OperationsDatabase {
       json_extract(definition_json,'$.kind') AS kind FROM schedule_origins o
       JOIN schedule_rule_revisions r ON r.id=o.rule_id AND r.revision=o.rule_revision
       WHERE o.plan_id=?`).get(plan.id);
-    if (!origin) return plan;
+    const exception = this.flexibilityEnabled ? this.db.prepare("SELECT action,reason FROM attendance_exceptions WHERE plan_id=? ORDER BY revision DESC LIMIT 1").get(plan.id) : undefined;
+    const details = exception ? { dayException: exception as unknown as DayException, ...(exception.action === "walk_in" ? { actualOnly: true } : {}) } : {};
+    if (!origin) return { ...plan, ...details };
     const { kind, ...cycleOrigin } = origin;
-    return { ...plan, cycleKind: kind as CycleKind, cycleOrigin: cycleOrigin as unknown as ScheduleOrigin };
+    return { ...plan, ...details, cycleKind: kind as CycleKind, cycleOrigin: cycleOrigin as unknown as ScheduleOrigin };
   }
 
   scheduleConfiguration(): ScheduleConfiguration {
@@ -253,13 +259,43 @@ export class OperationsDatabase {
   changeCycleSchedule(raw: unknown): CycleResult {
     this.scheduleConfiguration();
     const command = scheduleCommand(raw);
+    if (command.action === "walkIn") {
+      if (!this.flexibilityEnabled) recovery("当前档案尚未启用临时签到。");
+      const planId = stableScheduleId("walk-in", command.requestId);
+      const change = identity({ id: planId, requestId: command.requestId, studentId: command.studentId, expectedRevision: 0 });
+      return { action: "visit", plan: this.createArrival(change, command.durationMinutes) };
+    }
+    if (command.action === "confirmFlex" || command.action === "arriveFlex") {
+      if (!this.flexibilityEnabled) recovery("当前档案尚未启用弹性安排。");
+      const origin = command.window;
+      const planId = stableScheduleId("plan", origin.ruleId, origin.slotId, origin.date);
+      const existing = this.attendancePlan(planId);
+      if (existing) {
+        if (!existing.cycleOrigin || (command.action === "confirmFlex" && shanghaiMinute(origin.date, command.start) !== existing.startAt)) {
+          conflict("该窗口已有具体安排，请打开原安排核对或调整。");
+        }
+        if (command.action === "arriveFlex" && existing.status !== "attended") conflict("该窗口已有预约，请从原安排签到。");
+        return { action: "visit", plan: existing };
+      }
+      const window = this.flexWindows(origin.date, origin.date).find(row => row.id === planId && row.revision === origin.revision);
+      if (!window) conflict("弹性窗口已有变化，请重新读取。");
+      const change = identity({ id: planId, requestId: stableScheduleId("request", origin.ruleId, origin.slotId, origin.date),
+        studentId: window.studentId, expectedRevision: 0 });
+      if (command.action === "arriveFlex") return { action: "visit", plan: this.createArrival(change, window.durationMinutes, window) };
+      const startAt = shanghaiMinute(origin.date, command.start)!;
+      const endAt = startAt + window.durationMinutes * minute;
+      if (startAt < shanghaiMinute(origin.date, window.start)! || endAt > shanghaiMinute(origin.date, window.end)!) {
+        invalid("具体预约须落在该窗口内，并覆盖预计学习时长。");
+      }
+      return { action: "visit", plan: this.saveAttendancePlan({ ...change, startAt, endAt }, origin, true) };
+    }
     if (command.action === "generate") {
       if (command.studentId && !this.m1.students().some(row => row.id === command.studentId)) invalid("找不到关联的学生。");
       const configuration = this.scheduleConfiguration();
       const students = new Map(this.m1.students().map(student => [student.id, student]));
       const result: GenerationResult = { created: 0, existing: 0, inactive: 0, conflicts: 0, elapsed: 0 };
       for (const rule of currentRules(configuration.rules)) {
-        if (command.studentId && command.studentId !== rule.studentId) continue;
+        if (rule.kind === "flex" || (command.studentId && command.studentId !== rule.studentId)) continue;
         for (let date = command.from; date <= command.to; date = shiftDate(date, 1)) {
           for (const slot of rule.slots.filter(item => dateApplies(rule, date, item))) {
             const origin = { ruleId: rule.id, revision: rule.revision, slotId: slot.id, date };
@@ -285,11 +321,62 @@ export class OperationsDatabase {
     return this.transact(() => {
       if (command.action === "hours") return { action: "hours", revision: persistScheduleHours(this.db, command, Date.now()) };
       if (!this.m1.students().some(student => student.id === command.studentId)) invalid("找不到关联的学生。");
+      if (command.definition.kind === "flex" && !this.flexibilityEnabled) recovery("当前档案尚未启用弹性安排。");
       return { action: "rule", rule: persistCycleRule(this.db, command, Date.now()) };
     });
   }
 
-  saveAttendancePlan(input: SaveAttendancePlanInput, origin?: ScheduleOrigin): AttendancePlan {
+  flexWindows(from: string, to: string, studentId?: string): FlexWindow[] {
+    if (!this.flexibilityEnabled) return [];
+    const range = scheduleCommand({ action: "generate", from, to, studentId });
+    if (range.action !== "generate") invalid("弹性查询区间无效。");
+    const active = new Set(this.m1.students().filter(row => row.lifecycleStatus === "active").map(row => row.id));
+    const pending: FlexWindow[] = [];
+    for (const rule of currentRules(this.scheduleConfiguration().rules)) {
+      if (rule.kind !== "flex" || rule.paused || !active.has(rule.studentId) || (studentId && rule.studentId !== studentId)) continue;
+      for (let date = range.from; date <= range.to; date = shiftDate(date, 1)) {
+        for (const slot of rule.slots.filter(item => dateApplies(rule, date, item))) {
+          const id = stableScheduleId("plan", rule.id, slot.id, date);
+          if (this.db.prepare("SELECT 1 FROM schedule_origins WHERE plan_id=?").get(id)) continue;
+          pending.push({ id, studentId: rule.studentId, date, ruleId: rule.id, revision: rule.revision, slotId: slot.id,
+            start: slot.start, end: slot.end, durationMinutes: rule.durationMinutes! });
+        }
+      }
+    }
+    return pending.sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.id.localeCompare(b.id));
+  }
+
+  private recordException(change: ChangeInput, action: DayExceptionAction, reason: string, now: number) {
+    this.db.prepare("INSERT INTO attendance_exceptions VALUES(?,?,?,?,?,?)")
+      .run(change.id, change.expectedRevision + 1, change.requestId, action, reason, now);
+  }
+
+  private createArrival(change: ChangeInput, durationMinutes: number, window?: FlexWindow): AttendancePlan {
+    return this.write("registerArrival", "attendance", change, { durationMinutes, window: window?.id }, now => {
+      this.checkRevision(this.attendancePlan(change.id), change);
+      const date = shanghaiParts(now).date, startAt = Math.floor(now / minute) * minute;
+      const endAt = startAt + durationMinutes * minute;
+      if (shanghaiParts(endAt).date !== date) invalid("请缩短预计时长，临时到课须在同日。");
+      if (window && (window.date !== date || now < shanghaiMinute(date, window.start)! || now >= shanghaiMinute(date, window.end)!)) {
+        conflict("目前不在这个弹性窗口，可登记当日临时到课。");
+      }
+      if (this.db.prepare(`SELECT 1 FROM attendance_plans WHERE student_id=? AND status NOT IN ('cancelled','absent')
+          AND ((status='attended' AND check_out_at IS NULL) OR (start_at<? AND end_at>?)) LIMIT 1`)
+          .get(change.studentId, endAt, startAt)) conflict("已有可关联的安排或未签退记录，请打开原安排。");
+      const within = rangeFitsHours(startAt, endAt, storedScheduleHours(this.db));
+      const reason = window ? "未预约弹性到课" : "当日临时到课";
+      this.db.prepare(`INSERT INTO attendance_plans
+        (id,student_id,start_at,end_at,kind,status,check_in_at,outside_window,exception_reason,revision,created_at,updated_at)
+        VALUES(?,?,?,?,'regular','attended',?,?,?,1,?,?)`)
+        .run(change.id, change.studentId, startAt, endAt, now, Number(!within), within ? null : reason, now, now);
+      if (window) this.db.prepare("INSERT INTO schedule_origins VALUES(?,?,?,?,?)")
+        .run(change.id, window.ruleId, window.revision, window.slotId, window.date);
+      this.recordException(change, "walk_in", reason, now);
+      return this.attendancePlan(change.id)!;
+    });
+  }
+
+  saveAttendancePlan(input: SaveAttendancePlanInput, origin?: ScheduleOrigin, confirmedFlex = false): AttendancePlan {
     const change = identity(input), startAt = timestamp(input.startAt), kind = input.kind ?? "regular";
     if (kind !== "regular" && kind !== "whole_day") invalid("到校类型无效。");
     const endAt = timestamp(input.endAt ?? (kind === "regular" ? startAt + 120 * minute : undefined));
@@ -300,8 +387,9 @@ export class OperationsDatabase {
       if (input.exception?.confirmed !== true) invalid("默认时段外的单次排课需要明确确认。");
       exceptionReason = text(input.exception.reason, 500, true);
     }
-    return this.write(origin ? "generateScheduleOccurrence" : "saveAttendancePlan", "attendance", change,
-      { startAt, endAt, kind, exceptionReason, ...(origin ? { origin } : {}) }, now => {
+    const changeReason = this.flexibilityEnabled && input.changeReason !== undefined ? text(input.changeReason, 500, true) : undefined;
+    return this.write(confirmedFlex ? "confirmFlex" : origin ? "generateScheduleOccurrence" : "saveAttendancePlan", "attendance", change,
+      { startAt, endAt, kind, exceptionReason, ...(origin ? { origin } : {}), ...(changeReason ? { changeReason } : {}) }, now => {
       if (origin && !this.m1.students().some(student => student.id === change.studentId && student.lifecycleStatus === "active")) {
         conflict("该学生已暂停或归档，请人工核对既有安排。");
       }
@@ -320,24 +408,30 @@ export class OperationsDatabase {
         change.studentId, change.id, endAt, startAt)) conflict("同一学生已有重叠的到校安排。");
       this.db.prepare(`INSERT INTO attendance_plans
         (id,student_id,start_at,end_at,kind,status,outside_window,exception_reason,revision,created_at,updated_at)
-        VALUES(?,?,?,?,?,'planned',?,?,1,?,?) ON CONFLICT(id) DO UPDATE SET start_at=excluded.start_at,
+        VALUES(?,?,?,?,?,?,?,?,1,?,?) ON CONFLICT(id) DO UPDATE SET start_at=excluded.start_at,
         end_at=excluded.end_at,kind=excluded.kind,outside_window=excluded.outside_window,
         exception_reason=excluded.exception_reason,revision=attendance_plans.revision+1,updated_at=excluded.updated_at`)
-        .run(change.id, change.studentId, startAt, endAt, kind, Number(!inWindow), exceptionReason, now, now);
+        .run(change.id, change.studentId, startAt, endAt, kind, confirmedFlex ? "confirmed" : "planned", Number(!inWindow), exceptionReason, now, now);
       if (origin) this.db.prepare("INSERT INTO schedule_origins VALUES(?,?,?,?,?)")
         .run(change.id, origin.ruleId, origin.revision, origin.slotId, origin.date);
+      if (this.flexibilityEnabled && current && (current.startAt !== startAt || current.endAt !== endAt)) {
+        this.recordException(change, "rescheduled", changeReason ?? "单次调整", now);
+      }
       return this.attendancePlan(change.id)!;
     });
   }
 
   recordAttendance(input: ChangeInput & {
-    action: "confirm" | "checkIn" | "checkOut" | "absent" | "cancel"; at?: number;
+    action: "confirm" | "checkIn" | "checkOut" | "absent" | "cancel" | "leave"; at?: number; reason?: string;
   }): AttendancePlan {
     const change = identity(input), action = input.action;
     const at = input.at === undefined ? null : timestamp(input.at);
-    if (!["confirm", "checkIn", "checkOut", "absent", "cancel"].includes(action) ||
+    if (!["confirm", "checkIn", "checkOut", "absent", "cancel", "leave"].includes(action) ||
+        (action === "leave" && !this.flexibilityEnabled) ||
         (at !== null && action !== "checkIn" && action !== "checkOut")) invalid("出勤操作无效。");
-    return this.write("recordAttendance", "attendance", change, { action, at }, now => {
+    const note = action === "leave" ? text(input.reason, 500, true) : action === "cancel" && this.flexibilityEnabled
+      ? text(input.reason ?? "单次取消", 500, true) : undefined;
+    return this.write("recordAttendance", "attendance", change, { action, at, ...(note ? { note } : {}) }, now => {
       const current = this.attendancePlan(change.id);
       if (!current) invalid("找不到到校安排。");
       this.checkRevision(current, change);
@@ -352,7 +446,9 @@ export class OperationsDatabase {
           status = "confirmed";
           break;
         case "checkIn":
-          if (!waiting) conflict("该到校安排不能签到。");
+          if (!waiting || (this.flexibilityEnabled && shanghaiParts(actualAt).date !== shanghaiParts(current.startAt).date)) {
+            conflict("该到校安排与实际签到日期或状态不符。");
+          }
           status = "attended";
           checkInAt = actualAt;
           break;
@@ -371,8 +467,9 @@ export class OperationsDatabase {
           }
           status = "absent";
           break;
+        case "leave":
         case "cancel":
-          if (!waiting || now >= current.startAt || this.db.prepare(
+          if (!waiting || (action === "cancel" && now >= current.startAt) || this.db.prepare(
             "SELECT 1 FROM learning_blocks WHERE attendance_plan_id=? AND status<>'cancelled' LIMIT 1").get(change.id)) {
             conflict("该到校安排不能取消，请核对已有学习块和出勤。");
           }
@@ -381,6 +478,7 @@ export class OperationsDatabase {
       }
       this.db.prepare(`UPDATE attendance_plans SET status=?,check_in_at=?,check_out_at=?,revision=revision+1,updated_at=? WHERE id=?`)
         .run(status, checkInAt, checkOutAt, now, change.id);
+      if (note) this.recordException(change, action === "leave" ? "leave" : "cancelled", note, now);
       return this.attendancePlan(change.id)!;
     });
   }

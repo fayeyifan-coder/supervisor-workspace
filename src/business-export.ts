@@ -21,7 +21,7 @@ export interface BusinessExportResult {
 }
 export interface BusinessExportDocument {
  format: "sw-business-data-v1"; snapshotId: string; capturedAt: string; applicationVersion: string;
- m1Version: 6 | 7 | 8 | 9; includeSourceText: boolean; sourceImages: { file: string; sha256: string }[];
+ m1Version: 6 | 7 | 8 | 9 | 10; includeSourceText: boolean; sourceImages: { file: string; sha256: string }[];
  tables: (ExportTableSummary & { rows: Record<string, ExportValue>[] })[];
 }
 const maxJsonBytes = 32 * 1024 * 1024;
@@ -31,7 +31,7 @@ function invalid(message: string): never { throw new WorkspaceFault("invalid", m
 export function businessExportDocument(bytes: Buffer, includeSourceText: boolean): BusinessExportDocument {
  const checked = validateProtection(bytes);
  const m1Version = checked.summary.m1Version;
- if (checked.summary.formatVersion !== 2 || (m1Version !== 6 && m1Version !== 7 && m1Version !== 8 && m1Version !== 9)) invalid("业务导出需要五库 v6 或更新档案。请继续使用完整备份。");
+ if (checked.summary.formatVersion !== 2 || (m1Version !== 6 && m1Version !== 7 && m1Version !== 8 && m1Version !== 9 && m1Version !== 10)) invalid("业务导出需要五库 v6 或更新档案。请继续使用完整备份。");
  if (checked.summary.unfinishedImports) throw new WorkspaceFault("recovery", "存在未完成导入，请先核对处理，再生成业务导出。");
  const tables: BusinessExportDocument["tables"] = [];
  for (let index = 0; index < checked.images.length; index++) {

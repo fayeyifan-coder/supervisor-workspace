@@ -3,19 +3,26 @@ import { createHash } from "node:crypto";
 import { defaultScheduleHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, type ScheduleHours } from "./schedule-calendar";
 import { WorkspaceFault } from "./workspace-fault";
 
-export type CycleKind = "long_term" | "fixed";
+export type CycleKind = "long_term" | "fixed" | "flex";
 export interface CycleSlot { id: string; day: number; start: string; end: string }
-export interface CycleDefinition { kind: CycleKind; startsOn: string; endsOn: string | null; paused: boolean; slots: CycleSlot[] }
+export interface CycleDefinition { kind: CycleKind; startsOn: string; endsOn: string | null; paused: boolean; slots: CycleSlot[]; durationMinutes?: number }
 export interface CycleRule extends CycleDefinition { id: string; studentId: string; revision: number; changedAt: number }
 export interface ScheduleConfiguration { rules: CycleRule[]; hours: ScheduleHours; hoursRevision: number }
 export interface ScheduleOrigin { ruleId: string; revision: number; slotId: string; date: string }
+export interface FlexWindow extends ScheduleOrigin { id: string; studentId: string; start: string; end: string; durationMinutes: number }
+export type DayExceptionAction = "rescheduled" | "leave" | "cancelled" | "walk_in";
+export interface DayException { action: DayExceptionAction; reason: string }
 export interface GenerationResult { created: number; existing: number; inactive: number; conflicts: number; elapsed: number }
 export type CycleCommand =
   | { action: "rule"; requestId: string; id: string; studentId: string; expectedRevision: number; definition: CycleDefinition }
   | { action: "hours"; requestId: string; expectedRevision: number; hours: ScheduleHours }
-  | { action: "generate"; from: string; to: string; studentId?: string };
+  | { action: "generate"; from: string; to: string; studentId?: string }
+  | { action: "confirmFlex"; window: ScheduleOrigin; start: string }
+  | { action: "arriveFlex"; window: ScheduleOrigin }
+  | { action: "walkIn"; requestId: string; studentId: string; durationMinutes: number };
 export type CycleResult = { action: "rule"; rule: CycleRule } |
-  { action: "hours"; revision: number } | { action: "generate"; result: GenerationResult };
+  { action: "hours"; revision: number } | { action: "generate"; result: GenerationResult } |
+  { action: "visit"; plan: import("./operations").AttendancePlan };
 
 const identifier = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const minute = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -62,9 +69,13 @@ export function hoursOf(raw: unknown): ScheduleHours {
     return periods;
   });
 }
+function durationOf(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 15 || value > 480) invalid("预计学习时间为 15 至 480 分钟。");
+  return value;
+}
 export function cycleDefinition(raw: unknown): CycleDefinition {
-  const { kind, startsOn, endsOn, paused, slots } = scheduleObject(raw);
-  if (kind !== "long_term" && kind !== "fixed") invalid("请选择长期在校或固定到课。");
+  const { kind, startsOn, endsOn, paused, slots, durationMinutes } = scheduleObject(raw);
+  if (kind !== "long_term" && kind !== "fixed" && kind !== "flex") invalid("请选择有效排课类型。");
   if (typeof paused !== "boolean" || !Array.isArray(slots) || !slots.length || slots.length > 42) invalid("周期规则需要 1 至 42 个时段。");
   const first = dateOf(startsOn);
   const last = endsOn === null ? null : dateOf(endsOn);
@@ -79,7 +90,13 @@ export function cycleDefinition(raw: unknown): CycleDefinition {
       entries.some((slot, i) => i > 0 && entries[i - 1].day === slot.day && overlaps(entries[i - 1], slot))) {
     invalid("该学生的周期时段重复或重叠。");
   }
-  return { kind, startsOn: first, endsOn: last, paused, slots: entries };
+  if (kind !== "flex") return { kind, startsOn: first, endsOn: last, paused, slots: entries };
+  const duration = durationOf(durationMinutes ?? 120);
+  const minutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
+  if (entries.some(slot => slot.day === 0 || slot.day === 6 || minutes(slot.end) - minutes(slot.start) < duration)) {
+    invalid("弹性安排限工作日，窗口须覆盖预计学习时长。");
+  }
+  return { kind, startsOn: first, endsOn: last, paused, slots: entries, durationMinutes: duration };
 }
 function decodeRule(row: Record<string, unknown>): CycleRule {
   assertCanonical(row.definition, cycleDefinition);
@@ -109,6 +126,15 @@ export function scheduleCommand(raw: unknown): CycleCommand {
     if (to < from || Date.parse(to) - Date.parse(from) > 30 * 86_400_000) invalid("单次生成日期范围最多 31 天。");
     return { action: "generate", from, to, studentId: data.studentId === undefined ? undefined : scheduleId(data.studentId) };
   }
+  if (data.action === "walkIn") return { action: "walkIn", requestId: scheduleId(data.requestId),
+    studentId: scheduleId(data.studentId), durationMinutes: durationOf(data.durationMinutes ?? 120) };
+  if (data.action === "confirmFlex" || data.action === "arriveFlex") {
+    const value = scheduleObject(data.window);
+    const window = { ruleId: scheduleId(value.ruleId), revision: versionOf(value.revision), slotId: scheduleId(value.slotId), date: dateOf(value.date) };
+    if (data.action === "arriveFlex") return { action: data.action, window };
+    if (typeof data.start !== "string" || !minute.test(data.start)) invalid("请选择具体预约开始时间。");
+    return { action: data.action, window, start: data.start };
+  }
   const requestId = scheduleId(data.requestId), expectedRevision = versionOf(data.expectedRevision);
   if (data.action === "hours") return { action: "hours", requestId, expectedRevision, hours: hoursOf(data.hours) };
   if (data.action !== "rule") return invalid("排课操作无效。");
@@ -132,6 +158,7 @@ export function persistCycleRule(db: DatabaseSync, input: Extract<CycleCommand, 
   const current = active.find(rule => rule.id === id);
   if ((current?.revision ?? 0) !== expectedRevision || (current && current.studentId !== studentId)) conflict("规则已有新版本或归属不同，请重新读取。");
   if (!definition.paused && active.some(rule => rule.studentId === studentId && rule.id !== id && !rule.paused &&
+    (rule.kind === "flex") === (definition.kind === "flex") &&
     rule.slots.some(existing => definition.slots.some(slot => slot.day === existing.day && overlaps(slot, existing) &&
       periodsIntersect(definition, rule, slot.day))))) conflict("同一学生已有重叠的长期或固定规则。");
   db.prepare("INSERT INTO schedule_rule_revisions VALUES(?,?,?,?,?,?)").run(id, next, studentId, requestId, encoded, now);
@@ -168,13 +195,13 @@ export function stableScheduleId(...parts: string[]) {
   const hex = bytes.toString("hex");
   return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
 }
-export function verifyRecurringHistory(db: DatabaseSync, students: ReadonlySet<string>) {
+export function verifyRecurringHistory(db: DatabaseSync, students: ReadonlySet<string>, flexEnabled: boolean) {
   const revisions = new Map<string, CycleRule>();
   const prior = new Map<string, CycleRule>();
   for (const row of db.prepare(`SELECT ${ruleColumns} FROM schedule_rule_revisions ORDER BY id,revision`).all()) {
     const rule = decodeRule(row);
     const prev = prior.get(rule.id);
-    if (!students.has(rule.studentId) || rule.revision !== (prev?.revision ?? 0) + 1 ||
+    if ((!flexEnabled && rule.kind === "flex") || !students.has(rule.studentId) || rule.revision !== (prev?.revision ?? 0) + 1 ||
       (prev && prev.studentId !== rule.studentId)) invalid("周期规则的修订或学生归属无效。");
     scheduleId(row.requestId);
     prior.set(rule.id, rule);

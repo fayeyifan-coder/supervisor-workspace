@@ -220,9 +220,9 @@ function BlockCard({ block, target, locked, checkedOut, submit, onEdit }: {
   </article>;
 }
 
-export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, leaveGuard, focusTaskId, backLabel = "返回课表" }: {
+export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, leaveGuard, focusTaskId, allowLeave, backLabel = "返回课表" }: {
   api: WorkspaceApi; target: LearningDayInput; alias: string; reloadVersion: number; confirmedRequestId?: string; blocked: boolean;
-  submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void; backLabel?: string; focusTaskId?: string;
+  submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void; backLabel?: string; focusTaskId?: string; allowLeave?: boolean;
   leaveGuard: Ref<() => boolean>;
 }) {
   const [data, setData] = useState<LearningDay>();
@@ -233,11 +233,12 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
   const [notice, setNotice] = useState<{ error: boolean; text: string }>();
   const [draft, setDraft] = useState<BlockDraft>();
   const [busy, setBusy] = useState(false);
+  const [leaveReason, setLeaveReason] = useState<string>();
   const running = useRef(false);
   const pendingEditor = useRef<{ command: LearningChange; close: () => void } | undefined>(undefined);
   const focusedTask = useRef<string>(undefined);
   function canLeave() {
-    return !running.current && (!draft || window.confirm("确认离开学习块表单？"));
+    return !running.current && (!(draft || leaveReason) || window.confirm("确认离开未保存的表单？"));
   }
   useImperativeHandle(leaveGuard, () => canLeave);
   useEffect(() => {
@@ -310,6 +311,11 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
       outsideAttendanceReason: outside ? draft.reason : undefined }, () => setDraft(undefined));
   }
 
+  function saveLeave() {
+    if (!plan || !leaveReason?.trim()) return;
+    void save({ ...change(target, plan.id, plan.revision), command: "recordAttendance", action: "leave", reason: leaveReason }, () => setLeaveReason(undefined));
+  }
+
   const waiting = plan && (plan.status === "planned" || plan.status === "confirmed");
   const started = plan && plan.startAt <= Date.now();
   const hasStartedBlock = data?.blocks.some(block => block.actualStart !== null);
@@ -335,7 +341,7 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
     {data && plan && <>
       <section className="panel learning-attendance" aria-labelledby="attendance-title">
         <header className="learning-task-head"><h2 id="attendance-title">到校记录</h2>
-          <span className="learning-status">{plan.checkOutAt === null ? attendanceLabels[plan.status] : "已签退"}</span></header>
+          <span className="learning-status">{plan.dayException?.action === "leave" ? "已请假" : plan.checkOutAt === null ? attendanceLabels[plan.status] : "已签退"}</span></header>
         <dl className="learning-times">
           <div><dt>计划到校</dt><dd>{range(plan.startAt, plan.endAt)}</dd></div>
           <div><dt>实际签到</dt><dd>{factTime(plan.checkInAt)}</dd></div>
@@ -351,6 +357,11 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
               onClick={() => attendance("absent")}>标记缺席</button>}
             {!started && !hasLiveBlock && <button type="button" className="secondary" disabled={locked}
               onClick={() => attendance("cancel")}>取消到校</button>}
+            {allowLeave && !hasLiveBlock && leaveReason === undefined && <button type="button" className="secondary"
+              disabled={locked} onClick={() => setLeaveReason("")}>登记请假</button>}
+            {leaveReason !== undefined && <label>请假原因<input value={leaveReason} maxLength={500} onChange={event => setLeaveReason(event.target.value)} />
+              <button type="button" disabled={locked || !leaveReason.trim()} onClick={saveLeave}>保存请假</button>
+              <button type="button" className="secondary" onClick={() => setLeaveReason(undefined)}>关闭请假输入</button></label>}
           </>}
           {plan.status === "attended" && plan.checkOutAt === null && <button type="button" className="primary"
             disabled={locked || hasActiveBlock} onClick={() => attendance("checkOut")}>签退</button>}

@@ -68,7 +68,7 @@ export function applyLearningChange(store: OperationsDatabase, students: Student
   if (command === "recordAttendance") {
     if (change.id !== plan.id) invalid("签到记录与当前到校安排不一致。");
     return store.recordAttendance({ ...change,
-      action: enumValue(request.action, ["confirm", "checkIn", "checkOut", "absent", "cancel"]) });
+      action: enumValue(request.action, ["confirm", "checkIn", "checkOut", "absent", "cancel", "leave"]), reason: optionalText(request.reason, 500) });
   }
   const block = store.learningBlock(change.id);
   if (block ? block.studentId !== change.studentId || block.attendancePlanId !== plan.id : command !== "saveLearningBlock") {

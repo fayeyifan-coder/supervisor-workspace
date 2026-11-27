@@ -75,3 +75,5 @@
 .recurring-generate label, .recurring-editor label { display: grid; gap: 4px; }
 .recurring-editor { margin-block: 12px; }
 .recurring-editor fieldset > label { margin-block: 6px; }
+
+.flex-window { display: grid; gap: 4px; padding: 8px; border: 1px dashed var(--line); border-radius: 6px; }

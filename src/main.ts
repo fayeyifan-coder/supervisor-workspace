@@ -16,7 +16,7 @@ import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSu
 import { OperationsDatabase } from "./operations";
 import { summarizeStudentOverview } from "./student-overview";
 import { shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
-import { id as scheduleId, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
+import { id as scheduleId, listFlexibleWeek, listScheduleWeek, object as scheduleObject, readSchedulePlan, saveSchedulePlan } from "./schedule-api";
 import { applyLearningChange, readAttendanceBoard, readLearningDay, readScheduleReceipt } from "./learning-api";
 import { StudentWriteRecovery } from "./student-write-recovery";
 import { OperationsPending } from "./operations-pending";
@@ -312,6 +312,7 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   }));
   handle(channels.scheduleWeek, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => listScheduleWeek(store, students, raw)));
+  handle(channels.scheduleFlexWeek, (event, raw: unknown) => invokeSchedule(event, (store, students) => listFlexibleWeek(store, students, raw)));
   handle(channels.attendanceBoard, event => invokeSchedule(event, readAttendanceBoard));
   handle(channels.schedulePlan, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => readSchedulePlan(store, students, raw)));

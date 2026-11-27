@@ -286,6 +286,7 @@ internal static class RecoveryIo {
 
     static string Marker(int index, string m1Version) {
         if (index == 0) return "mvp-v" + m1Version + "\n";
+        if (index == 4 && m1Version == "10") return "operations-v3\n";
         return index == 4 && m1Version == "9" ? "operations-v2\n" : MarkerContents[index];
     }
 
@@ -405,7 +406,7 @@ internal static class RecoveryIo {
                 string version = args.Length == 3 ? "1" : args[3];
                 string m1Version = args.Length == 5 ? args[4] : "1";
                 Check(version == "1" || version == "2", "Invalid recovery format.");
-                Check(m1Version == "1" || (version == "2" && (m1Version == "2" || m1Version == "3" || m1Version == "4" || m1Version == "5" || m1Version == "6" || m1Version == "7" || m1Version == "8" || m1Version == "9")), "Invalid student database version.");
+                Check(m1Version == "1" || (version == "2" && (m1Version == "2" || m1Version == "3" || m1Version == "4" || m1Version == "5" || m1Version == "6" || m1Version == "7" || m1Version == "8" || m1Version == "9" || m1Version == "10")), "Invalid student database version.");
                 int count = version == "2" ? RestoreFiles.Length : RestoreFiles.Length - 1;
                 if (args[0] == "inspect" || args[0] == "inspect-active") Inspect(args[1], args[2], count, m1Version, args[0] == "inspect-active");
                 else Restore(args[1], args[2], args[0] == "activate", count, m1Version);

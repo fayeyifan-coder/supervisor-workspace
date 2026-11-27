@@ -1,7 +1,7 @@
 import type { Student } from "./contracts";
 import { WorkspaceFault } from "./database";
 import type { OperationsDatabase, SaveAttendancePlanInput } from "./operations";
-import { minute, shanghaiParts, weekRange } from "./schedule-calendar";
+import { minute, shanghaiParts, shiftDate, weekRange } from "./schedule-calendar";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
@@ -45,6 +45,13 @@ export function listScheduleWeek(store: OperationsDatabase, students: StudentLis
   return store.listAttendancePlans(range.startAt, range.endAt, studentId);
 }
 
+export function listFlexibleWeek(store: OperationsDatabase, students: StudentList, raw: unknown) {
+  const query = object(raw);
+  if (typeof query.monday !== "string" || !weekRange(query.monday)) invalid("弹性查询需要合法的机构周一日期。");
+  const studentId = query.studentId === undefined ? undefined : requireStudent(query.studentId, students);
+  return store.flexWindows(query.monday, shiftDate(query.monday, 6), studentId);
+}
+
 export function readSchedulePlan(store: OperationsDatabase, students: StudentList, raw: unknown) {
   const planId = id(raw);
   store.protectionConnection();
@@ -74,5 +81,6 @@ export function saveSchedulePlan(store: OperationsDatabase, students: StudentLis
   return store.saveAttendancePlan({
     id: id(request.id), studentId: requireStudent(request.studentId, students), requestId: id(request.requestId),
     expectedRevision, startAt, endAt, kind, exception,
+    changeReason: typeof request.changeReason === "string" ? request.changeReason : undefined,
   });
 }

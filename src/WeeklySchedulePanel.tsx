@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import type { AttendancePlan, Failure, LearningDayInput, ScheduleSaveInput, Student, WorkspaceApi } from "./contracts";
 import { attendanceCounts, minute, mondayOf, openingHours, shanghaiMinute, shanghaiParts, shiftDate, weekday, weekRange, type ScheduleHours } from "./schedule-calendar";
-import type { ScheduleConfiguration } from "./recurring-schedule";
+import type { FlexWindow, ScheduleConfiguration } from "./recurring-schedule";
+import { FlexibleWindowCard, WalkInForm } from "./ScheduleArrivals";
 import { RecurringSchedulePanel } from "./RecurringSchedulePanel";
 import { AttendanceLearningPanel } from "./AttendanceLearningPanel";
 import { usePendingOperation } from "./use-pending-operation";
@@ -11,7 +12,7 @@ const dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "�
 const statuses: Record<AttendancePlan["status"], string> = {
   planned: "待确认", confirmed: "已确认", attended: "已到校", absent: "缺席", cancelled: "已取消",
 };
-const attendanceLabel = (plan: AttendancePlan) => plan.checkOutAt === null ? statuses[plan.status] : "已签退";
+const attendanceLabel = (plan: AttendancePlan) => plan.dayException?.action === "leave" ? "已请假" : plan.checkOutAt === null ? statuses[plan.status] : "已签退";
 
 interface Draft {
   id: string;
@@ -22,6 +23,7 @@ interface Draft {
   kind: AttendancePlan["kind"];
   confirmed: boolean;
   reason: string;
+  changeReason?: string;
   original?: AttendancePlan;
 }
 
@@ -68,9 +70,9 @@ function exceptionText(draft: Draft, schedule?: ScheduleHours): string {
     : "当天未配置营业时段。";
 }
 
-export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId, setStudentId, learning, learningBackLabel,
+export function WeeklySchedulePanel({ api, recurringEnabled, flexEnabled, students, studentId, setStudentId, learning, learningBackLabel,
   onLearning, onExitLearning, learningLeaveGuard, onStudent, summary }: {
-  api: WorkspaceApi; recurringEnabled: boolean; students: Student[]; studentId: string; setStudentId: (id: string) => void;
+  api: WorkspaceApi; recurringEnabled: boolean; flexEnabled: boolean; students: Student[]; studentId: string; setStudentId: (id: string) => void;
   learning?: LearningDayInput & { focusTaskId?: string }; learningBackLabel?: string;
   onLearning: (target: LearningDayInput, trigger: HTMLButtonElement) => void;
   onExitLearning: () => void; learningLeaveGuard: Ref<() => boolean>;
@@ -83,6 +85,7 @@ export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId
   const [mode, setMode] = useState<"week" | "day">("day");
   const [queryRevision, setQueryRevision] = useState(0);
   const [configuration, setConfiguration] = useState<ScheduleConfiguration>();
+  const [flex, setFlex] = useState<{ key: string; windows?: FlexWindow[]; error?: string }>();
   const [listing, setListing] = useState<{ key: string; rows?: AttendancePlan[]; error?: string }>();
   const [draft, setDraft] = useState<Draft>();
   const [draftDirty, setDraftDirty] = useState(false);
@@ -124,7 +127,23 @@ export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId
     return () => { current = false; };
   }, [api, recurringEnabled, queryRevision]);
 
+  useEffect(() => {
+    if (!flexEnabled) return;
+    let current = true;
+    api.scheduleFlexWeek({ monday: week, studentId: studentId || undefined }).then(reply => {
+      if (current) setFlex(reply.ok ? { key: queryKey, windows: reply.value } : { key: queryKey, error: reply.message });
+    }).catch(() => { if (current) setFlex({ key: queryKey, error: "无法读取弹性窗口。" }); });
+    return () => { current = false; };
+  }, [api, flexEnabled, week, studentId, queryKey, queryRevision, students]);
+  const windows = flex?.key === queryKey ? flex.windows ?? [] : [];
+
   function refresh() { setQueryRevision(value => value + 1); }
+  function onVisit(plan: AttendancePlan, trigger: HTMLButtonElement, actual: boolean) {
+    selectDay(shanghaiParts(plan.startAt).date);
+    refresh();
+    setNotice({ kind: "success", message: actual ? "已记录实际签到。" : "具体预约已确认。" });
+    if (actual) onLearning({ studentId: plan.studentId, attendanceId: plan.id }, trigger);
+  }
 
   function canDiscard(): boolean {
     if (inFlight.current || request.busy) return false;
@@ -184,6 +203,7 @@ export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId
       requestId: crypto.randomUUID(), id: draft.id, studentId: draft.studentId,
       expectedRevision: draft.original?.revision ?? 0, startAt, endAt, kind: draft.kind,
       exception: exception ? { confirmed: true, reason: draft.reason.trim() } : undefined,
+      changeReason: flexEnabled && draft.original ? draft.changeReason?.trim() || undefined : undefined,
     };
     submission.current = command;
     inFlight.current = true;
@@ -254,7 +274,7 @@ export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId
     {learning && <AttendanceLearningPanel key={learning.attendanceId} api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
       reloadVersion={learningRevision} confirmedRequestId={confirmedLearningRequest}
       blocked={request.blocked} submit={request.run}
-      leaveGuard={learningLeaveGuard} backLabel={learningBackLabel} focusTaskId={learning.focusTaskId}
+      leaveGuard={learningLeaveGuard} backLabel={learningBackLabel} focusTaskId={learning.focusTaskId} allowLeave={flexEnabled}
       onBack={onExitLearning} />}
     <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}
       data-profile-switch-draft={draftDirty || busy ? "" : undefined}>
@@ -267,7 +287,8 @@ export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId
     </header>
     {summary}
     {recurringEnabled && <RecurringSchedulePanel api={api} configuration={configuration} students={students} week={week}
-      studentId={studentId} blocked={busy || request.blocked} onChanged={refresh} />}
+      studentId={studentId} flexEnabled={flexEnabled} blocked={busy || request.blocked} onChanged={refresh} />}
+    {flexEnabled && <WalkInForm api={api} students={students} initial={studentId} blocked={busy || request.blocked} onSaved={onVisit} />}
     <div className="schedule-toolbar">
       <div className="schedule-period">
         <div className="schedule-buttons" aria-label="课表视图">
@@ -328,6 +349,8 @@ export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId
             <option value="regular">普通</option><option value="whole_day">全天</option>
           </select>
         </label>
+        {flexEnabled && draft.original && <label>本次调课原因<input maxLength={500} value={draft.changeReason ?? ""}
+          onChange={event => updateDraft({ changeReason: event.target.value })} /></label>}
         {exception && <div className="schedule-exception">
           <p>{exceptionText(draft, configuration?.hours)}</p>
           <label className="schedule-check"><input type="checkbox" checked={draft.confirmed}
@@ -346,6 +369,7 @@ export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId
       </div>
     </form>}
     {!current && <p className="schedule-read-state muted" role="status">正在读取本周排课…</p>}
+    {flex?.key === queryKey && flex.error && <p role="alert">{flex.error} <button type="button" onClick={refresh}>重试</button></p>}
     {current?.error && <div className="notice failure" role="alert">
       {current.error} <button type="button" className="secondary" onClick={refresh}>重新读取</button>
     </div>}
@@ -363,6 +387,10 @@ export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId
             <h2>{dayNames[day]} <time dateTime={date}>{date.slice(5).replace("-", "/")}</time></h2>
             <p>{hours ? hours.start + "–" + hours.end : "周一默认停排 · 仅显示例外"}</p>
           </header>
+          {windows.some(window => window.date === date) && <ul className="schedule-card-list" aria-label="待确认弹性窗口">
+            {windows.filter(window => window.date === date).map(window => <FlexibleWindowCard key={window.id} api={api} window={window}
+              alias={names.get(window.studentId) ?? "待核对学生"} blocked={busy || request.blocked} onSaved={onVisit} />)}
+          </ul>}
           {current?.rows && (plans.length ? <ul className="schedule-card-list">{plans.map(plan => {
             const start = shanghaiParts(plan.startAt).time;
             const end = shanghaiParts(plan.endAt).time;
@@ -374,8 +402,9 @@ export function WeeklySchedulePanel({ api, recurringEnabled, students, studentId
                 }}>
                 <span className="schedule-card-time">{start}–{end}</span>
                 <strong>{alias}</strong>
-                <span className="schedule-card-meta">{plan.cycleKind === "long_term" ? "长期在校" : plan.cycleKind === "fixed" ? "固定到课" : plan.kind === "whole_day" ? "全天" : "单次"} · {attendanceLabel(plan)}</span>
+                <span className="schedule-card-meta">{plan.cycleKind === "long_term" ? "长期在校" : plan.cycleKind === "fixed" ? "固定到课" : plan.cycleKind === "flex" ? "弹性到课" : plan.actualOnly ? "临时到课" : plan.kind === "whole_day" ? "全天" : "单次"} · {attendanceLabel(plan)}</span>
                 {plan.exceptionReason && <span className="schedule-card-exception">时段例外</span>}
+                {plan.dayException && <span className="schedule-card-exception">{plan.dayException.reason}</span>}
               </button>
               <div className="schedule-card-actions">
                 <button className="primary schedule-learning-entry" type="button" disabled={busy || request.busy}
