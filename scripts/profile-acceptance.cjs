@@ -70,7 +70,7 @@ async function profileShot(name) { await main(W+'.setSize(1100,1000);true');awai
 (async()=>{
  await launch();
  if (mode === 'student-management') {
-  evidence.management = await require('./student-management-acceptance.cjs')({ main, ui, api, ok, wait, click, choose, profileShot, E });
+  evidence.management = await require('./student-management-acceptance.cjs')({ main, ui, api, ok, wait, click, choose, profileShot, E, reopen: async () => { await close(); await launch(); } });
   await close(); evidence.completed = true; fs.writeFileSync(join(output, 'acceptance.json'), JSON.stringify(evidence, null, 2)); return;
  }
  const students=[];

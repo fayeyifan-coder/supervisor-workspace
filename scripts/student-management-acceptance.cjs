@@ -2,9 +2,8 @@ const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { shanghaiParts, shanghaiMinute, shiftDate, weekday } = require("../build/schedule-calendar.js");
 
-module.exports = async function verifyStudentManagement({ main, ui, api, ok, wait, click, choose, profileShot, E }) {
+module.exports = async function verifyStudentManagement({ main, ui, api, ok, wait, click, choose, profileShot, E, reopen }) {
   const id = () => randomUUID();
-  await main(E + ".dialog.showMessageBoxSync=()=>1;true");
   const students = [];
   for (let i = 1; i <= 20; i++) {
     students.push(ok(await api("createStudent", { id: id(), alias: "虚构督学" + String(i).padStart(2, "0"), grade: "七年级",
@@ -53,6 +52,7 @@ module.exports = async function verifyStudentManagement({ main, ui, api, ok, wai
     tasks: [{ id: taskId, category: "home_school", subject: "数学", content: "合成甲：验算练习" }] }));
   ok(await api("acknowledgeOperation", taskRequest, false));
 
+  await reopen();
   const selected = () => ui('document.querySelector(".student-detail-nav button[aria-pressed=true]")?.textContent');
   const summary = '.student-summary-grid';
   const hasOverviewText = value => ui('document.querySelector(' + JSON.stringify(summary) + ')?.innerText.includes(' + JSON.stringify(value) + ')');

@@ -235,6 +235,7 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
   const pendingEditor = useRef<{ command: LearningChange; close: () => void } | undefined>(undefined);
+  const focusedTask = useRef<string>(undefined);
   function canLeave() {
     return !running.current && (!draft || window.confirm("确认离开学习块表单？"));
   }
@@ -262,10 +263,12 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
   function reread() { setReload(value => value + 1); }
 
   useEffect(() => {
-    if (!focusTaskId || !data || data.attendance.id !== target.attendanceId) return;
+    if (!focusTaskId || focusedTask.current === focusTaskId || !data || data.attendance.id !== target.attendanceId) return;
     const task = document.getElementById("learning-task-" + focusTaskId);
-    task?.scrollIntoView({ block: "center" });
-    task?.focus({ preventScroll: true });
+    if (!task) return;
+    focusedTask.current = focusTaskId;
+    task.scrollIntoView({ block: "center" });
+    task.focus({ preventScroll: true });
   }, [focusTaskId, data, target.attendanceId]);
 
   const plan = data?.attendance;
