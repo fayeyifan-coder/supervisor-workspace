@@ -130,7 +130,9 @@ module.exports = async function verifyStudentManagement({ main, ui, api, ok, wai
   await click("综合概览");
   await click("家长诉求", ".student-detail-nav button");
   assert.equal(await ui('document.querySelector("#student-section-parent form textarea").value'), "合成未保存概览测试草稿");
+  await ui('globalThis.confirmDraftDiscard=window.confirm;window.confirm=()=>true;true');
   await click("取消", "#student-section-parent form button");
+  await ui('window.confirm=globalThis.confirmDraftDiscard;delete globalThis.confirmDraftDiscard;true');
 
   await main('(()=>{const ipc=' + E + '.ipcMain;const c="mvp:student-overview";const original=ipc._invokeHandlers.get(c);'
     + 'ipc.removeHandler(c);ipc.handle(c,async(event,id)=>{if(id===' + JSON.stringify(a.id)
