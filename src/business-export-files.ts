@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, statfsSync } from "node:fs";
+import { existsSync, realpathSync, statfsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import type { BusinessExportDocument, BusinessExportResult } from "./business-export";
 import { businessExportPayload } from "./business-export";
@@ -10,6 +10,22 @@ const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 const within = (root: string, path: string) => {const part = relative(root,path); return !isAbsolute(part) && part !== ".." && !part.startsWith("..\\");};
 export function requireExportDestination(parent: string, forbidden: readonly string[]) {
  if (!/^[A-Za-z]:\\/.test(parent) || forbidden.some(root => within(root,parent))) throw new WorkspaceFault("invalid", "请选择正式程序、档案与业务数据目录以外的导出位置。");
+ let canonical: string;
+ try { canonical = realpathSync.native(parent); }
+ catch { throw new WorkspaceFault("invalid", "无法确认导出目录，请重新选择本机目录。"); }
+ if (canonical.toLowerCase() !== parent.toLowerCase()) {
+  throw new WorkspaceFault("invalid", "请选择真实的完整目录路径，不能使用短路径别名或目录链接。");
+ }
+ for (const root of forbidden) {
+  let canonicalRoot: string;
+  try { canonicalRoot = realpathSync.native(root); }
+  catch (error) {
+   const code = (error as NodeJS.ErrnoException).code;
+   if (code === "ENOENT" || code === "ENOTDIR") continue;
+   throw new WorkspaceFault("invalid", "无法确认受保护目录边界，未开始导出。");
+  }
+  if (within(canonicalRoot, canonical)) throw new WorkspaceFault("invalid", "请选择正式程序、档案与业务数据目录以外的导出位置。");
+ }
  for (let cursor = parent;; cursor = dirname(cursor)) {
   if (existsSync(join(cursor,".git"))) throw new WorkspaceFault("invalid", "业务导出不能保存到 Git 仓库内，请选择仓库外的本机目录。");
   if (dirname(cursor) === cursor) break;
@@ -24,6 +40,7 @@ export class BusinessExportFiles {
   const payload = await businessExportPayload(document);
   const lengths = payload.files.map(file => file.bytes.length); const total = lengths.reduce((a,b) => a+b, 0);
   if (total > 96*1024*1024 || this.available(parent) < total + 16*1024*1024) throw new WorkspaceFault("failed", "导出空间不足或文件超过 96 MiB 上限，未写入任何导出文件。");
+  requireExportDestination(parent, forbidden);
   const location = join(parent,leaf);
   const expected = Buffer.from("sw-business-export-v1\n" + sha(payload.files[2].bytes) + "\n");
   await new Promise<void>((resolve,reject) => {

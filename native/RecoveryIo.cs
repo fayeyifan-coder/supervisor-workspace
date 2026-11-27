@@ -242,6 +242,10 @@ internal static class RecoveryIo {
         Check(Regex.IsMatch(name, @"\Asw-business-export-[a-f0-9]{32}\z") && xlsxSize > 0 && jsonSize > 0 && manifestSize > 0 &&
             total <= 96 * 1024 * 1024, "Invalid business export output.");
         using (var path = new PinnedPath(root)) {
+            var canonical = new StringBuilder(32768);
+            uint chars = GetFinalPathNameByHandleW(path.Current, canonical, (uint)canonical.Capacity, 0);
+            Check(chars != 0 && chars < canonical.Capacity && canonical.ToString().Equals(@"\\?\" + root, StringComparison.OrdinalIgnoreCase),
+                "Business export requires the full directory path.");
             Check(new DriveInfo(root.Substring(0, 3)).AvailableFreeSpace >= total + 16 * 1024 * 1024, "Insufficient export space.");
             path.Add(name, true); // Exclusive fresh directory, never an existing user destination.
             using (var xlsx = Output(path.Current, "business-data.xlsx"))

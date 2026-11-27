@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const {test}=require('node:test');
 const {randomUUID,createHash}=require('node:crypto');
-const {existsSync,mkdirSync,readFileSync,readdirSync,writeFileSync}=require('node:fs');
+const {existsSync,mkdirSync,readFileSync,readdirSync,realpathSync,writeFileSync}=require('node:fs');
 const {join}=require('node:path');
 const {spawnSync}=require('node:child_process');
 const {DatabaseSync}=require('node:sqlite');
@@ -95,4 +95,33 @@ test('interrupted or truncated native output cannot create a successful completi
  const r=spawnSync(helper,['publish-business',f.dir,leaf,'1000','1000','1000'],{input:Buffer.from('truncated'),windowsHide:true});
  assert.notEqual(r.status,0);assert(existsSync(join(f.dir,leaf)));assert(!existsSync(join(f.dir,leaf,'export.complete')));
  const denied=spawnSync(helper,['publish-business',f.dir,'../escape','1','1','1'],{input:Buffer.from('abc'),windowsHide:true});assert.notEqual(denied.status,0);
+});
+
+test('business publication refuses noncanonical directory paths before creating output', t => {
+ const fixture = exportFixture(t, 0);
+ const directory = join(fixture.dir, 'Synthetic Forbidden Profile Directory');
+ mkdirSync(directory);
+ const shortName = spawnSync('cmd.exe', ['/d', '/c', 'for %I in ("%SW_EXPORT_TEST_PARENT%") do @echo %~sI'], {
+  env: { ...process.env, SW_EXPORT_TEST_PARENT: directory }, encoding: 'utf8', windowsHide: true,
+  windowsVerbatimArguments: true,
+ });
+ assert.equal(shortName.status, 0);
+ const shortPath = shortName.stdout.trim();
+ assert.equal(realpathSync.native(shortPath).toLowerCase(), realpathSync.native(directory).toLowerCase());
+ const aliases = [directory + '\\.'];
+ if (shortPath.toLowerCase() !== directory.toLowerCase()) aliases.push(shortPath);
+ else t.diagnostic('The test volume did not assign an 8.3 alias to the synthetic directory.');
+ for (const alias of aliases) {
+  const leaf = 'sw-business-export-' + randomUUID().replaceAll('-', '');
+  assert.throws(() => requireExportDestination(alias, []), { code: 'invalid' });
+  const attempt = spawnSync(helper, ['publish-business', alias, leaf, '1', '1', '1'], {
+   input: Buffer.from('abc'), windowsHide: true,
+  });
+  assert.notEqual(attempt.status, 0);
+  assert.equal(existsSync(join(directory, leaf)), false);
+ }
+ if (aliases.length === 2) {
+  assert.throws(() => requireExportDestination(directory, [shortPath]), { code: 'invalid' });
+  t.diagnostic('Real 8.3 alias verified against both the policy check and the pinned native writer.');
+ }
 });
