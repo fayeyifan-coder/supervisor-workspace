@@ -1,6 +1,6 @@
 {
   "name": "supervisor-workspace-mvp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Offline Windows workspace for student learning records",
   "author": "Supervisor Workspace",
