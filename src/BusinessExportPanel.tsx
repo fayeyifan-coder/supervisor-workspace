@@ -50,7 +50,7 @@ export function BusinessExportPanel({api, supported, onBusyChange}: {api: Worksp
    <p>学生 {preview.students} 名 · 业务及历史记录 {preview.rows} 行 · 五库 {preview.tables.length} 表范围已登记。</p>
    <p>快照截至 {new Date(preview.capturedAt).toLocaleString("zh-CN",{timeZone:"Asia/Shanghai",hour12:false})}；此后保存的记录不自动加入，请重新预览刷新。预览于 {new Date(preview.expiresAt).toLocaleTimeString("zh-CN",{hour12:false})} 失效。</p>
    <p>{preview.includeSourceText?"本次包含导入原文。请将导出文件作为私人业务资料妥善保管。":"本次不包含 intake_jobs.source_json 导入原文；其余已确认业务和来源身份保留。"} 三类内部状态仅列数量，不导出正文；完整恢复请用上方完整备份。</p>
-   <details><summary>查看 24 表映射、记录数及排除项</summary><div className="business-export-table"><table><thead><tr><th>库 / 原表</th><th>Excel 表</th><th>源行数</th><th>输出行数</th><th>实体 / 历史行</th><th>范围说明</th></tr></thead><tbody>
+   <details><summary>查看 {preview.tables.length} 表映射、记录数及排除项</summary><div className="business-export-table"><table><thead><tr><th>库 / 原表</th><th>Excel 表</th><th>源行数</th><th>输出行数</th><th>实体 / 历史行</th><th>范围说明</th></tr></thead><tbody>
     {preview.tables.map(row=><tr key={row.store+row.table}><td>{row.store} / {row.table}</td><td>{row.role==="internal"?"仅范围说明":row.sheet}</td><td>{row.sourceRows}</td><td>{row.exportedRows}</td><td>{row.entities} / {row.historicalRows}</td><td>{row.reason}</td></tr>)}
    </tbody></table></div></details>
    <div className="retry-actions"><button type="button" className="primary" disabled={busy} onClick={()=>void write()}>确认范围并选择保存位置</button><button type="button" className="secondary" disabled={busy} onClick={()=>void cancel()}>取消导出预览</button></div>

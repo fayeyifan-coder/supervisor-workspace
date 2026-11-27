@@ -135,7 +135,7 @@ export async function businessExportPayload(document: BusinessExportDocument, sh
   row.eachCell(cell => {cell.numFmt = "@";}); // Strings only: never formula/hyperlink objects or automatic numeric/date coercion.
  }
  const cover = sheet("导出说明", ["项目", "内容"]);
- for (const row of [["范围", "当前五库 v6 全部已提交业务及历史修订；不是可恢复备份。"], ["数据截至", document.capturedAt],
+ for (const row of [["范围", `当前五库 v${document.m1Version} 的全部已提交业务及历史修订。完整恢复请使用 SWBACK2。`], ["数据截至", document.capturedAt],
   ["快照身份", document.snapshotId], ["原始数据", "business-data.json 是保真原值；本 XLSX 全部业务单元格按文本写入，公式不执行。"],
   ["空值", "SQL NULL 显示为 ⟪NULL⟫；空字符串为空白。超过安全整数范围的整数在 JSON 中用 sqliteInteger 十进制标签保留。"],
   ["长文本", "超长、过多换行或 Excel 不支持的字符使用分片表；按同一引用拼接 fragment 后 JSON.parse 可还原完整字符串。"],

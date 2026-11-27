@@ -23,6 +23,56 @@ test('empty five-store export enumerates all 24 tables and excludes only declare
  assert.equal(book.getWorksheet('考试成绩').rowCount,1);
 });
 
+test('v6, v7 and v8 previews, XLSX and JSON describe the same table scope', async t => {
+ for (const [version, tableCount, businessCount] of [[6, 24, 21], [7, 24, 21], [8, 25, 22]]) {
+  const fixture = exportFixture(t, 1, version);
+  if (version === 8) fixture.m1.saveStudentLifecycle({studentId: fixture.studentId, requestId: randomUUID(),
+   expectedRevision: 0, status: 'paused', reason: '合成范围核验'});
+  const bytes = fixture.capture();
+  const plans = new BusinessExportPlans();
+  const preview = plans.prepare('synthetic-layout', bytes, false);
+  const document = plans.take(preview.token, 'synthetic-layout');
+  const payload = await businessExportPayload(document);
+  const exportedJson = JSON.parse(payload.files.find(file => file.name === 'business-data.json').bytes);
+  const book = new Excel.Workbook();
+  await book.xlsx.load(payload.files.find(file => file.name === 'business-data.xlsx').bytes);
+  assert.equal(exportedJson.m1Version, version);
+  assert.equal(preview.tables.length, tableCount);
+  assert.deepEqual(preview.tables, exportedJson.tables.map(({rows, ...summary}) => summary));
+  assert.deepEqual(payload.manifest.tables, preview.tables);
+  assert.match(book.getWorksheet('导出说明').getCell('B2').text, new RegExp('五库 v' + version + '\\b'));
+  const internal = exportedJson.tables.filter(table => table.role === 'internal');
+  assert.deepEqual(internal.map(table => table.table).sort(), ['growth_requests', 'operation_requests', 'student_edit_pending']);
+  for (const table of internal) {
+   assert.equal(table.exportedRows, 0);
+   assert.deepEqual(table.rows, []);
+   assert.equal(book.getWorksheet(table.sheet), undefined);
+  }
+  const business = exportedJson.tables.filter(table => table.role !== 'internal');
+  assert.equal(business.length, businessCount);
+  assert.equal(book.getWorksheet('表清单').rowCount, tableCount + 1);
+  assert.equal(book.worksheets.length, businessCount + 3);
+  assert.deepEqual(payload.manifest.workbookSheets.map(sheet => sheet.table), business.map(table => table.table));
+  for (const [index, table] of exportedJson.tables.entries()) {
+   const inventory = book.getWorksheet('表清单').getRow(index + 2);
+   assert.equal(inventory.getCell(2).text, table.table);
+   assert.equal(inventory.getCell(3).text, table.role === 'internal' ? '不导出正文' : table.sheet);
+  }
+  for (const table of business) {
+   assert.equal(table.rows.length, table.sourceRows);
+   assert(table.rows.length > 0, table.table + ' should contain synthetic data');
+   assert.equal(book.getWorksheet(table.sheet).rowCount, table.rows.length + 1);
+  }
+  const scoreMapping = payload.manifest.workbookSheets.find(sheet => sheet.table === 'student_scores');
+  assert.equal(scoreMapping.columns.includes('payload.classRank'), version >= 7);
+  const lifecycle = exportedJson.tables.find(table => table.table === 'student_lifecycle');
+  if (version === 8) {
+   assert.equal(lifecycle.rows[0].status, 'paused');
+   assert.equal(lifecycle.rows[0].student_id, fixture.studentId);
+  } else assert.equal(lifecycle, undefined);
+ }
+});
+
 test('single and 20 synthetic students preserve every business row, identity, cross-store link and historical revision',t=>{
  for(const count of [1,20]){
   const f=exportFixture(t,count);const before=sourceHashes(f);const d=businessExportDocument(f.capture(),true);
