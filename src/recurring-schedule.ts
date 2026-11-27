@@ -140,6 +140,21 @@ export function scheduleCommand(raw: unknown): CycleCommand {
   if (data.action !== "rule") return invalid("排课操作无效。");
   return { action: "rule", requestId, expectedRevision, id: scheduleId(data.id), studentId: scheduleId(data.studentId), definition: cycleDefinition(data.definition) };
 }
+function effectiveRulePeriods(rules: readonly CycleRule[]): CycleRule[] {
+  const nextStart = new Map<string, string>();
+  const periods: CycleRule[] = [];
+  // History is ordered by rule ID and descending revision. A newer start closes earlier periods.
+  for (const rule of rules) {
+    const next = nextStart.get(rule.id);
+    if (next && rule.startsOn >= next) continue;
+    nextStart.set(rule.id, rule.startsOn);
+    const cutoff = next ? shiftDate(next, -1) : null;
+    const endsOn = cutoff && (!rule.endsOn || cutoff < rule.endsOn) ? cutoff : rule.endsOn;
+    periods.push({ ...rule, endsOn });
+  }
+  return periods;
+}
+
 function periodsIntersect(a: CycleDefinition, b: CycleDefinition, weekDay: number) {
   const from = a.startsOn > b.startsOn ? a.startsOn : b.startsOn;
   const endA = a.endsOn ?? maximumDate, endB = b.endsOn ?? maximumDate;
@@ -154,10 +169,10 @@ export function persistCycleRule(db: DatabaseSync, input: Extract<CycleCommand, 
     if (prior.id !== id || prior.studentId !== studentId || prior.revision !== next || prior.definition !== encoded) conflict("该保存编号已用于另一条周期规则。");
     return decodeRule(prior);
   }
-  const active = currentRules(recurringConfiguration(db).rules);
-  const current = active.find(rule => rule.id === id);
+  const { rules } = recurringConfiguration(db);
+  const current = currentRules(rules).find(rule => rule.id === id);
   if ((current?.revision ?? 0) !== expectedRevision || (current && current.studentId !== studentId)) conflict("规则已有新版本或归属不同，请重新读取。");
-  if (!definition.paused && active.some(rule => rule.studentId === studentId && rule.id !== id && !rule.paused &&
+  if (!definition.paused && effectiveRulePeriods(rules).some(rule => rule.studentId === studentId && rule.id !== id && !rule.paused &&
     (rule.kind === "flex") === (definition.kind === "flex") &&
     rule.slots.some(existing => definition.slots.some(slot => slot.day === existing.day && overlaps(slot, existing) &&
       periodsIntersect(definition, rule, slot.day))))) conflict("同一学生已有重叠的长期或固定规则。");

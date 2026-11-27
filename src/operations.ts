@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { WorkspaceFault, type WorkspaceDatabase } from "./database";
 import { operationsProtectionFor, verifyOperationsStudentLinks, type OperationsLayout } from "./operations-schema";
-import { currentRules, dateApplies, persistCycleRule, persistScheduleHours, rangeFitsHours,
+import { dateApplies, type CycleRule, persistCycleRule, persistScheduleHours, rangeFitsHours,
   recurringConfiguration, scheduleCommand, stableScheduleId, storedScheduleHours,
   type CycleKind, type CycleResult, type DayException, type DayExceptionAction, type FlexWindow, type GenerationResult, type ScheduleConfiguration, type ScheduleOrigin } from "./recurring-schedule";
 import { isExpectedVisit, minute, openingHours, shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
@@ -256,6 +256,27 @@ export class OperationsDatabase {
     return recurringConfiguration(this.protectionConnection());
   }
 
+  private *cycleSlots(rules: readonly CycleRule[], from: string, to: string) {
+    const byRule = new Map<string, CycleRule[]>();
+    for (const rule of rules) {
+      const revisions = byRule.get(rule.id) ?? [];
+      revisions.push(rule);
+      byRule.set(rule.id, revisions);
+    }
+    // An already generated rule/date remains on its original revision, even if slots later change identity.
+    const pinned = new Map(this.db.prepare(`SELECT rule_id,occurrence_date,min(rule_revision) AS revision
+      FROM schedule_origins WHERE occurrence_date BETWEEN ? AND ? GROUP BY rule_id,occurrence_date`)
+      .all(from, to).map(row => [row.rule_id + "/" + row.occurrence_date, row.revision]));
+    for (const [id, revisions] of byRule) {
+      for (let date = from; date <= to; date = shiftDate(date, 1)) {
+        const revision = pinned.get(id + "/" + date);
+        const rule = revisions.find(row => revision === undefined ? row.startsOn <= date : row.revision === revision);
+        if (!rule) continue;
+        for (const slot of rule.slots) if (dateApplies(rule, date, slot)) yield { rule, date, slot };
+      }
+    }
+  }
+
   changeCycleSchedule(raw: unknown): CycleResult {
     this.scheduleConfiguration();
     const command = scheduleCommand(raw);
@@ -294,26 +315,23 @@ export class OperationsDatabase {
       const configuration = this.scheduleConfiguration();
       const students = new Map(this.m1.students().map(student => [student.id, student]));
       const result: GenerationResult = { created: 0, existing: 0, inactive: 0, conflicts: 0, elapsed: 0 };
-      for (const rule of currentRules(configuration.rules)) {
+      const originExists = this.db.prepare("SELECT 1 FROM schedule_origins WHERE plan_id=?");
+      for (const { rule, date, slot } of this.cycleSlots(configuration.rules, command.from, command.to)) {
         if (rule.kind === "flex" || (command.studentId && command.studentId !== rule.studentId)) continue;
-        for (let date = command.from; date <= command.to; date = shiftDate(date, 1)) {
-          for (const slot of rule.slots.filter(item => dateApplies(rule, date, item))) {
-            const origin = { ruleId: rule.id, revision: rule.revision, slotId: slot.id, date };
-            const planId = stableScheduleId("plan", rule.id, slot.id, date);
-            if (this.db.prepare("SELECT 1 FROM schedule_origins WHERE plan_id=?").get(planId)) { result.existing++; continue; }
-            if (rule.paused || students.get(rule.studentId)?.lifecycleStatus !== "active") { result.inactive++; continue; }
-            const startAt = shanghaiMinute(date, slot.start)!, endAt = shanghaiMinute(date, slot.end)!;
-            if (startAt <= Date.now()) { result.elapsed++; continue; }
-            if (!rangeFitsHours(startAt, endAt, configuration.hours)) { result.conflicts++; continue; }
-            try {
-              this.saveAttendancePlan({ id: planId, studentId: rule.studentId, expectedRevision: 0, startAt, endAt,
-                requestId: stableScheduleId("request", rule.id, slot.id, date) }, origin);
-              result.created++;
-            } catch (error) {
-              if (!(error instanceof WorkspaceFault) || error.code !== "conflict") throw error;
-              result.conflicts++;
-            }
-          }
+        const origin = { ruleId: rule.id, revision: rule.revision, slotId: slot.id, date };
+        const planId = stableScheduleId("plan", rule.id, slot.id, date);
+        if (originExists.get(planId)) { result.existing++; continue; }
+        if (rule.paused || students.get(rule.studentId)?.lifecycleStatus !== "active") { result.inactive++; continue; }
+        const startAt = shanghaiMinute(date, slot.start)!, endAt = shanghaiMinute(date, slot.end)!;
+        if (startAt <= Date.now()) { result.elapsed++; continue; }
+        if (!rangeFitsHours(startAt, endAt, configuration.hours)) { result.conflicts++; continue; }
+        try {
+          this.saveAttendancePlan({ id: planId, studentId: rule.studentId, expectedRevision: 0, startAt, endAt,
+            requestId: stableScheduleId("request", rule.id, slot.id, date) }, origin);
+          result.created++;
+        } catch (error) {
+          if (!(error instanceof WorkspaceFault) || error.code !== "conflict") throw error;
+          result.conflicts++;
         }
       }
       return { action: "generate", result };
@@ -332,16 +350,13 @@ export class OperationsDatabase {
     if (range.action !== "generate") invalid("弹性查询区间无效。");
     const active = new Set(this.m1.students().filter(row => row.lifecycleStatus === "active").map(row => row.id));
     const pending: FlexWindow[] = [];
-    for (const rule of currentRules(this.scheduleConfiguration().rules)) {
+    const originExists = this.db.prepare("SELECT 1 FROM schedule_origins WHERE plan_id=?");
+    for (const { rule, date, slot } of this.cycleSlots(this.scheduleConfiguration().rules, range.from, range.to)) {
       if (rule.kind !== "flex" || rule.paused || !active.has(rule.studentId) || (studentId && rule.studentId !== studentId)) continue;
-      for (let date = range.from; date <= range.to; date = shiftDate(date, 1)) {
-        for (const slot of rule.slots.filter(item => dateApplies(rule, date, item))) {
-          const id = stableScheduleId("plan", rule.id, slot.id, date);
-          if (this.db.prepare("SELECT 1 FROM schedule_origins WHERE plan_id=?").get(id)) continue;
-          pending.push({ id, studentId: rule.studentId, date, ruleId: rule.id, revision: rule.revision, slotId: slot.id,
-            start: slot.start, end: slot.end, durationMinutes: rule.durationMinutes! });
-        }
-      }
+      const id = stableScheduleId("plan", rule.id, slot.id, date);
+      if (originExists.get(id)) continue;
+      pending.push({ id, studentId: rule.studentId, date, ruleId: rule.id, revision: rule.revision, slotId: slot.id,
+        start: slot.start, end: slot.end, durationMinutes: rule.durationMinutes! });
     }
     return pending.sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.id.localeCompare(b.id));
   }
@@ -353,28 +368,25 @@ export class OperationsDatabase {
     if (range.action !== "generate") invalid("签到表日期无效。");
     const fromAt = shanghaiMinute(range.from, "00:00")!, toAt = shanghaiMinute(shiftDate(range.to, 1), "00:00")!;
     const plans = this.listAttendancePlans(fromAt, toAt);
-    const visits = plans.filter(isExpectedVisit).map(({ studentId, startAt, endAt }) => ({ studentId, startAt, endAt }));
+    const visits: { studentId: string; startAt: number; endAt: number; source: "appointment" | "rule" }[] =
+      plans.filter(isExpectedVisit).map(({ studentId, startAt, endAt }) => ({ studentId, startAt, endAt, source: "appointment" }));
     const occupying = plans.filter(plan => plan.status !== "cancelled" && plan.status !== "absent")
       .map(({ studentId, startAt, endAt }) => ({ studentId, startAt, endAt }));
     const conflicts: { studentId: string; startAt: number; endAt: number }[] = [];
     const active = new Set(this.m1.students().filter(row => row.lifecycleStatus === "active").map(row => row.id));
     const config = this.scheduleConfiguration();
     const originExists = this.db.prepare("SELECT 1 FROM schedule_origins WHERE plan_id=?");
-    for (const rule of currentRules(config.rules)) {
+    for (const { rule, date, slot } of this.cycleSlots(config.rules, range.from, range.to)) {
       if (rule.kind === "flex" || rule.paused || !active.has(rule.studentId)) continue;
-      for (let date = range.from; date <= range.to; date = shiftDate(date, 1)) {
-        for (const slot of rule.slots.filter(item => dateApplies(rule, date, item))) {
-          const startAt = shanghaiMinute(date, slot.start)!, endAt = shanghaiMinute(date, slot.end)!;
-          if (startAt <= now || originExists.get(stableScheduleId("plan", rule.id, slot.id, date))) continue;
-          const visit = { studentId: rule.studentId, startAt, endAt };
-          if (!rangeFitsHours(startAt, endAt, config.hours) ||
-            occupying.some(plan => plan.studentId === rule.studentId && plan.startAt < endAt && plan.endAt > startAt)) {
-            conflicts.push(visit);
-          } else {
-            visits.push(visit);
-            occupying.push(visit);
-          }
-        }
+      const startAt = shanghaiMinute(date, slot.start)!, endAt = shanghaiMinute(date, slot.end)!;
+      if (startAt <= now || originExists.get(stableScheduleId("plan", rule.id, slot.id, date))) continue;
+      const visit = { studentId: rule.studentId, startAt, endAt };
+      if (!rangeFitsHours(startAt, endAt, config.hours) ||
+        occupying.some(plan => plan.studentId === rule.studentId && plan.startAt < endAt && plan.endAt > startAt)) {
+        conflicts.push(visit);
+      } else {
+        visits.push({ ...visit, source: "rule" });
+        occupying.push(visit);
       }
     }
     return { visits, conflicts };

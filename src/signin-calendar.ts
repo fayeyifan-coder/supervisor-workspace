@@ -1,8 +1,14 @@
 import { mondayOf, shanghaiMinute, shiftDate, weekday, type ScheduleInterval } from "./schedule-calendar";
 
 export type SigninKind = "weekday" | "saturday" | "sunday";
-export interface SigninInput { kind: SigninKind; period: string; slots: ScheduleInterval[]; studentId?: string }
-export interface SigninMember { studentId: string; alias: string; dates: string[] }
+export type WeekendGrouping = "start" | "coverage";
+export type SigninSource = "appointment" | "rule" | "flex" | "manual";
+export interface SigninInput {
+  kind: SigninKind; period: string; slots: ScheduleInterval[]; studentId?: string;
+  includePendingFlex?: boolean; weekendGrouping?: WeekendGrouping;
+}
+export interface SigninDay { date: string; sources: SigninSource[] }
+export interface SigninMember { studentId: string; alias: string; days: SigninDay[] }
 export interface SigninGroup { label: string; members: SigninMember[] }
 export interface SigninPreview {
   input: SigninInput; dates: string[]; groups: SigninGroup[];
@@ -12,6 +18,13 @@ export interface SigninChange { group: number; studentId: string; date: string; 
 export interface SigninResult { location: string; names: number; slots: number }
 export const signinLabels: Record<SigninKind, string> = {
   weekday: "工作日周签到表", saturday: "周六月签到表", sunday: "周日月签到表",
+};
+
+export const signinSourceLabels: Record<SigninSource, string> = {
+  appointment: "已有安排", rule: "周期预计", flex: "弹性候选", manual: "人工补入",
+};
+export const weekendGroupingLabels: Record<WeekendGrouping, string> = {
+  start: "按到课开始时段", coverage: "按覆盖时段",
 };
 
 export function defaultSigninSlots(): ScheduleInterval[] {

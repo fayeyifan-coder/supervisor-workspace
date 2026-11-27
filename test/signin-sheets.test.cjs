@@ -23,10 +23,10 @@ test("three synthetic templates produce locally readable A4 sheets with correct 
   const students = [{id: randomUUID(), alias: "=合成中文学生"}, {id: randomUUID(), alias: "合成可调整"}];
   for (const [kind, period] of [["weekday", "2025-01-01"], ["saturday", "2027-01"], ["sunday", "2027-02"], ["sunday", "2027-01"]]) {
     const dates = signinDates(kind, period), date = dates[0];
-    const visit = (student, time) => ({studentId: students[student].id, startAt: shanghaiMinute(date, time)});
+    const visit = (student, time) => ({studentId: students[student].id, startAt: shanghaiMinute(date, time), source: "appointment"});
     const preview = readSigninPlan({plannedSigninVisits: () => ({visits: [visit(0, "08:05"), visit(0, "08:06")], conflicts: [visit(1, "09:30")]})},
-      students, {kind, period, slots: kind === "weekday" ? [] : defaultSigninSlots()});
-    assert.equal(preview.groups[0].members[0].dates.length, 1);
+      students, {kind, period, slots: kind === "weekday" ? [] : defaultSigninSlots(), includePendingFlex: false});
+    assert.equal(preview.groups[0].members[0].days.length, 1);
     assert.equal(preview.warnings.length, 1);
     adjustSigninPlan(preview, students, [{group: 0, studentId: students[1].id, date: dates.at(-1), include: true}]);
     const template = await fakeSigninTemplate(kind), result = await signinWorkbook(template, preview);
@@ -43,7 +43,7 @@ test("three synthetic templates produce locally readable A4 sheets with correct 
     for (const sheet of check.worksheets) {
       assert.doesNotMatch(JSON.stringify({values: sheet.getSheetValues(), header: sheet.headerFooter}), /must not be copied/);
       for (let row = 5; row <= 30; row++) {
-        for (let column = 3; column <= (kind === "weekday" ? 7 : 2 + dates.length); column++) assert.equal(sheet.getCell(row, column).value, null);
+        for (let column = 3; column <= (kind === "weekday" ? 6 : 2 + dates.length); column++) assert.equal(sheet.getCell(row, column).value, null);
       }
     }
   }
@@ -123,4 +123,59 @@ test("v8 synthetic backup restores natively to v10 and a new v10 backup preserve
     assert(excel.getWorksheet(data.tables.find(table => table.table === "attendance_exceptions").sheet));
   } finally { for (const database of [store, intake, growth, work, students]) database.close(); }
   assert.deepEqual(businessExportDocument(f.capture(), false).tables, legacy.tables);
+});
+
+test("weekday preview defaults to unconfirmed flexible candidates, combines sources and keeps one slot per student and date", async t => {
+  const { exportFixture } = require("./export-fixture.cjs");
+  const { operations, m1 } = exportFixture(t, 3, 10);
+  const [combined, flexOnly, manual] = m1.students();
+  const date = "2030-01-01", now = shanghaiMinute("2029-12-30", "09:00");
+  for (const [student,kind,start,end] of [[combined,"fixed","09:00","10:00"],[combined,"flex","16:00","20:00"],
+      [flexOnly,"flex","16:00","20:00"]]) {
+    operations.changeCycleSchedule({action:"rule", id:randomUUID(), studentId:student.id, requestId:randomUUID(),
+      expectedRevision:0, definition:{kind, startsOn:date, endsOn:null, paused:false,
+        slots:[{id:randomUUID(), day:2,start,end}]}});
+  }
+  const input = {kind:"weekday", period:date, slots:[]};
+  const before = operations.listAttendancePlans(shanghaiMinute(date,"00:00"),shanghaiMinute("2030-01-02","00:00"));
+  const preview = readSigninPlan(operations,m1.students(),input,now);
+  const byStudent = id => preview.groups[0].members.find(member => member.studentId === id);
+  assert.equal(preview.input.includePendingFlex,true);
+  assert.deepEqual(byStudent(combined.id).days,[{date,sources:["rule","flex"]}]);
+  assert.deepEqual(byStudent(flexOnly.id).days,[{date,sources:["flex"]}]);
+  assert.deepEqual(readSigninPlan(operations,m1.students(),{...input,includePendingFlex:false},now).groups[0].members
+    .map(member=>[member.studentId,member.days]),[[combined.id,[{date,sources:["rule"]}]]]);
+  adjustSigninPlan(preview,m1.students(),[{group:0,studentId:manual.id,date,include:true}]);
+  assert.deepEqual(byStudent(manual.id).days,[{date,sources:["manual"]}]);
+  const workbook = new Excel.Workbook();
+  await workbook.xlsx.load(await signinWorkbook(await fakeSigninTemplate("weekday"),preview));
+  const sheet = workbook.worksheets[0];
+  for (const [student, code] of [[combined,"规"],[flexOnly,"候"],[manual,"补"]]) {
+    const item = preview.groups[0].members.findIndex(row=>row.studentId===student.id) + 5;
+    assert.equal(sheet.getCell(item,7).value.split(" ")[0],code);
+    for (const column of [3,4,5,6]) assert.equal(sheet.getCell(item,column).value,null);
+  }
+  assert.deepEqual(operations.listAttendancePlans(shanghaiMinute(date,"00:00"),shanghaiMinute("2030-01-02","00:00")),before);
+  assert.equal(operations.flexWindows(date,date).length,2);
+});
+
+test("both weekend grouping options cover exact boundaries and month ends with blank signatures", async () => {
+  const student = {id:randomUUID(),alias:"合成长时段"};
+  const row = (date,start,end) => ({studentId:student.id, source:"appointment", startAt:shanghaiMinute(date,start),endAt:shanghaiMinute(date,end)});
+  const store = {plannedSigninVisits:()=>({visits:[row("2026-12-26","08:00","12:00"),row("2027-01-02","08:00","12:00"),
+    row("2027-01-30","10:00","12:00"),row("2027-02-06","08:00","12:00")], conflicts:[]})};
+  for (const [month, dates] of [["2026-12",["2026-12-26"]],["2027-01",["2027-01-02","2027-01-30"]]]) {
+    for (const grouping of ["start","coverage"]) {
+      const preview=readSigninPlan(store,[student],{kind:"saturday",period:month,slots:defaultSigninSlots(),weekendGrouping:grouping});
+      assert.deepEqual(preview.groups[0].members.flatMap(member=>member.days.map(day=>day.date)),dates.slice(0,1));
+      assert.deepEqual(preview.groups[1].members.flatMap(member=>member.days.map(day=>day.date)),grouping==="coverage" ? dates : dates.slice(1));
+      assert.equal(preview.groups[2].members.length,0);
+      const workbook=new Excel.Workbook();
+      await workbook.xlsx.load(await signinWorkbook(await fakeSigninTemplate("saturday"),preview));
+      assert.equal(workbook.worksheets[0].getCell("B5").value,student.alias);
+      for (const sheet of workbook.worksheets) {
+        for (let col=3;col<3+preview.dates.length;col++) assert.equal(sheet.getCell(5,col).value,null);
+      }
+    }
+  }
 });

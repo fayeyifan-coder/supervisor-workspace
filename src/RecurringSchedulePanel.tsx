@@ -43,7 +43,7 @@ export function RecurringSchedulePanel({ api, configuration, students, week, stu
       const value = reply.value;
       if (value.action === "rule") {
         setDraft(undefined);
-        setNotice({ text: "周期规则已保存。已生成的单日安排保留。", bad: false });
+        setNotice({ text: "周期规则已保存。已经生成的规则日期继续使用原修订。", bad: false });
       } else if (value.action === "hours") {
         setHoursText(undefined);
         setNotice({ text: "营业时间已保存。", bad: false });
@@ -90,7 +90,7 @@ export function RecurringSchedulePanel({ api, configuration, students, week, stu
       <button type="button" className="primary" disabled={locked || !chosen.from || !chosen.to} onClick={() =>
         void change({ action: "generate", from: chosen.from, to: chosen.to, studentId: studentId || undefined })}>生成单日安排</button>
     </div>
-    <p className="muted">按当前学生筛选生成，单次最多 31 天。修改规则用于尚未生成的日期。调整已生成的安排请进入对应的单次排课。</p>
+    <p className="muted">按当前学生筛选生成，单次最多 31 天。修订自生效日起用于该规则尚未生成安排的日期。已生成的日期沿用原修订，若要调整请编辑单次排课。</p>
     {notice && <p className={notice.bad ? "notice failure" : "muted"} role={notice.bad ? "alert" : "status"}>{notice.text}</p>}
     {hoursText && <form className="recurring-editor" onSubmit={event => { event.preventDefault(); saveHours(); }}>
       <fieldset disabled={locked}>
@@ -149,10 +149,11 @@ export function RecurringSchedulePanel({ api, configuration, students, week, stu
         const history = filtered.filter(item => item.id === rule.id);
         return <li key={rule.id}>
           <div className="student-source-heading"><strong>{student?.alias ?? "待核对学生"} · {nameOf(rule.kind)}</strong>
-            {(rule.paused || student?.lifecycleStatus !== "active") && <span>暂停生成，已有安排待人工核对</span>}
+            {student?.lifecycleStatus !== "active" ? <span>学生已暂停或归档，已有安排待人工核对</span>
+              : rule.paused && <span>此修订生效后暂停生成，已有安排保留</span>}
             <button type="button" className="secondary" disabled={locked || Boolean(draft)} onClick={() => edit(rule)}>编辑规则</button>
           </div>
-          <p>{rule.startsOn} 至 {rule.endsOn ?? "长期"}</p>
+          <p>最新修订生效期间 {rule.startsOn} 至 {rule.endsOn ?? "长期"}</p>
           <p>{rule.slots.map(item => `${days[item.day]} ${item.start}–${item.end}`).join("、")}</p>
           <details><summary>修订历史（{history.length}）</summary><ol>{history.map(item => <li key={item.revision}>
             第 {item.revision} 版 · {new Date(item.changedAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })} · {nameOf(item.kind)} ·

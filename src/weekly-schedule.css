@@ -86,3 +86,5 @@
 .signin-table :is(th, td) { padding: 8px 12px; border-bottom: 1px solid #d6dce2; text-align: center; white-space: nowrap; }
 .signin-table th:first-child { text-align: left; }
 .signin-table input[type=checkbox] { margin: 0; width: 16px; height: 16px; }
+
+.signin-source { display: block; white-space: normal; }

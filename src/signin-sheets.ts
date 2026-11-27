@@ -6,14 +6,15 @@ import type { Student } from "./contracts";
 import type { OperationsDatabase } from "./operations";
 import { scheduleId, scheduleObject } from "./recurring-schedule";
 import { shanghaiMinute, shanghaiParts } from "./schedule-calendar";
-import { signinDates, signinLabels, type SigninChange, type SigninInput, type SigninPreview, type SigninResult } from "./signin-calendar";
+import { signinDates, signinLabels, weekendGroupingLabels, type SigninChange, type SigninInput,
+  type SigninPreview, type SigninResult, type SigninSource } from "./signin-calendar";
 import { requireExportDestination } from "./business-export-files";
 import { WorkspaceFault } from "./workspace-fault";
 
 function invalid(message: string): never { throw new WorkspaceFault("invalid", message); }
 
 export function readSigninPlan(store: OperationsDatabase, students: Student[], raw: unknown, now = Date.now()): SigninPreview {
-  const { kind, period, slots, studentId } = scheduleObject(raw);
+  const { kind, period, slots, studentId, includePendingFlex, weekendGrouping } = scheduleObject(raw);
   if ((kind !== "weekday" && kind !== "saturday" && kind !== "sunday") || typeof period !== "string") invalid("请选择正确的签到表周期。");
   const dates = signinDates(kind, period);
   if (!dates.length) invalid("请选择有效的机构日期。");
@@ -28,35 +29,54 @@ export function readSigninPlan(store: OperationsDatabase, students: Student[], r
   const selected = studentId === undefined ? undefined : scheduleId(studentId);
   const names = new Map(students.filter(row => !selected || row.id === selected).map(row => [row.id, row.alias]));
   if (selected && !names.has(selected)) invalid("筛选学生已变化。");
-  const input: SigninInput = { kind, period, slots: periods, studentId: selected };
+  if (includePendingFlex !== undefined && typeof includePendingFlex !== "boolean") invalid("未确认弹性名单选项无效。");
+  if (weekendGrouping !== undefined && weekendGrouping !== "start" && weekendGrouping !== "coverage") invalid("请选择有效的周末归组方式。");
+  const input: SigninInput = {kind, period, slots: periods, studentId: selected,
+    ...(kind === "weekday" ? {includePendingFlex: includePendingFlex ?? true} : {weekendGrouping: weekendGrouping ?? "start"})};
   const preview: SigninPreview = { input, dates, groups: (kind === "weekday" ? ["周二至周五"] :
     periods.map(slot => slot.start + "–" + slot.end)).map(label => ({ label, members: [] })), warnings: [] };
   const { visits, conflicts } = store.plannedSigninVisits(dates[0], dates.at(-1)!, now);
-  const add = (row: { studentId: string; startAt: number }, conflict: boolean) => {
+  const add = (row: { studentId: string; startAt: number; endAt: number }, source: SigninSource, conflict = false) => {
     if (selected && row.studentId !== selected) return;
     const alias = names.get(row.studentId);
     if (alias === undefined) invalid("签到表发现无法关联的学生档案。");
     const { date, time } = shanghaiParts(row.startAt);
     if (!dates.includes(date)) return;
-    const group = kind === "weekday" ? 0 : periods.findIndex(slot => time >= slot.start && time < slot.end);
-    if (conflict || group === -1) {
-      preview.warnings.push({ alias, date, time, reason: conflict ? "周期安排重叠或超出营业时段" : "开始时间未落入任一打印时段" });
-    } else {
-      const list = preview.groups[group].members;
+    const covers = input.weekendGrouping === "coverage";
+    const groups = kind === "weekday" ? [0] : periods.flatMap((slot, index) => {
+      const matches = covers ? row.startAt < shanghaiMinute(date, slot.end)! && row.endAt > shanghaiMinute(date, slot.start)!
+        : time >= slot.start && time < slot.end;
+      return matches ? [index] : [];
+    });
+    if (conflict || !groups.length) {
+      const reason = covers ? "安排与打印时段没有交集" : "开始时间未落入任一打印时段";
+      preview.warnings.push({alias, date, time, reason: conflict ? "周期安排重叠或超出营业时段" : reason});
+      return;
+    }
+    for (const index of groups) {
+      const list = preview.groups[index].members;
       let member = list.find(item => item.studentId === row.studentId);
-      if (!member) { member = {studentId: row.studentId, alias, dates: []}; list.push(member); }
-      if (!member.dates.includes(date)) member.dates.push(date);
+      if (!member) { member = {studentId: row.studentId, alias, days: []}; list.push(member); }
+      const day = member.days.find(item => item.date === date);
+      if (!day) member.days.push({date, sources: [source]});
+      else if (!day.sources.includes(source)) day.sources.push(source);
     }
   };
-  visits.forEach(row => add(row, false));
-  conflicts.forEach(row => add(row, true));
+  visits.forEach(row => add(row, row.source));
+  conflicts.forEach(row => add(row, "rule", true));
+  if (input.includePendingFlex) {
+    for (const window of store.flexWindows(dates[0], dates.at(-1)!, selected)) {
+      add({studentId: window.studentId, startAt: shanghaiMinute(window.date, window.start)!,
+        endAt: shanghaiMinute(window.date, window.end)!}, "flex");
+    }
+  }
   sortMembers(preview);
   return preview;
 }
 
 function sortMembers(preview: SigninPreview) {
   for (const group of preview.groups) {
-    for (const member of group.members) member.dates.sort();
+    for (const member of group.members) member.days.sort((a, b) => a.date.localeCompare(b.date));
     group.members.sort((a, b) => a.alias.localeCompare(b.alias, "zh-CN") || a.studentId.localeCompare(b.studentId));
   }
 }
@@ -73,11 +93,12 @@ export function adjustSigninPlan(preview: SigninPreview, students: Student[], ra
     const list = preview.groups[group].members;
     const index = list.findIndex(member => member.studentId === id);
     if (index === -1) {
-      if (include) list.push({studentId: id, alias: names.get(id)!, dates: [date]});
+      if (include) list.push({studentId: id, alias: names.get(id)!, days: [{date, sources: ["manual"]}]});
     } else {
       const member = list[index];
-      member.dates = include ? [...new Set([...member.dates, date])] : member.dates.filter(day => day !== date);
-      if (!member.dates.length) list.splice(index, 1);
+      if (!include) member.days = member.days.filter(day => day.date !== date);
+      else if (!member.days.some(day => day.date === date)) member.days.push({date, sources: ["manual"]});
+      if (!member.days.length) list.splice(index, 1);
     }
   }
   sortMembers(preview);
@@ -121,7 +142,8 @@ export async function signinWorkbook(template: Buffer, preview: SigninPreview): 
     });
     if (templateCol === undefined || source.pageSetup.orientation === "landscape" ||
       (source.pageSetup.paperSize && source.pageSetup.paperSize !== 9)) invalid("模板需采用已登记的四行表头和 A4 纵向布局。");
-    const outputCol = preview.input.kind === "weekday" ? 7 : 2 + preview.dates.length;
+    const isWeekday = preview.input.kind === "weekday";
+    const outputCol = isWeekday ? 7 : 2 + preview.dates.length;
     const last = String.fromCharCode(64 + outputCol);
     const outputRows = Math.max(source.rowCount, 4 + group.members.length, 5);
     if (outputRows > 500) invalid("纸质签到表超过 496 行，请缩小名单后重试。");
@@ -141,9 +163,17 @@ export async function signinWorkbook(template: Buffer, preview: SigninPreview): 
         });
       }
     }
-    for (const address of ["A1:" + last + "1", "A2:" + last + "2", "C3:" + last + "3", "A3:A4", "B3:B4"]) sheet.mergeCells(address);
+    const signatureEnd = isWeekday ? "F" : last;
+    for (const address of ["A1:" + last + "1", "A2:" + last + "2", "C3:" + signatureEnd + "3", "A3:A4", "B3:B4"]) sheet.mergeCells(address);
+    const sourceCodes: Record<SigninSource, string> = {appointment: "排", rule: "规", flex: "候", manual: "补"};
+    if (isWeekday) {
+      sheet.mergeCells("G3:G4");
+      sheet.getCell("G3").value = "来源（按日期）";
+    }
     sheet.getCell("A1").value = signinLabels[preview.input.kind];
-    sheet.getCell("A2").value = preview.input.period + " · " + group.label + " · 预计名单";
+    sheet.getCell("A2").value = preview.input.period + " · " + group.label + " · " + (isWeekday
+      ? "排 已有安排 | 规 周期预计 | 候 弹性待确认 | 补 人工补入"
+      : "预计名单 · " + weekendGroupingLabels[preview.input.weekendGrouping ?? "start"]);
     sheet.getCell("A3").value = "序号";
     sheet.getCell("B3").value = "学生姓名";
     sheet.getCell("C3").value = "学生签名";
@@ -153,8 +183,13 @@ export async function signinWorkbook(template: Buffer, preview: SigninPreview): 
       sheet.getCell(row, 1).value = index + 1;
       sheet.getCell(row, 2).value = member.alias;
       preview.dates.forEach((date, i) => {
-        if (!member.dates.includes(date)) sheet.getCell(row, 3 + i).fill = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE9E9E9"}};
+        if (!member.days.some(day => day.date === date)) sheet.getCell(row, 3 + i).fill = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE9E9E9"}};
       });
+      if (isWeekday) sheet.getCell(row, 7).value = preview.dates.map(date => {
+        const day = member.days.find(item => item.date === date);
+        const source = day?.sources[0];
+        return source ? sourceCodes[source] : "–";
+      }).join(" ");
     });
     const margins = source.pageSetup.margins;
     sheet.pageSetup = { ...sheet.pageSetup, paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0,
@@ -197,7 +232,7 @@ export async function writeSigninFile(path: string, bytes: Buffer, preview: Sign
     if ((await stat(temp)).size !== bytes.length) throw new WorkspaceFault("failed", "签到表写入不完整。");
     await link(temp, path); // Atomic publication. Existing file (including the selected template) is never replaced.
     return { location: path, names: preview.groups.reduce((n, group) => n + group.members.length, 0),
-      slots: preview.groups.reduce((n, group) => n + group.members.reduce((sum, member) => sum + member.dates.length, 0), 0) };
+      slots: preview.groups.reduce((n, group) => n + group.members.reduce((sum, member) => sum + member.days.length, 0), 0) };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new WorkspaceFault("conflict", "目标文件已经存在，未覆盖。请选择其他文件名。");
     throw error;

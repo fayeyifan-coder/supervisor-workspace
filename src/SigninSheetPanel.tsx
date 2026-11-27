@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import type { Student, WorkspaceApi } from "./contracts";
 import { shanghaiParts } from "./schedule-calendar";
-import { defaultSigninSlots, signinLabels, type SigninChange, type SigninKind, type SigninPreview } from "./signin-calendar";
+import { defaultSigninSlots, signinLabels, signinSourceLabels, weekendGroupingLabels, type SigninChange,
+  type SigninKind, type SigninPreview, type WeekendGrouping } from "./signin-calendar";
 
 export function SigninSheetPanel({ api, students, studentId, day }: {
   api: WorkspaceApi; students: Student[]; studentId: string; day: string;
@@ -10,6 +11,8 @@ export function SigninSheetPanel({ api, students, studentId, day }: {
   const [kind, setKind] = useState<SigninKind>("weekday");
   const [period, setPeriod] = useState("");
   const [slots, setSlots] = useState(defaultSigninSlots);
+  const [includePendingFlex, setIncludePendingFlex] = useState(true);
+  const [weekendGrouping, setWeekendGrouping] = useState<WeekendGrouping>("start");
   const [result, setResult] = useState<{ preview: SigninPreview; key: string }>();
   const [edits, setEdits] = useState<SigninChange[]>([]);
   const [adding, setAdding] = useState<Record<number, string>>({});
@@ -32,7 +35,8 @@ export function SigninSheetPanel({ api, students, studentId, day }: {
     try {
       if (action === "preview") {
         invalidate();
-        const response = await api.previewSignin({kind, period: selected, slots: kind === "weekday" ? [] : slots, studentId: studentId || undefined});
+        const response = await api.previewSignin({kind, period: selected, slots: kind === "weekday" ? [] : slots, studentId: studentId || undefined,
+          ...(kind === "weekday" ? {includePendingFlex} : {weekendGrouping})});
         if (!response.ok) setNotice({ message: response.message, error: true });
         else setResult(response.value);
       } else if (visible) {
@@ -59,7 +63,13 @@ export function SigninSheetPanel({ api, students, studentId, day }: {
         {kind === "weekday" ? <label>所在周日期<input type="date" value={selected} onChange={event => { setPeriod(event.target.value); invalidate(); }} /></label>
           : <label>月份<input type="month" value={selected} onChange={event => { setPeriod(event.target.value); invalidate(); }} /></label>}
       </fieldset>
-      {kind !== "weekday" && <fieldset className="schedule-fields" disabled={busy}><legend>打印时段</legend>{slots.map((slot, index) =>
+      {kind === "weekday" ? <label className="schedule-check"><input type="checkbox" checked={includePendingFlex} disabled={busy}
+        onChange={event => { setIncludePendingFlex(event.target.checked); invalidate(); }} />包含未确认弹性学生</label>
+        : <fieldset className="schedule-fields" disabled={busy}><legend>打印时段</legend>
+          <label>周末名单归组<select value={weekendGrouping} onChange={event => {
+            setWeekendGrouping(event.target.value as WeekendGrouping); invalidate();
+          }}>{Object.entries(weekendGroupingLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          {slots.map((slot, index) =>
         <div className="schedule-buttons" key={index}>
           {(["start", "end"] as const).map(field => <label key={field}>{field === "start" ? "开始" : "结束"} {index + 1}<input type="time"
             value={slot[field]} onChange={event => {
@@ -67,7 +77,9 @@ export function SigninSheetPanel({ api, students, studentId, day }: {
               setSlots(previous => previous.map((item, i) => i === index ? { ...item, [field]: value } : item)); invalidate();
             }} /></label>)}
         </div>)}</fieldset>}
-      <p className="muted">名单使用单日安排和未来固定排课。弹性窗口须确认预约才列入。只可调整本次打印，签名栏留空。</p>
+      <p className="muted">{kind === "weekday"
+        ? "弹性候选只预留签名位置，预约和考勤由各自记录确认。"
+        : "按覆盖时段可把一段到课列入所有与之重叠的打印时段。"} 名单调整仅用于本次打印，签名栏留空。</p>
       <button type="button" className="secondary" disabled={busy} onClick={() => void operate("preview")}>预览预计签到名单</button>
       {preview && <div className="signin-preview">
         {preview.warnings.length > 0 && <details><summary>有 {preview.warnings.length} 条安排需人工核对</summary><ul>
@@ -81,11 +93,15 @@ export function SigninSheetPanel({ api, students, studentId, day }: {
               <table>
                 <thead><tr><th scope="col">学生</th>{preview.dates.map(date => <th scope="col" key={date}>{date.slice(5)}</th>)}</tr></thead>
                 <tbody>{ids.map(id => <tr key={id}><th scope="row">{aliases.get(id) ?? "待核对学生"}</th>
-                  {preview.dates.map(date => <td key={date}><input type="checkbox" disabled={busy}
-                    aria-label={(aliases.get(id) ?? "") + " " + date + " 预留签名"}
-                    checked={selection.find(row => row.studentId === id && row.date === date)?.include ??
-                      Boolean(group.members.find(member => member.studentId === id)?.dates.includes(date))}
-                    onChange={event => mark({group: index, studentId: id, date, include: event.target.checked})} /></td>)}</tr>)}</tbody>
+                  {preview.dates.map(date => {
+                    const sources = group.members.find(member => member.studentId === id)?.days.find(day => day.date === date)?.sources;
+                    const checked = selection.find(row => row.studentId === id && row.date === date)?.include ?? Boolean(sources);
+                    const label = checked ? (sources ?? ["manual"] as const).map(source => signinSourceLabels[source]).join("、") : "";
+                    return <td key={date}><input type="checkbox" disabled={busy}
+                      aria-label={(aliases.get(id) ?? "") + " " + date + " 预留签名" + (label ? " · " + label : "")}
+                      checked={checked} onChange={event => mark({group: index, studentId: id, date, include: event.target.checked})} />
+                      {label && <small className="signin-source muted">{label}</small>}</td>;
+                  })}</tr>)}</tbody>
               </table>
               {!ids.length && <p className="muted">该时段暂无预计名单。</p>}
             </div>
