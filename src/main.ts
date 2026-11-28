@@ -15,6 +15,7 @@ import { maxIntakeBytes } from "./intake-format";
 import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSupportedProfileOpen, validateProtection,
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
 import { documentLimit, emptyPlan, type PlanPickResult, type PlanSourceCell } from "./study-plan-model";
+import { linkPlanTask, listPlanTasks } from "./study-plan-links";
 import { addManualStudyPlan, savePlanVersion, studentPlanViews } from "./study-plan-versions";
 import { parseStudyPlan } from "./study-plan-docx";
 import { addStudyPlan, digestDocument, listStudyPlans, planExists, planId, planObject, studyPlanSource } from "./study-plans";
@@ -562,7 +563,17 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   }));
   handleWrite(channels.savePlanVersion,(event,raw:unknown)=>invoke(event,()=>{
     if(m1Version<12)throw new WorkspaceFault("invalid","当前档案尚不支持执行规划。");
-    return savePlanVersion(planningStore(),raw,false);
+    return savePlanVersion(planningStore(),raw,m1Version>=13);
+  }));
+  handle(channels.planTasks,(event,id:unknown)=>invoke(event,()=>{
+    if(m1Version<13||!operations)throw new WorkspaceFault("invalid","当前档案尚不支持任务来源关联。");
+    return listPlanTasks(planningStore(),operations.protectionConnection(),planId(id));
+  }));
+  handleWrite(channels.linkPlanTask,(event,raw:unknown)=>invoke(event,()=>{
+    if(m1Version<13||!operations||operationsPending.state().kind!=="empty") {
+      throw new WorkspaceFault("recovery","请先完成原教务请求，再关联实际学习任务。");
+    }
+    return linkPlanTask(planningStore(),operations.protectionConnection(),raw);
   }));
   handle(channels.studyPlanSource,(event,id:unknown,plan:unknown)=>invoke(event,()=>{
     const {metadata,cells}=studyPlanSource(planningStore(),planId(id),planId(plan));

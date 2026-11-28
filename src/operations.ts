@@ -171,7 +171,7 @@ function verifyHeader(path: string, layout: OperationsLayout): void {
   } finally { closeSync(fd); }
 }
 
-type ScheduleStudents = Pick<WorkspaceDatabase, "students"> & Partial<Pick<WorkspaceDatabase, "version">>;
+type ScheduleStudents = Pick<WorkspaceDatabase, "students"> & Partial<Pick<WorkspaceDatabase, "version" | "hasPlanTaskLink">>;
 
 export class OperationsDatabase {
   private writesBlocked = false;
@@ -593,6 +593,9 @@ export class OperationsDatabase {
       if (block.status !== "planned") conflict("只能编辑尚未开始的任务计划。");
       const other = this.db.prepare("SELECT 1 FROM learning_tasks WHERE id=? AND block_id<>?");
       if (tasks.some(task => other.get(task.id, change.id))) conflict("该任务编号已属于其他学习块。");
+      if (block.tasks.some(task=>!tasks.some(next=>next.id===task.id)&&this.m1.hasPlanTaskLink?.(task.id))) {
+        conflict("该任务已关联历史规划版本，请保留任务身份。");
+      }
       this.db.prepare("DELETE FROM learning_tasks WHERE block_id=?").run(change.id);
       const insert = this.db.prepare(`INSERT INTO learning_tasks
         (id,block_id,position,category,subject,content,knowledge_points,planned_target,status)

@@ -31,3 +31,8 @@ export interface PlanVersion {revision:number;effectiveOn:string;startsOn:string
   reason:string;changedAt:number;fields:PlanDraft}
 export interface PlanVersionInput {studentId:string;planId:string;requestId:string;expectedRevision:number;effectiveOn:string;
   startsOn:string;endsOn:string;state:PlanVersion["state"];reason:string;fields:PlanDraft}
+
+export interface PlanTaskLink {taskId:string;studentId:string;planId:string;revision:number;entryId:string;linkedAt:number}
+export interface PlanTask {id:string;date:string;subject:string;content:string;status:"planned"|"in_progress"|"done"|"skipped";
+ attendanceId:string|null;blockId:string;link:PlanTaskLink|null}
+export interface PlanLinkInput {studentId:string;taskId:string;planId:string;revision:number;entryId:string}

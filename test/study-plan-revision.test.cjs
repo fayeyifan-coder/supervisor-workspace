@@ -1,0 +1,47 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const {randomUUID}=require('node:crypto');
+const {exportFixture}=require('./export-fixture.cjs');
+const {emptyPlan}=require('../build/study-plan-model.js');
+const {addManualStudyPlan,savePlanVersion,studentPlanViews,currentPlan}=require('../build/study-plan-versions.js');
+const {linkPlanTask,listPlanTasks,verifyPlanLinks}=require('../build/study-plan-links.js');
+const {shanghaiMinute}=require('../build/schedule-calendar.js');
+const {validateProtection,businessExportDocument}=Object.assign({},require('../build/offline-protection.js'),require('../build/business-export.js'));
+
+const uid=()=>randomUUID();
+test('revision snapshots remain immutable and linked tasks keep the original effective version across changes',t=>{
+ const f=exportFixture(t,2,13),db=f.m1.protectionConnection(),ops=f.operations,[a,b]=f.m1.students();
+ const taskDay='2030-01-02', start=shanghaiMinute(taskDay,'16:00'), clock=shanghaiMinute('2030-01-01','10:00');
+ const item=(date,content)=>({id:uid(),subject:'数学',month:'1月',week:'第1周',kind:'week',content,estimated:'1小时',from:date,to:'',sources:[]});
+ const anchor=item(taskDay,'合成原安排'), future=item('2030-01-10','合成未来任务');
+ const fields={...emptyPlan(),title:'合成执行计划',subjects:['数学'],entries:[anchor,future]};
+ const plan=addManualStudyPlan(db,a.id,uid(),fields);
+ const make=(extra={})=>({planId:plan,studentId:a.id,requestId:uid(),expectedRevision:0,effectiveOn:'2030-01-01',startsOn:'2030-01-01',endsOn:'',
+  reason:'合成初次启用',state:'active',fields,...extra});
+ savePlanVersion(db,make(),true,clock);
+ const attend=ops.saveAttendancePlan({id:uid(),requestId:uid(),studentId:a.id,expectedRevision:0,startAt:start,endAt:start+60*60_000});
+ const block=ops.saveLearningBlock({id:uid(),requestId:uid(),studentId:a.id,expectedRevision:0,attendancePlanId:attend.id,plannedStart:start,plannedEnd:start+30*60_000});
+ const taskId=uid();
+ const save={id:block.id,requestId:uid(),studentId:a.id,expectedRevision:block.revision,tasks:[{id:taskId,category:'foundation',subject:'数学',content:'合成实际学习任务'}]};
+ const stored=ops.saveLearningTasks(save);
+ const link={studentId:a.id,planId:plan,revision:1,entryId:anchor.id,taskId};
+ const reference=linkPlanTask(db,ops.protectionConnection(),link,clock);
+ assert.deepEqual(linkPlanTask(db,ops.protectionConnection(),link),reference);
+ assert.throws(()=>linkPlanTask(db,ops.protectionConnection(),{...link,studentId:b.id}),/历史关联/);
+ const change={...fields,entries:[anchor,{...future,content:'合成修订后的未来任务',estimated:'90 分钟'}]};
+ const due=make({expectedRevision:1,effectiveOn:'2030-01-05',reason:'合成延期',fields:change});
+ savePlanVersion(db,due,true,clock);
+ assert.throws(()=>savePlanVersion(db,make({expectedRevision:2,effectiveOn:'2030-01-07',fields:{...change,entries:[...change.entries.slice(1)]}}),true,clock),/保留/);
+ savePlanVersion(db,make({expectedRevision:2,effectiveOn:'2030-01-07',reason:'合成从历史版本复建',fields}),true,clock);
+ const view=studentPlanViews(db,a.id).find(row=>row.id===plan);
+ assert.deepEqual(view.initial,fields);
+ assert.equal(currentPlan(view.versions,taskDay).revision,1);
+ assert.equal(currentPlan(view.versions,'2030-01-06').fields.entries[1].content,'合成修订后的未来任务');
+ assert.equal(currentPlan(view.versions,'2030-01-08').revision,3);
+ assert.equal(listPlanTasks(db,ops.protectionConnection(),a.id).find(row=>row.id===taskId).link.revision,1);
+ assert.throws(()=>ops.saveLearningTasks({...save,requestId:uid(),expectedRevision:stored.revision,tasks:[]}),/保留任务身份/);
+ verifyPlanLinks(db,ops.protectionConnection());
+ const snapshot=f.capture();
+ assert.equal(validateProtection(snapshot).summary.m1Version,13);
+ assert.equal(businessExportDocument(snapshot,false).tables.find(row=>row.table==='study_plan_links').rows[0].revision,1);
+});

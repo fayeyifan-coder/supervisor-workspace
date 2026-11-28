@@ -513,7 +513,7 @@ function App() {
             : active && <StudentDetail student={active} api={api} intakeOpen={intakeOpen}
               overviewVisible={showingWorkspace && !learning}
               studyPlan={studentRecordVersion>=12&&<StudyPlanStudentPanel key={active.id} api={api} student={active}
-                refresh={planRefresh} onActivity={planActivity}/>}
+                refresh={planRefresh} onActivity={planActivity} revisionsEnabled={studentRecordVersion>=13}/>}
               overview={studentRecordVersion >= 8 ? openSource => <StudentOverview key={active.id} studentId={active.id}
                 api={api} openSource={openSource} openVisit={openLearning} /> : undefined}
               actions={scheduleEnabled && <div className="schedule-heading-actions">

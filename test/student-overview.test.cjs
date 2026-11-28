@@ -51,6 +51,6 @@ test("8 is discovered only from the matching restored profile marker and invalid
   assert.equal(restoredStudentVersion(dir, migrated.profileName), 8);
   assert.equal((await files.inspect(dir, migrated.profileName, 2, 8)).summary.students, 1);
   assert.throws(() => restoredStudentVersion(dir, "../elsewhere"));
-  writeFileSync(join(migrated.location, "recovery", "mvp.initialized"), "mvp-v11\n");
+  writeFileSync(join(migrated.location, "recovery", "mvp.initialized"), "mvp-v99\n");
   assert.throws(() => restoredStudentVersion(dir, migrated.profileName));
 });

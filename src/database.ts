@@ -5,14 +5,15 @@ import type { Failure, Lesson, LessonInput, Student, StudentEditFields, StudentE
 import { appendParentFollowUp, concernInput, createParentConcern, followUpInput, parentSchema, parentWriteCommitted, readParentFollowUp, verifyParentFollowUp } from "./parent-follow-up";
 import { readStudentRecords, saveStudentRecord, studentRecordCommitted, studentRecordInput, studentRecordSchema, verifyStudentRecords } from "./student-records";
 import { changeStudentLifecycle, lifecycleInput, lifecycleReceipt, lifecycleSchema, studentLifecycle, verifyStudentLifecycle } from "./student-lifecycle";
+import { planLinkSchema, verifyPlanLinks } from "./study-plan-links";
 import { planVersionSchema, verifyPlanVersions } from "./study-plan-versions";
 import { studyPlanSchema, studyPlanTables, verifyStudyPlans } from "./study-plans";
 import { WorkspaceFault } from "./workspace-fault";
 export { WorkspaceFault } from "./workspace-fault";
 
 const applicationId = 0x53574d31;
-export const latestM1Version = 12;
-export type M1Version = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+export const latestM1Version = 13;
+export type M1Version = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
 export function isM1Version(value: unknown): value is M1Version {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= latestM1Version;
 }
@@ -41,7 +42,7 @@ const editSchema = [
     payload TEXT NOT NULL
   ) STRICT`],
 ] as const;
-const schemaFor = (version: M1Version) => version >= 3 ? [...schema, ...editSchema, ...parentSchema, ...studentRecordSchema(version), ...(version >= 8 ? [lifecycleSchema] : []), ...(version >= 11 ? studyPlanSchema : []), ...(version >= 12 ? [planVersionSchema] : [])]
+const schemaFor = (version: M1Version) => version >= 3 ? [...schema, ...editSchema, ...parentSchema, ...studentRecordSchema(version), ...(version >= 8 ? [lifecycleSchema] : []), ...(version >= 11 ? studyPlanSchema : []), ...(version >= 12 ? [planVersionSchema] : []), ...(version >= 13 ? [planLinkSchema] : [])]
   : version === 2 ? [...schema, ...editSchema] : schema;
 const markerFor = (version: M1Version) => "mvp-v" + version + "\n";
 const studentColumns = "id, alias, grade, subjects, goal, notes, created_at AS createdAt";
@@ -95,6 +96,7 @@ function checkDatabase(db: DatabaseSync, version: M1Version): void {
   if (version >= 8) automatic.push("sqlite_autoindex_student_lifecycle_1", "sqlite_autoindex_student_lifecycle_2");
   if (version >= 11) automatic.push("sqlite_autoindex_study_plan_sources_1", "sqlite_autoindex_study_plans_1", "sqlite_autoindex_study_plans_2");
   if (version >= 12) automatic.push("sqlite_autoindex_study_plan_versions_1", "sqlite_autoindex_study_plan_versions_2");
+  if (version >= 13) automatic.push("sqlite_autoindex_study_plan_links_1");
   const expected = schemaFor(version);
   const explicitMatch = expected.every(([name, type, ddl]) => definitions.some(object =>
     object.name === name && object.type === type && typeof object.sql === "string" && canonical(object.sql) === canonical(ddl)));
@@ -109,6 +111,7 @@ function checkDatabase(db: DatabaseSync, version: M1Version): void {
   if (version >= 8) verifyStudentLifecycle(db);
   if (version >= 11) verifyStudyPlans(db);
   if (version >= 12) verifyPlanVersions(db);
+  if (version >= 13) verifyPlanLinks(db);
 }
 
 function inputObject(raw: unknown): Record<string, unknown> {
@@ -508,6 +511,10 @@ export class WorkspaceDatabase {
     }
   }
 
+  hasPlanTaskLink(taskId: string): boolean {
+    return this.version >= 13 && Boolean(this.protectionConnection().prepare("SELECT 1 FROM study_plan_links WHERE task_id=?").get(taskId));
+  }
+
   protectionConnection(): DatabaseSync {
     if (this.writesBlocked || this.db.isTransaction) throw new WorkspaceFault("busy", "本地数据库写入状态仍待确定，无法导出。");
     return this.db;
@@ -535,6 +542,6 @@ const m1ParentProtection = {
 export function m1ProtectionLayout(version: M1Version) {
   if (version <= 3) return version === 3 ? m1ParentProtection : version === 2 ? m1EditProtection : m1Protection;
   return { ...m1ParentProtection, version, marker: markerFor(version),
-    tables: [...m1ParentProtection.tables, ...studentRecordSchema(version).map(entry => entry[0]), ...(version >= 8 ? [lifecycleSchema[0]] : []), ...(version >= 11 ? studyPlanTables : []), ...(version >= 12 ? [planVersionSchema[0]] : [])],
+    tables: [...m1ParentProtection.tables, ...studentRecordSchema(version).map(entry => entry[0]), ...(version >= 8 ? [lifecycleSchema[0]] : []), ...(version >= 11 ? studyPlanTables : []), ...(version >= 12 ? [planVersionSchema[0]] : []), ...(version >= 13 ? [planLinkSchema[0]] : [])],
     ddl: schemaFor(version).map(entry => entry[2]) };
 }

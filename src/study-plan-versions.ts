@@ -86,6 +86,10 @@ export function savePlanVersion(db:DatabaseSync,raw:unknown,allowRevision:boolea
  if(!allowRevision&&JSON.stringify(original)!==json)fail("当前档案版本仅支持发布与执行期间设置。");
  const today=shanghaiParts(now).date;
  if(req.effectiveOn<today)fail("规划设置只影响今天及以后，已发生的学习历史保留。");
+ if(original.entries.some(entry=>entry.from&&(entry.to||entry.from)<req.effectiveOn&&
+     !req.fields.entries.some(item=>item.id===entry.id&&JSON.stringify(item)===JSON.stringify(entry)))) {
+   fail("生效日以前的已定日条目需要保留。请调整未来条目。");
+ }
  const refs=new Set(base.source?studyPlanSource(db,req.studentId,req.planId).cells.map(cell=>cell.ref):[]);
  if(req.fields.entries.some(entry=>entry.sources.some(ref=>!refs.has(ref))))fail("版本中的原文位置不属于该规划。");
  if(req.state==="active"&&req.fields.entries.some(entry=>!entry.subject))fail("启用前请确认每条任务的学科。");
