@@ -21,7 +21,7 @@ export interface BusinessExportResult {
 }
 export interface BusinessExportDocument {
  format: "sw-business-data-v1"; snapshotId: string; capturedAt: string; applicationVersion: string;
- m1Version: 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13; includeSourceText: boolean; sourceImages: { file: string; sha256: string }[];
+ m1Version: 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14; includeSourceText: boolean; sourceImages: { file: string; sha256: string }[];
  tables: (ExportTableSummary & { rows: Record<string, ExportValue>[] })[];
 }
 const maxJsonBytes = 32 * 1024 * 1024;

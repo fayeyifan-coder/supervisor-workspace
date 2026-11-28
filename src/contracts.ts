@@ -22,6 +22,8 @@ export const channels = {
   studentWriteState: "mvp:student-write-state",
   resolveStudentWrite: "mvp:resolve-student-write",
   addLesson: "mvp:add-lesson",
+  dailyContext: "b5:daily-context",
+  addQuickLesson: "b5:add-quick-lesson",
   workItems: "m2b:work-items",
   searchWorkItems: "m2b:search-work-items",
   workHistory: "m2b:work-history",
@@ -245,6 +247,8 @@ export interface WorkspaceApi {
   studentOverview(studentId: string): Promise<Result<import("./student-overview").StudentOverviewData>>;
   saveStudentLifecycle(input: LifecycleInput): Promise<Result<LifecycleChange>>;
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
+  dailyContext(studentId:string,date:string): Promise<Result<import("./learning-daily").DailyContext>>;
+  addQuickLesson(input:import("./learning-daily").DailyInput): Promise<Result<Lesson>>;
   workItems(today: string): Promise<Result<import("./worklog").WorkItem[]>>;
   searchWorkItems(from: string, to: string, query?: string): Promise<Result<import("./worklog").WorkItem[]>>;
   workHistory(id: string): Promise<Result<import("./worklog").WorkChange[]>>;

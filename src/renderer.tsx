@@ -13,6 +13,7 @@ import { StudyPlanStudentPanel } from "./StudyPlanStudentPanel";
 import { StudyPlanImportPanel } from "./StudyPlanImportPanel";
 import "./study-plans.css";
 import { StudentDetail } from "./StudentDetail";
+import { QuickLearningPanel } from "./QuickLearningPanel";
 import { StudentEditPanel } from "./StudentEditPanel";
 import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
 import { TrainingForPlan } from "./TrainingForPlan";
@@ -162,6 +163,9 @@ function App() {
   const refreshStudentWrites = useCallback(() => setStudentWriteRefresh(value => value + 1), []);
   const [studentRecordVersion, setStudentRecordVersion] = useState(0);
   const [planImportOpen,setPlanImportOpen]=useState(false);
+  const [quick,setQuick]=useState<{studentId:string;attendanceId?:string}>();
+  const quickStudent=students?.find(student=>student.id===quick?.studentId);
+  function openQuick(studentId:string,attendanceId?:string){if(quick)return;setQuick({studentId,attendanceId});requestAnimationFrame(()=>document.querySelector(".quick-learning")?.scrollIntoView());}
   const [planRefresh,setPlanRefresh]=useState(0);
   const [planEdit,setPlanEdit]=useState({dirty:false,busy:false});
   const planActivity=useCallback((dirty:boolean,busy:boolean)=>setPlanEdit(old=>old.dirty===dirty&&old.busy===busy?old:{dirty,busy}),[]);
@@ -432,6 +436,8 @@ function App() {
     </header>
     {planImportOpen&&students&&<StudyPlanImportPanel api={api} students={students} onClose={()=>setPlanImportOpen(false)}
       onSaved={()=>setPlanRefresh(value=>value+1)} />}
+    {quick&&quickStudent&&<QuickLearningPanel key={quickStudent.id} api={api} student={quickStudent} attendanceId={quick.attendanceId}
+      onClose={()=>setQuick(undefined)} onSaved={()=>{setHistoryRefresh(n=>n+1);setPlanRefresh(n=>n+1);}}/>}
     <section id="data-export-center" hidden={!protectionOpen} aria-label="数据导出与备份">
       <div className="schedule-heading-actions"><h1>数据导出与备份</h1><button className="secondary" type="button"
         disabled={protectionBusy || exportBusy} onClick={() => setProtectionOpen(false)}>收起数据面板</button></div>
@@ -466,7 +472,7 @@ function App() {
       }}/></div>}
     {scheduleEnabled && students && <div hidden={page !== "board" || Boolean(learning)}>
       <AttendanceBoard api={api} result={attendance.result} reload={attendance.reload} students={students}
-        onStudent={(id, trigger) => openLinkedStudent(id, "board", trigger)} onLearning={openLearning} />
+        onStudent={(id, trigger) => openLinkedStudent(id, "board", trigger)} onLearning={openLearning} onQuick={studentRecordVersion>=14?openQuick:undefined}/>
     </div>}
     <div className="workspace" hidden={!showingWorkspace || Boolean(learning)}>
       <aside className="roster" aria-label="学生档案">
@@ -531,6 +537,7 @@ function App() {
               overview={studentRecordVersion >= 8 ? openSource => <StudentOverview key={active.id} studentId={active.id}
                 api={api} openSource={openSource} openVisit={openLearning} /> : undefined}
               actions={scheduleEnabled && <div className="schedule-heading-actions">
+                {studentRecordVersion>=14&&<button type="button" className="secondary" disabled={Boolean(quick)||editorBusy} onClick={()=>openQuick(active.id)}>快速学习登记</button>}
                 {profileReturn && <button className="secondary" type="button" disabled={editorBusy} onClick={returnToOrigin}>
                   {profileReturn === "plan-board" ? "返回规划总览" : profileReturn === "board" ? "返回今日到校" : "返回课表"}
                 </button>}

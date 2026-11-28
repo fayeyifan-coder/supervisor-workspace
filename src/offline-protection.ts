@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { freemem } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { verifyPlanLinks } from "./study-plan-links";
+import { dailySchema, verifyDailyRecords } from "./learning-daily";
 import { verifyPlanVersions } from "./study-plan-versions";
 import { studyPlanTables, verifyStudyPlans } from "./study-plans";
 import { verifyStudentLifecycle } from "./student-lifecycle";
@@ -218,6 +219,10 @@ function summary(dbs: DatabaseSync[], manifest: Omit<Manifest, "databases">): Pr
     if (!operations) reject("学习计划实际任务关联需要教务库。");
     verifyPlanLinks(m1,operations);
     if (manifest.m1UpgradedFrom && (manifest.m1SourceVersion??1)<13 && count(m1,"study_plan_links")) reject("升级新增的计划任务关联表必须为空。");
+  }
+  if (m1Version >= 14) {
+    verifyDailyRecords(m1, operations);
+    if (manifest.m1UpgradedFrom && (manifest.m1SourceVersion??1)<14 && count(m1,dailySchema[0])) reject("升级新增的快速登记明细必须为空。");
   }
   if (manifest.m1UpgradedFrom && (m1Version === 2 || manifest.m1SourceVersion === 1) &&
       (count(m1, "student_edits") !== 0 || count(m1, "student_edit_pending") !== 0)) {

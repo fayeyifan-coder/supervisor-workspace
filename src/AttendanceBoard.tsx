@@ -55,10 +55,11 @@ export function AttendanceOverview({ day, compact = false }: { day: AttendanceBo
   </dl>;
 }
 
-export function AttendanceBoard({ api, result, reload, students, onLearning, onStudent }: {
+export function AttendanceBoard({ api, result, reload, students, onLearning, onStudent, onQuick }: {
   api: WorkspaceApi; result?: Result<AttendanceBoardDay>; reload: () => void; students: Student[];
   onLearning: (target: LearningDayInput, trigger: HTMLButtonElement) => void;
   onStudent: (studentId: string, trigger: HTMLButtonElement) => void;
+  onQuick?: (studentId:string,attendanceId:string)=>void;
 }) {
   const names = new Map(students.map(student => [student.id, student.alias]));
   const [studentId, setStudentId] = useState("");
@@ -122,6 +123,7 @@ export function AttendanceBoard({ api, result, reload, students, onLearning, onS
                 <button className="primary schedule-learning-entry" type="button" onClick={event => onLearning({
                   attendanceId: plan.id, studentId: plan.studentId,
                 }, event.currentTarget)}>进入学习</button>
+                {onQuick&&plan.checkInAt!==null&&<button type="button" className="secondary" onClick={()=>onQuick(plan.studentId,plan.id)}>快速登记</button>}
               </li>)}
             </ul>}
         </>}

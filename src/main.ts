@@ -17,6 +17,7 @@ import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSu
 import { documentLimit, emptyPlan, type PlanPickResult, type PlanSourceCell } from "./study-plan-model";
 import { readPlanBoard } from "./study-plan-overview";
 import { linkPlanTask, listPlanTasks } from "./study-plan-links";
+import { getDailyContext } from "./learning-daily";
 import { addManualStudyPlan, savePlanVersion, studentPlanViews } from "./study-plan-versions";
 import { parseStudyPlan } from "./study-plan-docx";
 import { addStudyPlan, digestDocument, listStudyPlans, planExists, planId, planObject, studyPlanSource } from "./study-plans";
@@ -303,6 +304,14 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       return studentWrites.resolve(store, action, requestId);
     }));
   handleWrite(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
+  handle(channels.dailyContext,(event,student:unknown,date:unknown)=>invoke(event,store=>{
+    if(m1Version<14||!operations)throw new WorkspaceFault("invalid","当前档案尚不支持快速学习登记。");
+    return getDailyContext(store.protectionConnection(),operations.protectionConnection(),student,date);
+  }));
+  handleWrite(channels.addQuickLesson,(event,raw:unknown)=>invoke(event,store=>{
+    if(m1Version<14||!operations||operationsPending.state().kind!=="empty")throw new WorkspaceFault("recovery","请先完成教务待确认请求。");
+    return store.addQuickLesson(operations.protectionConnection(),raw);
+  }));
   function invokeSchedule<T>(event: IpcMainInvokeEvent,
       operation: (store: OperationsDatabase, students: () => ReturnType<WorkspaceDatabase["students"]>) => T): Result<T> {
     if (!isTrusted(event, window)) return denied();
