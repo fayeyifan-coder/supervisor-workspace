@@ -8,6 +8,8 @@ import { WeeklySchedulePanel } from "./WeeklySchedulePanel";
 import { DataProtectionPanel } from "./DataProtectionPanel";
 import { BusinessExportPanel } from "./BusinessExportPanel";
 import { StudentIntakePanel } from "./StudentIntakePanel";
+import { StudyPlanImportPanel } from "./StudyPlanImportPanel";
+import "./study-plans.css";
 import { StudentDetail } from "./StudentDetail";
 import { StudentEditPanel } from "./StudentEditPanel";
 import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
@@ -157,6 +159,8 @@ function App() {
   const [writeResolution, setWriteResolution] = useState<StudentWriteResolution>();
   const refreshStudentWrites = useCallback(() => setStudentWriteRefresh(value => value + 1), []);
   const [studentRecordVersion, setStudentRecordVersion] = useState(0);
+  const [planImportOpen,setPlanImportOpen]=useState(false);
+  const [planRefresh,setPlanRefresh]=useState(0);
   const [recordActivity, setRecordActivity] = useState<Partial<Record<StudentRecordKind, { dirty: boolean; busy: boolean }>>>({});
   const onRecordActivity = useCallback((kind: StudentRecordKind, dirty: boolean, busy: boolean) => {
     setRecordActivity(old => old[kind]?.dirty === dirty && old[kind]?.busy === busy ? old : { ...old, [kind]: { dirty, busy } });
@@ -405,6 +409,8 @@ function App() {
           workspaceInfo?.mode === "synthetic" ? "合成验收 · 仅用虚构学生" : "档案模式待确认"}</span>
         <button className="secondary" type="button" aria-expanded={protectionOpen} aria-controls="data-export-center"
           disabled={protectionBusy || exportBusy} onClick={() => setProtectionOpen(open => !open)}>数据导出与备份</button>
+        {studentRecordVersion >= 11 && students && <button type="button" className="secondary" disabled={locked || editorBusy || intakeOpen}
+          onClick={()=>setPlanImportOpen(true)}>导入 Word 规划</button>}
         {scheduleEnabled && <>
           <button className="secondary" type="button" ref={scheduleNav} aria-current={page === "schedule" && !learning ? "page" : undefined}
             disabled={!students || locked || editorBusy || intakeOpen} onClick={() => navigate("schedule")}>全局总课表</button>
@@ -415,6 +421,8 @@ function App() {
         </>}
       </nav>
     </header>
+    {planImportOpen&&students&&<StudyPlanImportPanel api={api} students={students} onClose={()=>setPlanImportOpen(false)}
+      onSaved={()=>setPlanRefresh(value=>value+1)} />}
     <section id="data-export-center" hidden={!protectionOpen} aria-label="数据导出与备份">
       <div className="schedule-heading-actions"><h1>数据导出与备份</h1><button className="secondary" type="button"
         disabled={protectionBusy || exportBusy} onClick={() => setProtectionOpen(false)}>收起数据面板</button></div>

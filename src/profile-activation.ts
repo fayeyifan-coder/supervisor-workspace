@@ -153,7 +153,8 @@ export function isParentFollowUpProfile(name: string): boolean {
   return /^sw-parent-[a-z0-9-]+$/.test(name);
 }
 
-export function studentServicesVersion(name: string): 4 | 5 | 6 | 7 | 8 | 9 | 10 | undefined {
+export function studentServicesVersion(name: string): 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | undefined {
+  if (/^sw-services-v11-[a-z0-9-]+$/.test(name)) return 11;
   if (/^sw-services-v10-[a-z0-9-]+$/.test(name)) return 10;
   if (/^sw-services-v9-[a-z0-9-]+$/.test(name)) return 9;
   if (/^sw-services-v8-[a-z0-9-]+$/.test(name)) return 8;

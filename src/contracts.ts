@@ -1,5 +1,7 @@
 export const channels = {
   students: "mvp:students",
+  pickStudyPlans: "plan:pick", saveStudyPlan: "plan:save", studyPlans: "plan:list",
+  studyPlanSource: "plan:source", exportStudyPlanSource: "plan:export-source",
   history: "mvp:history",
   createStudent: "mvp:create-student",
   studentEditAvailable: "mvp:student-edit-available",
@@ -187,6 +189,11 @@ export interface WorkspaceInfo {
 }
 
 export interface WorkspaceApi {
+  pickStudyPlans(): Promise<Result<import("./study-plan-model").PlanPickResult[]>>;
+  saveStudyPlan(input: {token:string; studentId:string; confirmed:boolean; fields:import("./study-plan-model").PlanDraft}): Promise<Result<{id:string;duplicate:boolean}>>;
+  studyPlans(studentId: string): Promise<Result<import("./study-plan-model").PlanRecord[]>>;
+  studyPlanSource(studentId:string,id:string): Promise<Result<{metadata: import("./study-plan-model").PlanSource;cells:import("./study-plan-model").PlanSourceCell[]}>>;
+  exportStudyPlanSource(studentId:string,id:string): Promise<Result<string|null>>;
   previewSignin(input: import("./signin-calendar").SigninInput): Promise<Result<{preview: import("./signin-calendar").SigninPreview; key: string}>>;
   exportSignin(input: {input: import("./signin-calendar").SigninInput; key: string; changes: import("./signin-calendar").SigninChange[]}): Promise<Result<import("./signin-calendar").SigninResult | null>>;
   prepareBusinessExport(input: {includeSourceText: boolean}): Promise<Result<import("./business-export").BusinessExportPreview>>;

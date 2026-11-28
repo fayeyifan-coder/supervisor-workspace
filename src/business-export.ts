@@ -21,7 +21,7 @@ export interface BusinessExportResult {
 }
 export interface BusinessExportDocument {
  format: "sw-business-data-v1"; snapshotId: string; capturedAt: string; applicationVersion: string;
- m1Version: 6 | 7 | 8 | 9 | 10; includeSourceText: boolean; sourceImages: { file: string; sha256: string }[];
+ m1Version: 6 | 7 | 8 | 9 | 10 | 11; includeSourceText: boolean; sourceImages: { file: string; sha256: string }[];
  tables: (ExportTableSummary & { rows: Record<string, ExportValue>[] })[];
 }
 const maxJsonBytes = 32 * 1024 * 1024;
@@ -31,7 +31,7 @@ function invalid(message: string): never { throw new WorkspaceFault("invalid", m
 export function businessExportDocument(bytes: Buffer, includeSourceText: boolean): BusinessExportDocument {
  const checked = validateProtection(bytes);
  const m1Version = checked.summary.m1Version;
- if (checked.summary.formatVersion !== 2 || (m1Version !== 6 && m1Version !== 7 && m1Version !== 8 && m1Version !== 9 && m1Version !== 10)) invalid("业务导出需要五库 v6 或更新档案。请继续使用完整备份。");
+ if (checked.summary.formatVersion !== 2 || m1Version < 6) invalid("业务导出需要五库 v6 或更新档案。请继续使用完整备份。");
  if (checked.summary.unfinishedImports) throw new WorkspaceFault("recovery", "存在未完成导入，请先核对处理，再生成业务导出。");
  const tables: BusinessExportDocument["tables"] = [];
  for (let index = 0; index < checked.images.length; index++) {
@@ -46,7 +46,8 @@ export function businessExportDocument(bytes: Buffer, includeSourceText: boolean
     const actual = db.prepare(`PRAGMA table_info(${mapping.name})`).all().map(row => row.name);
     if (JSON.stringify(actual) !== JSON.stringify(mapping.columns)) invalid("数据库字段清单尚未适配，未生成不完整导出。");
     const count = Number(db.prepare(`SELECT count(*) AS n FROM ${mapping.name}`).get()!.n);
-    const excludedColumns = mapping.name === "intake_jobs" && !includeSourceText ? ["source_json"] : [];
+    const excludedColumns = mapping.name === "study_plan_sources" ? ["document_bytes", ...(!includeSourceText ? ["cells_json"] : [])]
+      : mapping.name === "intake_jobs" && !includeSourceText ? ["source_json"] : [];
     const columns = mapping.columns.filter(name => !excludedColumns.includes(name));
     const rows: Record<string, ExportValue>[] = [];
     if (mapping.role !== "internal") {
@@ -67,13 +68,13 @@ export function businessExportDocument(bytes: Buffer, includeSourceText: boolean
     const entities = new Set(rows.map(row => String(row[entityKey]))).size;
     tables.push({store, table: mapping.name, sheet: mapping.sheet, role: mapping.role, sourceColumns: [...mapping.columns], columns,
      sourceRows: count, exportedRows: rows.length, entities, entityKey, historicalRows: mapping.role === "history" ? rows.length : mapping.columns.includes("entity_id") ? rows.length - entities : 0,
-     excludedColumns, reason: mapping.name === "student_lifecycle" ? "按学生及修订保留全部状态历史。无状态历史的学生默认为正常跟进（active）。" : mapping.role === "internal" ? "内部未决/幂等安全状态不作为业务记录导出；完整恢复请用 SWBACK2。" :
+     excludedColumns, reason: mapping.name === "study_plan_sources" ? "本次 XLSX/JSON 保留原件身份和摘要，Word 原件字节仅纳入 SWBACK2；原文位置及文本按导出选项处理。" : mapping.name === "student_lifecycle" ? "按学生及修订保留全部状态历史。无状态历史的学生默认为正常跟进（active）。" : mapping.role === "internal" ? "内部未决/幂等安全状态不作为业务记录导出；完整恢复请用 SWBACK2。" :
       excludedColumns.length ? "默认不包含导入原文 source_json；其余已确认业务和来源身份完整保留。" : "全部原始业务行及历史修订，未使用界面分页或最新版本查询。", rows});
    }
   } finally { db.close(); }
  }
  const result: BusinessExportDocument = {format: "sw-business-data-v1", snapshotId: hash(bytes), capturedAt: checked.summary.createdAt,
-  applicationVersion: checked.summary.applicationVersion, m1Version, includeSourceText,
+  applicationVersion: checked.summary.applicationVersion, m1Version: m1Version as BusinessExportDocument["m1Version"], includeSourceText,
   sourceImages: checked.manifest.databases.map(row => ({file: row.file, sha256: row.sha256})), tables};
  const size = Buffer.byteLength(JSON.stringify(result));
  if (size > maxJsonBytes || Math.min(freemem(), process.availableMemory()) < size * 16 + 128 * 1024 * 1024) {

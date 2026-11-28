@@ -5,6 +5,11 @@ import type { GrowthSaveInput } from "./growth-profile";
 
 // The sandboxed preload only imports Electron at runtime.
 const api: WorkspaceApi = {
+  pickStudyPlans: () => ipcRenderer.invoke("plan:pick"),
+  saveStudyPlan: input => ipcRenderer.invoke("plan:save", input),
+  studyPlans: id => ipcRenderer.invoke("plan:list", id),
+  studyPlanSource: (id, plan) => ipcRenderer.invoke("plan:source", id, plan),
+  exportStudyPlanSource: (id, plan) => ipcRenderer.invoke("plan:export-source", id, plan),
   workspaceInfo: () => ipcRenderer.invoke("mvp:workspace-info"),
   scheduleAvailable: () => ipcRenderer.invoke("r2b:schedule-available"),
   scheduleConfiguration: () => ipcRenderer.invoke("r3:schedule-configuration"),

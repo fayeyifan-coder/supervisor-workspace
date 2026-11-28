@@ -1,0 +1,8 @@
+.study-plan-import { margin-block: 14px; }
+.study-plan-fields { border: 0; padding: 0; margin-block: 14px; display: grid; gap: 12px; }
+.study-plan-entry { padding: 12px; border: 1px solid #d5ddd1; border-radius: 8px; display: grid; gap: 8px; }
+.study-plan-original { display:grid; gap:8px; max-height:24rem; overflow:auto; }
+.study-plan-original > div { padding:8px; border-bottom:1px solid #d5ddd1; }
+.study-plan-original dd { margin:4px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.study-plan-file-list { display:flex; flex-wrap:wrap; gap:8px; padding-left: 1.4rem; }
+.study-plan-import code { overflow-wrap:anywhere; }

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, type IpcMainInvokeEvent, type Session } from "electron";
+import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { open, readFile } from "node:fs/promises";
@@ -13,6 +14,9 @@ import { IntakeStore, StudentIntakeService, type IntakeConfirm, type IntakeFile,
 import { maxIntakeBytes } from "./intake-format";
 import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSupportedProfileOpen, validateProtection,
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
+import { documentLimit, emptyPlan, type PlanPickResult, type PlanSourceCell } from "./study-plan-model";
+import { parseStudyPlan } from "./study-plan-docx";
+import { addStudyPlan, digestDocument, listStudyPlans, planExists, planId, planObject, studyPlanSource } from "./study-plans";
 import { OperationsDatabase } from "./operations";
 import { summarizeStudentOverview } from "./student-overview";
 import { shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
@@ -499,6 +503,78 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     try { recordSuccessfulBackup(profile, new Date()); }
     catch (error) { diagnostics?.record("protection:backup-status", "failed", sqliteErrorCode(error)); }
     return result;
+  }));
+  const planDocuments = new Map<string, {filename:string;bytes:Buffer;sha256:string;cells:PlanSourceCell[];id:string}>();
+  function planningStore() {
+    if (m1Version < 11 || format !== 2 || !database) throw new WorkspaceFault("invalid","当前档案版本尚不支持半年学习规划。");
+    return database.protectionConnection();
+  }
+  handleWrite(channels.pickStudyPlans, async (event): Promise<Result<PlanPickResult[]>> => {
+    if (!isTrusted(event, window)) return denied();
+    try {
+      planningStore();
+      const choice=await dialog.showOpenDialog(window,{title:"选择半年学习规划 Word 原件",properties:["openFile","multiSelections"],
+        filters:[{name:"Word 规划",extensions:["docx","doc"]}]});
+      if (!isTrusted(event,window)||state.pending) return denied();
+      if (choice.canceled) return {ok:true,value:[]};
+      if (!choice.filePaths.length||choice.filePaths.length>20) throw new WorkspaceFault("invalid","每次请选择 1 至 20 份 Word 文件。");
+      planDocuments.clear();
+      const db=planningStore(), results:PlanPickResult[]=[];
+      for (const path of choice.filePaths) {
+        const name=basename(path), extension=extname(name).toLowerCase();
+        try {
+          if (extension!==".docx"&&extension!==".doc") throw new WorkspaceFault("invalid","请选择 DOCX 或旧版 DOC。");
+          plainFile(path,documentLimit);
+          const handle=await open(path,"r");
+          let bytes:Buffer;
+          try {
+            const size=(await handle.stat()).size;
+            if (size<8||size>documentLimit) throw new WorkspaceFault("invalid","单份 Word 原件须在 512 KiB 内。");
+            bytes=Buffer.alloc(size+1);
+            const {bytesRead}=await handle.read(bytes,0,bytes.length,0);
+            if (bytesRead!==size||(await handle.stat()).size!==size) throw new WorkspaceFault("conflict","Word 文件可能已改变，请重新选择。");
+            bytes=bytes.subarray(0,size);
+          } finally { await handle.close(); }
+          if (extension===".doc"&&!bytes.subarray(0,8).equals(Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]))) {
+            throw new WorkspaceFault("invalid","这不是可确认的旧版 Word 文件。");
+          }
+          const preview=extension===".docx"?parseStudyPlan(bytes):{fields:emptyPlan(),cells:[],warnings:["旧版 DOC 原件会保留。可在 Word 本地另存为 DOCX 后重新选择，或在此人工补全。"]};
+          const token=randomUUID(), sha256=digestDocument(bytes);
+          planDocuments.set(token,{filename:name,bytes,sha256,cells:preview.cells,id:randomUUID()});
+          results.push({name,review:{token,name,sha256,duplicate:planExists(db,sha256),...preview}});
+        } catch(error) { results.push({name,issue:error instanceof WorkspaceFault ? error.message : "文件无法读取，请在 Word 本地核对原件。"}); }
+      }
+      return {ok:true,value:results};
+    } catch(error){ return failure(error); }
+  });
+  handleWrite(channels.saveStudyPlan,(event,raw:unknown)=>invoke(event,()=>{
+    const request=planObject(raw), token=planId(request.token), source=planDocuments.get(token);
+    if(!source||request.confirmed!==true)throw new WorkspaceFault("invalid","请重新选择 Word 文件，预览后人工确认学生。");
+    return addStudyPlan(planningStore(),planId(request.studentId),request.fields,source,source.id);
+  }));
+  handle(channels.studyPlans,(event,id:unknown)=>invoke(event,()=>listStudyPlans(planningStore(),planId(id))));
+  handle(channels.studyPlanSource,(event,id:unknown,plan:unknown)=>invoke(event,()=>{
+    const {metadata,cells}=studyPlanSource(planningStore(),planId(id),planId(plan));
+    return {metadata,cells};
+  }));
+  handle(channels.exportStudyPlanSource,(event,id:unknown,plan:unknown)=>protect(event,async()=>{
+    const source=studyPlanSource(planningStore(),planId(id),planId(plan));
+    const extension=extname(source.metadata.filename).toLowerCase();
+    const choice=await dialog.showSaveDialog(window,{title:"在私有目录保存已核验的 Word 原件副本",
+      defaultPath:join(production?.exports??"D:\\Codex-Development\\Exports",source.metadata.filename),
+      filters:[{name:"Word 原件",extensions:[extension.slice(1)]}]});
+    if(choice.canceled||!choice.filePath)return null;
+    if(!isTrusted(event,window)||state.pending)throw new WorkspaceFault("busy","工作窗体已变化，请重新打开规划。");
+    const destination=choice.filePath;
+    if(extname(destination).toLowerCase()!==extension)throw new WorkspaceFault("invalid","原件副本必须保留原扩展名。");
+    if(production&&isWithin(production.root,destination)&&!isWithin(production.exports,destination)) {
+      throw new WorkspaceFault("invalid","请选择专用 Exports 或其余私有目录。");
+    }
+    requireExportDestination(dirname(destination),exportForbiddenRoots());
+    const file=await open(destination,"wx");
+    try { await file.writeFile(source.bytes); await file.sync(); }
+    finally { await file.close(); }
+    return destination;
   }));
   handle(channels.previewSignin, (event, input: unknown) => invokeSchedule(event, (store, students) => {
     if (state.pending) throw new WorkspaceFault("busy", "当前档案即将切换，请重新打开课表。");
