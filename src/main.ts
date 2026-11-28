@@ -18,6 +18,7 @@ import { documentLimit, emptyPlan, type PlanPickResult, type PlanSourceCell } fr
 import { readPlanBoard } from "./study-plan-overview";
 import { linkPlanTask, listPlanTasks } from "./study-plan-links";
 import { getDailyContext } from "./learning-daily";
+import { DailyDrafts } from "./learning-drafts";
 import { readTracking } from "./learning-tracking";
 import { readReview } from "./learning-week-review";
 import { readWeeklyManagement } from "./learning-week-overview";
@@ -327,6 +328,14 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if(m1Version<15||!workLog)throw new WorkspaceFault("invalid","当前档案尚不支持单元检测。");
     return store.saveLearningTracking(workLog.protectionConnection(),raw);
   }));
+  const dailyDrafts=new DailyDrafts(profile);
+  function draftStudent(store:WorkspaceDatabase,value:unknown){
+    const id=planId(value);
+    if(m1Version<14||!store.students().some(student=>student.id===id))throw new WorkspaceFault("invalid","快速登记草稿的学生身份无效。");
+    return id;
+  }
+  handle(channels.quickLearningDraft,(event,studentId:unknown)=>invoke(event,store=>dailyDrafts.read(draftStudent(store,studentId))));
+  handleWrite(channels.saveQuickLearningDraft,(event,studentId:unknown,raw:unknown)=>invoke(event,store=>dailyDrafts.save(draftStudent(store,studentId),raw)));
   handle(channels.dailyContext,(event,student:unknown,date:unknown)=>invoke(event,store=>{
     if(m1Version<14||!operations)throw new WorkspaceFault("invalid","当前档案尚不支持快速学习登记。");
     return getDailyContext(store.protectionConnection(),operations.protectionConnection(),student,date);

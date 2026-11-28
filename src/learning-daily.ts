@@ -104,20 +104,22 @@ export function saveQuickLesson(db:DatabaseSync,ops:DatabaseSync,raw:unknown,now
     const context=getDailyContext(db,ops,input.studentId,input.date);
     if(input.attendanceId&&!context.visits.some(visit=>visit.id===input.attendanceId))return invalid("到课记录不属于该学生的实际学习日。");
     if(input.priorTaskId&&!context.unfinished.some(task=>task.id===input.priorTaskId))return invalid("引用任务已变化或不属于该学生。");
+    let historicalSource=false;
     if(input.taskId){
       const task=context.tasks.find(task=>task.id===input.taskId);
       if(!task||task.attendanceId!==input.attendanceId||!sameSubject(task.subject,input.subject))return invalid("详细任务的日期、学生、到课或学科不一致。");
       if(task.used)return conflict("该详细任务已有快速登记，请从学习历史查看。");
       if(input.planning&&task.planningNeedsReview)return conflict("请先核对详细任务原有的规划来源。");
       const detail=listPlanTasks(db,ops,input.studentId).find(row=>row.id===input.taskId);
-      if(input.planning&&detail?.linkState==="historical"&&
-        (input.planning.planId!==detail.link?.planId||input.planning.revision!==detail.link.revision||input.planning.entryId!==detail.link.entryId))
+      historicalSource=detail?.linkState==="historical";
+      if(input.planning&&historicalSource&&
+        (input.planning.planId!==detail?.link?.planId||input.planning.revision!==detail?.link?.revision||input.planning.entryId!==detail?.link?.entryId))
         return conflict("该详细任务的历史规划来源已经固定。");
     }else if(context.tasks.some(task=>task.attendanceId===input.attendanceId&&sameSubject(task.subject,input.subject)&&task.content.trim()===input.content)){
       return conflict("同一次学习已有详细任务。选中该任务后补充登记。");
     }
     const ref=input.planning;
-    if(ref&&!context.plans.some(plan=>plan.planId===ref.planId&&plan.revision===ref.revision&&plan.entryId===ref.entryId&&sameSubject(plan.subject,input.subject)))
+    if(ref&&!historicalSource&&!context.plans.some(plan=>plan.planId===ref.planId&&plan.revision===ref.revision&&plan.entryId===ref.entryId&&sameSubject(plan.subject,input.subject)))
       return conflict("规划条目或学科已变化，请重新核对当日生效版本。");
     if(db.prepare("SELECT 1 FROM learning_records WHERE id=?").get(input.id))return conflict("登记编号已经用于既有学习记录。");
     db.prepare("INSERT INTO learning_records VALUES(?,?,?,?,?,?,?,?,?)")

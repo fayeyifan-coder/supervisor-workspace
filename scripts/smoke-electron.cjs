@@ -101,7 +101,7 @@ const writeMethods = ["createStudent", "addLesson", "saveStudentEdit", "finishSt
   "appendParentFollowUp", "saveStudentRecord", "saveStudentLifecycle", "changeCycleSchedule", "resolveStudentWrite", "saveSchedulePlan", "applyLearningChange",
   "acknowledgeOperation", "saveWorkItem", "setWorkItemStatus", "saveGrowthProfile", "pickStudentIntake",
   "prepareStudentIntake", "saveStudentIntake", "pickStudyPlans", "saveStudyPlan",
-  "createManualPlan", "savePlanVersion", "linkPlanTask", "addQuickLesson", "saveLearningTracking", "saveWeeklyReview"];
+  "createManualPlan", "savePlanVersion", "linkPlanTask", "addQuickLesson", "saveQuickLearningDraft", "saveLearningTracking", "saveWeeklyReview"];
 
 async function rejectWrites(app) {
   for (const method of writeMethods) {

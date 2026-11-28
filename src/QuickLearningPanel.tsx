@@ -9,23 +9,17 @@ export function QuickLearningPanel({api,student,attendanceId,initialDate,onClose
  const empty=():DailyInput=>({id:crypto.randomUUID(),studentId:student.id,date:initialDate??today,subject:"",content:"",
   completion:"",mastery:"unassessed",tags:[],problem:"",intervention:"",next:"",attendanceId:attendanceId??null,
   source:attendanceId?"attendance":"other",taskId:null,priorTaskId:null,planning:null});
- const [draft,setDraft]=useState(empty),[key,setKey]=useState(""),[dirty,setDirty]=useState(false);
+ const [draft,setDraft]=useState(empty),[ready,setReady]=useState(false),[dirty,setDirty]=useState(false);
  const [busy,setBusy]=useState(false),[message,setMessage]=useState("");
  const [loaded,setLoaded]=useState<{date:string;data:DailyContext}>();
  useEffect(()=>{
   let alive=true;
-  api.activationStatus().then(reply=>{
-   if(!alive||!reply.ok)return;
-   const key="quick-learning-v1:"+reply.value.location+"/"+student.id;
-   try{
-    const stored=localStorage.getItem(key);
-    if(stored){
-     const saved=JSON.parse(stored) as DailyInput;
-     if(saved.studentId===student.id){setDraft(saved);setDirty(true);}
-    }
-    setKey(key);
-   }catch{setKey(key);setMessage("无法读取上次草稿。当前输入仍可保存。");}
-  }).catch(()=>{if(alive)setMessage("无法确认档案身份，请关闭后重试。");});
+  api.quickLearningDraft(student.id).then(reply=>{
+   if(!alive)return;
+   if(!reply.ok){setMessage(reply.message);return;}
+   if(reply.value){setDraft(reply.value);setDirty(true);}
+   setReady(true);
+  }).catch(()=>{if(alive)setMessage("无法读取本机草稿，请关闭后重试。");});
   return()=>{alive=false;};
  },[api,student.id]);
  useEffect(()=>{
@@ -40,16 +34,19 @@ export function QuickLearningPanel({api,student,attendanceId,initialDate,onClose
  const context=loaded?.date===draft.date?loaded.data:undefined;
  function patch(fields:Partial<DailyInput>){
   const next={...draft,...fields};setDraft(next);setDirty(true);
-  if(key)try{localStorage.setItem(key,JSON.stringify(next));}catch{setMessage("本机草稿暂无法落盘，请保持窗口开启。");}
+  if(ready)void api.saveQuickLearningDraft(student.id,next).then(reply=>{if(!reply.ok)setMessage(reply.message);})
+   .catch(()=>setMessage("本机草稿暂无法落盘，请保持窗口开启。"));
  }
  async function save(){
-  if(busy||!key||!context)return;
+  if(busy||!ready||!context)return;
   setBusy(true);setMessage("");
   try{
    const result=await api.addQuickLesson(draft);
    if(!result.ok){setMessage(result.message);return;}
-   try{localStorage.removeItem(key);}catch{}
-   onSaved();onClose();
+   const cleared=await api.saveQuickLearningDraft(student.id,null);
+   onSaved();
+   if(!cleared.ok){setMessage("学习记录已保存。草稿尚未清理，可重试同一登记。");return;}
+   onClose();
   }catch{setMessage("保存结果待核对。请保留当前草稿并重试同一请求。");}
   finally{setBusy(false);}
  }
@@ -62,7 +59,7 @@ export function QuickLearningPanel({api,student,attendanceId,initialDate,onClose
    <button type="button" className="secondary" disabled={busy} onClick={close}>关闭登记</button></header>
   {message&&<p role="status">{message}</p>}
   <form onSubmit={event=>{event.preventDefault();void save();}}>
-   <fieldset className="schedule-fields" disabled={busy||!key}>
+   <fieldset className="schedule-fields" disabled={busy||!ready}>
     <label>实际学习日期<input required type="date" max={today} value={draft.date} onChange={event=>patch({date:event.target.value,attendanceId:null,taskId:null,priorTaskId:null,planning:null,source:"other"})}/></label>
     <label>学习来源<select value={draft.source} onChange={event=>patch({source:event.target.value==="attendance"?"attendance":"other",attendanceId:null,taskId:null})}>
       <option value="other">其他学习</option><option value="attendance">机构实际到课</option></select></label>
@@ -74,13 +71,15 @@ export function QuickLearningPanel({api,student,attendanceId,initialDate,onClose
     <label>掌握情况<select value={draft.mastery} onChange={event=>patch({mastery:event.target.value as DailyInput["mastery"]})}>
      <option value="unassessed">未评估</option><option value="good">较好</option><option value="basic">基本掌握</option><option value="review">需巩固</option></select></label>
    </fieldset>
-   <fieldset className="schedule-fields" disabled={busy||!key}>
+   <fieldset className="schedule-fields" disabled={busy||!ready}>
     <label>实际学习内容<textarea required maxLength={500} rows={3} value={draft.content} onChange={event=>patch({content:event.target.value})}/></label>
+   </fieldset>
+   <details><summary>补充问题、教师干预或下次安排</summary><fieldset className="schedule-fields" disabled={busy||!ready}>
     <label>学习问题<textarea maxLength={500} rows={3} value={draft.problem} onChange={event=>patch({problem:event.target.value})}/></label>
     <label>教师观察与干预<textarea maxLength={500} rows={3} value={draft.intervention} onChange={event=>patch({intervention:event.target.value})}/></label>
     <label>下次学习安排<textarea maxLength={500} rows={3} value={draft.next} onChange={event=>patch({next:event.target.value})}/></label>
-   </fieldset>
-   <fieldset className="schedule-fields" disabled={busy||!context||!key}>
+   </fieldset></details>
+   <fieldset className="schedule-fields" disabled={busy||!context||!ready}>
     <label>已有详细任务<select value={draft.taskId??""} onChange={event=>{
      const task=context?.tasks.find(item=>item.id===event.target.value);
      patch(task?{taskId:task.id,subject:task.subject,content:task.content,planning:null}:{taskId:null});
@@ -93,11 +92,12 @@ export function QuickLearningPanel({api,student,attendanceId,initialDate,onClose
     }}><option value="">不关联规划</option>{context?.plans.filter(item=>!draft.subject||draft.subject.trim()===item.subject).map(item=><option key={planKey(item)} value={planKey(item)}>{item.subject} · 第 {item.revision} 版 · {item.content}</option>)}</select></label>
    </fieldset>
    {context?.previous&&<details><summary>上次学习记录</summary><p>{context.previous.date} · {context.previous.subject} · {context.previous.task}</p>{context.previous.nextStep&&<p>下次安排 {context.previous.nextStep}</p>}</details>}
-   <fieldset className="schedule-fields" disabled={busy||!key}><legend>学习表现标签</legend>{commonTags.map(tag=><label className="schedule-check" key={tag}>
+   <fieldset className="schedule-fields" disabled={busy||!ready}><legend>学习表现标签</legend>{commonTags.map(tag=><label className="schedule-check" key={tag}>
     <input type="checkbox" checked={draft.tags.includes(tag)} onChange={event=>patch({tags:event.target.checked?[...draft.tags,tag]:draft.tags.filter(item=>item!==tag)})}/>{tag}</label>)}</fieldset>
    <p className="muted">登记时间自动记录。学习开始、结束与时长缺少事实时保持未知。</p>
-   <button type="submit" className="primary" disabled={busy||!key||!context}>{busy?"正在保存…":"保存快速登记"}</button>
-   {dirty&&!busy&&<button type="button" className="secondary" onClick={()=>{if(window.confirm("确认丢弃当前快速登记草稿？")){try{localStorage.removeItem(key);}catch{}onClose();}}}>放弃草稿</button>}
+   <button type="submit" className="primary" disabled={busy||!ready||!context}>{busy?"正在保存…":"保存快速登记"}</button>
+   {dirty&&!busy&&<button type="button" className="secondary" onClick={()=>{if(window.confirm("确认丢弃当前快速登记草稿？"))void api.saveQuickLearningDraft(student.id,null)
+     .then(reply=>{if(reply.ok)onClose();else setMessage(reply.message);}).catch(()=>setMessage("无法清理草稿，请重试。"));}}>放弃草稿</button>}
   </form>
  </section>;
 }

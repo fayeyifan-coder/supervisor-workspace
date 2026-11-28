@@ -23,6 +23,7 @@ export const channels = {
   resolveStudentWrite: "mvp:resolve-student-write",
   addLesson: "mvp:add-lesson",
   dailyContext: "b5:daily-context",
+  quickLearningDraft:"b5:quick-learning-draft", saveQuickLearningDraft:"b5:save-quick-learning-draft",
   addQuickLesson: "b5:add-quick-lesson",
   learningTracking:"b5:learning-tracking",
   saveLearningTracking:"b5:save-learning-tracking",
@@ -250,6 +251,8 @@ export interface WorkspaceApi {
   studentOverview(studentId: string): Promise<Result<import("./student-overview").StudentOverviewData>>;
   saveStudentLifecycle(input: LifecycleInput): Promise<Result<LifecycleChange>>;
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
+  quickLearningDraft(studentId:string):Promise<Result<import("./learning-daily").DailyInput|null>>;
+  saveQuickLearningDraft(studentId:string,input:import("./learning-daily").DailyInput|null):Promise<Result<null>>;
   dailyContext(studentId:string,date:string): Promise<Result<import("./learning-daily").DailyContext>>;
   addQuickLesson(input:import("./learning-daily").DailyInput): Promise<Result<Lesson>>;
   learningTracking(studentId:string):Promise<Result<import("./learning-tracking").TrackingView>>;
