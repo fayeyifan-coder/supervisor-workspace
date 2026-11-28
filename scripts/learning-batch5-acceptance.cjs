@@ -127,6 +127,13 @@ module.exports=async function acceptLearning({main,ui,api,ok,wait,click,profileS
  assert(!Object.hasOwn(review.facts,'healthScore'));
  const fixed={kind:'training',id:trainingId,revision:1};
  ok(await api('saveLearningTracking',{...detection,requestId:randomUUID(),expectedRevision:1,fields:{...detection.fields,result:fixed}}));
+ await click('学生档案','nav button');
+ await choose(other);
+ await choose(student);
+ await click('单元与检测','.student-detail-nav button');
+ await wait(()=>ui('document.querySelector("#student-section-learning-tracking")?.innerText.includes("合成观察型训练 · 专项训练第 1 版 · 提分方案第 1 版")'));
+ await profileShot('detection-fixed-training.png');
+ await click('学习管理总览','nav button');
  const planEntry=(content)=>({id:randomUUID(),subject:'数学',month:'1月',week:'第1周',kind:'week',content,estimated:'',from:day,to:'',sources:[]});
  const entries=['合成详细流程结束','合成详细任务跳过'].map(planEntry);
  const {emptyPlan}=require('../build/study-plan-model.js');
@@ -150,6 +157,7 @@ module.exports=async function acceptLearning({main,ui,api,ok,wait,click,profileS
  assert.deepEqual(current.facts.tracking.find(item=>item.id===testId).fields.result,fixed);
  await click('本周','.weekly-management button');
  await wait(()=>ui('document.querySelector(".weekly-management .study-board-rows")?.innerText.includes("有执行记录 1 项 · 有明确完成记录 0 项")'));
+ await ui('Array.from(document.querySelectorAll(".weekly-management .study-board-rows > li")).find(row=>row.querySelector("h2").textContent.includes('+JSON.stringify(student.alias)+')).querySelectorAll("summary").forEach(summary=>{if(summary.textContent.startsWith("未完成或跳过"))summary.click();});true');
  assert((await ui('document.querySelector(".weekly-management .study-board-rows").innerText')).includes('合成详细任务跳过'));
  await profileShot('weekly-execution-closeout.png');
  const selector='(()=>{'+E+'.dialog.showOpenDialog=async()=>({canceled:false,filePaths:['+JSON.stringify(output)+']});return true;})()';
