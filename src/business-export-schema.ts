@@ -41,14 +41,14 @@ const studyPlanTables = [
 ];
 const planVersionTable = table("mvp", "study_plan_versions", "半年规划执行修订",
  "plan_id,revision,request_id,effective_on,starts_on,ends_on,state,reason,fields_json,changed_at", "history");
-const planLinkTable = table("mvp", "study_plan_links", "实际任务与规划来源",
- "task_id,student_id,plan_id,revision,entry_id,linked_at", "history");
+const planLinkTable = table("mvp", "study_plan_links", "学习任务与规划来源",
+ "task_id,student_id,plan_id,revision,entry_id,linked_at,basis_revision", "history");
 export const exportTablesFor = (version: number) =>
   [...exportTables, ...(version >= 8 ? [lifecycleTable] : []), ...(version >= 9 ? recurringTables : []), ...(version >= 10 ? [attendanceExceptionTable] : []), ...(version >= 11 ? studyPlanTables : []), ...(version >= 12 ? [planVersionTable] : []), ...(version >= 13 ? [planLinkTable] : [])];
 
 export const columnLabels: Record<string, string> = {
  sha256: "原件 SHA256", filename: "原件文件名", byte_length: "原件字节数", imported_at: "导入时间戳",
- cells_json: "原文位置与文本", document_bytes: "Word 二进制原件", source_sha256: "关联原件 SHA256", task_id: "实际学习任务身份", entry_id: "规划条目身份", linked_at: "关联时间戳", effective_on: "修订生效日", fields_json: "执行版本完整字段", initial_json: "不可变初始规划",
+ cells_json: "原文位置与文本", document_bytes: "Word 二进制原件", source_sha256: "关联原件 SHA256", task_id: "实际学习任务身份", entry_id: "规划条目身份", linked_at: "关联时间戳", basis_revision: "关联依据学习块修订", effective_on: "修订生效日", fields_json: "执行版本完整字段", initial_json: "不可变初始规划",
  id: "记录身份", entity_id: "实体身份", request_id: "请求身份", student_id: "学生UUID", alias: "学生代号",
  grade: "年级", subjects: "学科", goal: "学习目标", notes: "备注", created_at: "创建时间戳", revision: "修订版本",
  changed_at: "变更时间戳", saved_at: "保存时间戳", updated_at: "更新时间戳", study_date: "学习日期",

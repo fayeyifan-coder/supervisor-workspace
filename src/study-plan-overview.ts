@@ -21,11 +21,25 @@ export function readPlanBoard(db:DatabaseSync,ops:DatabaseSync,students:Student[
      if(!item.from||item.from>day||(item.to||item.from)<day)continue;
      const key=[plan.id,version.revision,item.id].join("/");
      if(list.has(key))continue;
-     const actual=tasks.filter(row=>row.date>=from&&row.date<=to&&row.link?.planId===plan.id&&
-       row.link?.revision===version.revision&&row.link?.entryId===item.id);
-     list.set(key,{key,studentId,planId:plan.id,planTitle:version.fields.title,revision:version.revision,entry:item,actual});
+     list.set(key,{key,studentId,planId:plan.id,planTitle:version.fields.title,revision:version.revision,entry:item,scheduled:true,planned:[],actual:[]});
     }
    }
+  }
+  for(const task of tasks){
+   const link=task.link;
+   if(!link||task.linkState==="review"||task.date<from||task.date>to)continue;
+   const key=[link.planId,link.revision,link.entryId].join("/");
+   let record=list.get(key);
+   if(!record&&task.linkState==="historical"){
+    const version=plans.find(plan=>plan.id===link.planId)?.versions?.find(version=>version.revision===link.revision);
+    const entry=version?.fields.entries.find(item=>item.id===link.entryId);
+    if(version&&entry){
+     record={key,studentId,planId:link.planId,planTitle:version.fields.title,revision:link.revision,entry,scheduled:false,planned:[],actual:[]};
+     list.set(key,record);
+    }
+   }
+   if(task.linkState==="planned")record?.planned.push(task);
+   else if(task.linkState==="historical")record?.actual.push(task);
   }
   return [...list.values()].sort((a,b)=>a.entry.from.localeCompare(b.entry.from)||a.key.localeCompare(b.key));
  }
@@ -40,6 +54,7 @@ export function readPlanBoard(db:DatabaseSync,ops:DatabaseSync,students:Student[
   const lookup=new Set(plans.flatMap(plan=>(plan.versions?.[0]?.fields??plan.initial).subjects));
   return {studentId:student.id,alias:student.alias,grade:student.grade,lifecycle:student.lifecycleStatus??"active",status,
     imported:plans.filter(plan=>plan.source).length,plans:plans.length,subjects:[...lookup],today,
+    reviewLinks:tasks.filter(task=>task.linkState==="review").length,
     pending:pending.map(plan=>({id:plan.id,title:plan.initial.title})),
     week:range(student.id,plans,tasks,monday,weekEnd),month:range(student.id,plans,tasks,month,monthEnd)};
  });

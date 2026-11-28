@@ -62,3 +62,22 @@ test('v10 independently migrates to v11 without moving existing tables or changi
  assert.equal(validateProtection(result).summary.formatVersion,2);
  assert.throws(()=>prepareProtectionRestore(result,2,10),/不能降级/);
 });
+
+test('merged columns, preceding month and separate subjects keep unambiguous time attribution',async()=>{
+ const {timingAndMergeDocx}=require('./study-plan-docx-fixture.cjs');
+ const {fields,warnings,cells}=parseStudyPlan(await timingAndMergeDocx());
+ assert.deepEqual(fields.subjects,['数学','英语']);
+ const first=fields.entries.filter(row=>row.month==='12月');
+ assert.equal(first.length,3);
+ assert.equal(first.find(row=>row.subject==='数学').estimated,'60 分钟');
+ assert.equal(first.find(row=>row.subject==='英语'&&row.week==='第1周').estimated,'');
+ assert.equal(first.find(row=>row.subject==='英语'&&row.week==='第4周').estimated,'45 分钟');
+ assert(first.every(row=>row.sources.some(ref=>/^p/.test(ref))));
+ assert(warnings.some(text=>text.includes('无法唯一对应')));
+ assert(warnings.some(text=>text.includes('横跨多个周次')));
+ assert(cells.some(cell=>cell.text.includes('99 分钟')));
+ const next=fields.entries.filter(row=>row.month==='1月');
+ assert.equal(next.length,5);
+ assert.equal(next.find(row=>row.week==='第5周').estimated,'90 分钟');
+ assert(fields.entries.every(row=>row.from===''));
+});

@@ -344,7 +344,14 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       return performOperation(command, () => saveSchedulePlan(store, students, command));
     }));
   handle(channels.learningDay, (event, raw: unknown) =>
-    invokeSchedule(event, (store, students) => readLearningDay(store, students, raw)));
+    invokeSchedule(event, (store, students) => {
+      const day=readLearningDay(store, students, raw);
+      if(m1Version<13)return day;
+      const tasks=listPlanTasks(planningStore(),store.protectionConnection(),day.attendance.studentId,{attendanceId:day.attendance.id});
+      const planningSources=Object.fromEntries(tasks.filter(task=>task.link)
+        .map(({id,link,linkState})=>[id,{link,linkState}]));
+      return {...day,planningSources};
+    }));
   handleWrite(channels.applyLearningChange, (event, raw: unknown) =>
     invokeSchedule(event, (store, students) => {
       const command = scheduleObject(raw);

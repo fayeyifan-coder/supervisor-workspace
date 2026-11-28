@@ -54,6 +54,8 @@ export function StudyPlanStudentPanel({api,student,refresh,onActivity,revisionsE
  const visibleVersion=basis>0?current?.versions?.find(row=>row.revision===basis):basis===0?active??effective??latest:undefined;
  const shown=visibleVersion?.fields??current?.initial;
  const linked=tasks?.filter(task=>task.link?.planId===current?.id&&task.link?.revision===visibleVersion?.revision)??[];
+ const reviewCount=tasks?.filter(task=>task.link?.planId===current?.id&&task.linkState==="review").length??0;
+ const linkLabels={planned:"计划关联",historical:"历史关联",review:"来源待核对"} as const;
  const displayed=shown?.entries.filter(row=>(!subject||row.subject===subject)&&(!month||row.month===month)&&(!week||row.week===week))??[];
  const filter=(value:string,set:(value:string)=>void,items:string[],label:string)=><label>{label}<select value={value} onChange={event=>set(event.target.value)}>
   <option value="">全部</option>{[...new Set(items.filter(Boolean))].map(item=><option key={item}>{item}</option>)}
@@ -95,7 +97,7 @@ export function StudyPlanStudentPanel({api,student,refresh,onActivity,revisionsE
   try{
    const reply=await api.linkPlanTask({studentId:id,planId:current.id,revision:visibleVersion.revision,entryId:entryChoice,taskId:taskChoice});
    if(!reply.ok)setStatus(reply.message);
-   else {setTaskChoice("");setEntryChoice("");setGeneration(n=>n+1);setStatus("已关联实际任务和所选历史版本。");}
+   else {setTaskChoice("");setEntryChoice("");setGeneration(n=>n+1);setStatus("已确认任务与所选规划版本的关联。");}
   }catch{setStatus("关联结果待核对，可以重试同一任务。");}finally{setBusy(false);}
  }
  function patch(fields:Partial<PlanVersionInput>){
@@ -138,22 +140,23 @@ export function StudyPlanStudentPanel({api,student,refresh,onActivity,revisionsE
    </div>}
    {(["context","goals","habits","notes"] as const).map((key,index)=>shown[key]&&<details key={key}><summary>{["学情与依据","阶段及半年目标","习惯与干预","规划备注"][index]}</summary>
     <p className="study-plan-text">{shown[key]}</p></details>)}
+   {reviewCount>0&&<p className="notice pending" role="status">{reviewCount} 项任务的规划来源待重新核对。可以选择有效日期及同学科条目重新确认。</p>}
    {revisionsEnabled&&visibleVersion&&<details>
     <summary>实际学习任务关联（{linked.length}）</summary>
-    <p className="muted">关联只记录已保存的学习任务来源。完成状态来自本来的学习任务记录。</p>
+    <p className="muted">开始前建立计划关联。学习开始后保留已确认的历史来源。来源待核对的任务不计作规划执行依据。</p>
     {linked.length>0?<ul>{linked.map(task=><li key={task.id}>{task.date} · {task.content} ·
-      {({planned:"待开始",in_progress:"进行中",done:"已完成",skipped:"已跳过"})[task.status]} · 规划第 {task.link?.revision} 版
+      {({planned:"待开始",in_progress:"进行中",done:"已完成",skipped:"已跳过"})[task.status]} · 规划第 {task.link?.revision} 版 · {task.linkState&&linkLabels[task.linkState]}
     </li>)}</ul>:<p className="muted">当前版本尚未关联实际任务。</p>}
     <div className="schedule-fields">
       <label>规划条目<select value={entryChoice} disabled={busy} onChange={event=>setEntryChoice(event.target.value)}>
        <option value="">请选择</option>{visibleVersion.fields.entries.map(item=><option key={item.id} value={item.id}>{item.week||item.month||"日期待确认"} · {item.content}</option>)}
       </select></label>
       <label>现有学习任务<select value={taskChoice} disabled={busy} onChange={event=>setTaskChoice(event.target.value)}>
-       <option value="">请选择</option>{tasks?.filter(task=>!task.link).map(task=><option key={task.id} value={task.id}>{task.date} · {task.content}</option>)}
+       <option value="">请选择</option>{tasks?.filter(task=>task.linkable).map(task=><option key={task.id} value={task.id}>{task.date} · {task.subject||"学科未登记"} · {task.content}{task.linkState==="review"?" · 来源待核对":""}</option>)}
       </select></label>
     </div>
     <button type="button" className="secondary" disabled={busy||!taskChoice||!visibleVersion.fields.entries.some(item=>item.id===entryChoice)}
-      onClick={()=>void linkTask()}>关联至第 {visibleVersion.revision} 版</button>
+      onClick={()=>void linkTask()}>确认关联至第 {visibleVersion.revision} 版</button>
    </details>}
    <div className="schedule-fields">
     {filter(subject,setSubject,shown.subjects,"按学科")}

@@ -32,10 +32,10 @@ export function StudyPlanBoard({api,refresh,onPlan,onLearning,visible}:{
  const board=response?.ok?response.value:undefined;
  const matches=(row:PlanBoardRow)=> (!student||row.studentId===student)&&(!subject||row.subjects.includes(subject))&&
   (life==="all"||row.lifecycle===life)&&(!status||(status==="not-imported"?row.imported===0:
-   status==="needs-review"?row.status==="review"||row.pending.length>0||row.today.some(plan=>plan.undated>0||plan.unassigned>0):row.status===status));
+   status==="needs-review"?row.status==="review"||row.pending.length>0||row.reviewLinks>0||row.today.some(plan=>plan.undated>0||plan.unassigned>0):row.status===status));
  const rows=board?.rows.filter(matches)??[];
  const subjects=[...new Set(board?.rows.flatMap(row=>row.subjects)??[])];
- const itemCount=(key:"week"|"month")=>rows.reduce((n,row)=>n+row[key].filter(item=>!subject||item.entry.subject===subject).length,0);
+ const itemCount=(key:"week"|"month")=>rows.reduce((n,row)=>n+row[key].filter(item=>item.scheduled&&(!subject||item.entry.subject===subject)).length,0);
  return <section className="schedule-page study-plan-board" aria-labelledby="study-plan-overview-title">
   <header className="schedule-heading">
    <div><h1 id="study-plan-overview-title">学习规划总览</h1><p className="muted">查看学生规划、确认日期及已关联的学习记录。</p></div>
@@ -80,6 +80,7 @@ export function StudyPlanBoard({api,refresh,onPlan,onLearning,visible}:{
       <span>{row.grade} · {lifeLabels[row.lifecycle]} · {stateLabels[row.status]}</span>
      </div>
      <p className="muted">{row.plans} 份规划 · 已导入 {row.imported} 份 Word</p>
+     {row.reviewLinks>0&&<p className="notice pending">{row.reviewLinks} 项任务的规划来源待重新核对。</p>}
      {row.today.map(plan=><p key={plan.id}><button type="button" className="schedule-profile-link" onClick={event=>
       onPlan(row.studentId,plan.id,plan.revision,event.currentTarget)}>{plan.title} · 第 {plan.revision} 版</button>
       {plan.undated>0&&" · 日期待核对 "+plan.undated+" 项"}
@@ -89,11 +90,12 @@ export function StudyPlanBoard({api,refresh,onPlan,onLearning,visible}:{
      {!items.length?<p className="muted">当前范围尚未登记已确认日期的条目。</p>:
        <details open={Boolean(student)}><summary>期间规划 · {items.length} 项</summary><ol>{items.map(item=><li key={item.key}>
         <p><button type="button" className="schedule-profile-link" onClick={event=>onPlan(row.studentId,item.planId,item.revision,event.currentTarget)}>
-         {item.entry.from} · {item.entry.subject||"学科待核对"} · {item.entry.content}</button></p>
-        <p className="muted">{item.planTitle} · 第 {item.revision} 版 · {item.entry.estimated||"预计时长尚未登记"}</p>
-        {item.actual.length?item.actual.map(task=><p key={task.id}>{task.attendanceId?<button type="button" className="schedule-profile-link"
+         {item.entry.from||"原计划日期待确认"} · {item.entry.subject||"学科待核对"} · {item.entry.content}</button></p>
+        <p className="muted">{item.planTitle} · 第 {item.revision} 版 · {!item.scheduled&&"历史来源 · "} {item.entry.estimated||"预计时长尚未登记"}</p>
+        {[...item.planned,...item.actual].map(task=><p key={task.id}>{task.attendanceId?<button type="button" className="schedule-profile-link"
           onClick={event=>onLearning({studentId:row.studentId,attendanceId:task.attendanceId!},event.currentTarget,task.id)}>{task.content}</button>:task.content}
-          {" · "+taskLabels[task.status]}</p>):<p className="muted">实际学习任务尚未关联。</p>}
+          {" · "+(task.linkState==="planned"?"计划关联 · ":"历史关联 · ")+taskLabels[task.status]}</p>)}
+        {!item.actual.length&&<p className="muted">实际学习任务尚未关联。</p>}
        </li>)}</ol></details>}
     </li>;
    })}</ul>

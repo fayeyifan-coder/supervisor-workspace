@@ -153,6 +153,7 @@ export interface AttendanceBoardDay {
 export interface LearningDay {
   attendance: AttendancePlan;
   blocks: LearningBlock[];
+  planningSources?: Record<string, Pick<import("./study-plan-model").PlanTask,"link"|"linkState">>;
 }
 
 interface LearningChangeInput extends LearningDayInput {

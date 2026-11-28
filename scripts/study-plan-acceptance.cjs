@@ -83,12 +83,31 @@ module.exports=async function verifyStudyPlanning({main,ui,api,ok,wait,click,pro
  assert.equal(notes.versions.length,2);
  const board=ok(await api('studyPlanBoard',day));
  assert.equal(board.rows.length,20);
- assert.equal(board.rows.find(row=>row.studentId===student.id).week[0].actual[0].id,taskId);
+ assert.equal(board.rows.find(row=>row.studentId===student.id).week[0].planned[0].id,taskId);
  await click('学习规划总览','nav button');
  await input(ui,'.study-plan-board input[type=date]',day);
  await wait(()=>ui('document.querySelectorAll(".study-board-rows > li").length===20'),'read synthetic roster');
  await input(ui,'.study-plan-board label:nth-child(3) select',student.id);
  await wait(()=>ui('document.querySelector(".study-plan-board")?.innerText.includes("合成保留实际任务")'));
+ await click('合成保留实际任务','.study-board-rows button');
+ const taskText=(text)=>ui('document.getElementById('+JSON.stringify('learning-task-'+taskId)+')?.innerText.includes('+JSON.stringify(text)+')');
+ await wait(()=>taskText('计划关联'),'learning task shows planned source');
+ await click('编辑任务计划');
+ await input(ui,'.learning-task-form label.wide input','合成内容已调整');
+ await click('保存任务计划');
+ await wait(()=>taskText('规划来源待重新核对'),'editing flags stale origin');
+ const target={studentId:student.id,attendanceId:attendance.id};
+ assert.equal(ok(await api('learningDay',target)).planningSources[taskId].linkState,'review');
+ await profileShot('learning-source-review.png');
+ ok(await api('linkPlanTask',{...target,planId:plan.id,taskId,revision:1,entryId:newFields.entries[0].id}));
+ await click('开始学习块');
+ await wait(()=>taskText('计划关联'),'opening a block retains a provisional task source');
+ await click('记录完成');
+ await wait(()=>taskText('已完成'),'actual task completion is retained');
+ await wait(()=>taskText('历史关联'),'execution preserves approved source');
+ assert.equal(ok(await api('learningDay',target)).planningSources[taskId].linkState,'historical');
+ await click('返回规划总览');
+ await wait(()=>ui('document.querySelector(".study-plan-board")?.innerText.includes("合成内容已调整")'));
  await profileShot('planning-overview.png');
  await click(student.alias,'.study-board-rows h2 button');
  await wait(()=>ui('document.querySelector(".student-detail-nav [aria-pressed=true]")?.textContent==="学习规划"'),'global drill-through');
@@ -142,6 +161,6 @@ module.exports=async function verifyStudyPlanning({main,ui,api,ok,wait,click,pro
  assert.deepEqual(originalRows.map(row=>row.sha256).sort(),reviews.map(row=>row.review.sha256).sort());
  assert(originalRows.every(row=>!('document_bytes' in row)&&!('cells_json' in row)));
  return {version,schema:13,students:20,files:20,pickerCancel:true,limitEnforced:true,partialFailure:true,duplicateRetry:true,
-   studentSwitchDraftGuard:true,historicalTaskVersion:1,activePlans:1,backup:backup.location,backupWordDigests:20,tableCount:33,
-   businessExport:published.location,businessExportFiles:published.files,screenshots:['word-import.png','planning-overview.png','student-study-plan.png']};
+   studentSwitchDraftGuard:true,learningSourceReview:true,historicalTaskVersion:1,activePlans:1,backup:backup.location,backupWordDigests:20,tableCount:33,
+   businessExport:published.location,businessExportFiles:published.files,screenshots:['word-import.png','planning-overview.png','student-study-plan.png','learning-source-review.png']};
 };

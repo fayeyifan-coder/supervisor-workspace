@@ -3,7 +3,7 @@ const p=t=>'<w:p><w:r><w:t>'+t+'</w:t></w:r></w:p>';
 const tc=(t,attributes='')=>'<w:tc><w:tcPr>'+attributes+'</w:tcPr>'+p(t)+'</w:tc>';
 const row=(...cells)=>'<w:tr>'+cells.join('')+'</w:tr>';
 const table=(...rows)=>'<w:tbl>'+rows.join('')+'</w:tbl>';
-async function studyPlanDocx(index=1,conflict=false){
+async function studyPlanDocx(index=1,conflict=false,layout){
  const zip=new JSZip();
  zip.file('[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
  zip.file('_rels/.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
@@ -16,7 +16,22 @@ async function studyPlanDocx(index=1,conflict=false){
    row(tc('预计学习时间'),tc('90 分钟'),tc('2 小时'),tc(''),tc('90 分钟'),tc('45 分钟')),
    row(tc('1月份学习目标'),tc('合成复习目标')),
    row(tc('学习内容'),tc('第一周')),row(tc('英语'),tc('合成阅读任务')));
- zip.file('word/document.xml','<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+intro+tasks+'<w:sectPr/></w:body></w:document>');
+ zip.file('word/document.xml','<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+(layout??intro+tasks)+'<w:sectPr/></w:body></w:document>');
  return zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
 }
-module.exports={studyPlanDocx};
+function timingAndMergeDocx(){
+ const span='<w:gridSpan w:val="2"/>';
+ const heading=p('合成学期学习规划')+table(row(tc('辅导科目'),tc('数学、英语')))+p('12月份：合成第一月安排');
+ const first=table(
+  row(tc('学习内容',span),...[1,2,3,4].map(i=>tc('第'+i+'周'))),
+  row(tc('数学',span),tc('合成数学第一项'),tc('合成数学横跨两周',span),tc('')),
+  row(tc('英语',span),tc('合成英语第一项'),tc(''),tc(''),tc('合成英语第四项')),
+  row(tc('预计学习时间',span),tc('99 分钟'),tc(''),tc(''),tc('45 分钟')),
+  row(tc('数学预计学习时间',span),tc('60 分钟'),tc(''),tc(''),tc('')),
+  row(tc('1月份学习目标','<w:gridSpan w:val="6"/>')),
+  row(tc('学习内容'),...[1,2,3,4,5].map(i=>tc('第'+i+'周'))),
+  row(tc('英语'),...[1,2,3,4,5].map(i=>tc('合成五周 '+i))),
+  row(tc('预计学习时间'),tc('30 分钟'),tc(''),tc(''),tc(''),tc('90 分钟')));
+ return studyPlanDocx(1,false,heading+first);
+}
+module.exports={studyPlanDocx,timingAndMergeDocx};

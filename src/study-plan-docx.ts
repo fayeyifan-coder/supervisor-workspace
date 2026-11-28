@@ -118,6 +118,11 @@ function readDocument(document: Buffer): Extracted {
 const monthPattern=/(?<!\d)((?:20\d{2}\s*年\s*)?(?:1[0-2]|0?[1-9]|十[一二]?|[一二三四五六七八九])\s*月)/u;
 const weekPattern=/^(?:第\s*[一二三四五六七八九十\d]+\s*周|周次\s*[一二三四五六七八九十\d]+)$/u;
 const subjects="语文 数学 英语 物理 化学 生物 科学 道德与法治 历史 地理 政治 信息技术".split(" ");
+function cellColumn(cell:PlanSourceCell){return Number(/:c(\d+)$/.exec(cell.ref)?.[1]);}
+function coveringHeader(headers:PlanSourceCell[],cell:PlanSourceCell){
+  const from=cellColumn(cell), end=from+(cell.span??1);
+  return headers.find(header=>cellColumn(header)<=from&&end<=cellColumn(header)+(header.span??1));
+}
 function meaningful(line:string){return line.trim().replace(/^(?:[\d一二三四五六七八九十]+[、.．)）]\s*)/u,"");}
 function fieldType(text:string){
   if(/学情|学习现状|学习情况|规划依据|学科现状|性格|目前成绩/.test(text))return "context";
@@ -134,7 +139,7 @@ export function parseStudyPlan(input:Buffer): {fields:PlanDraft;cells:PlanSource
     if(!value.trim())return;
     if(/^(?:学生)?姓名$|^学生名$/.test(label))labels.learner.add(value.trim());
     if(/^(?:就读)?年级$/.test(label))labels.grade.add(value.trim());
-    if(/^(?:规划|学习)?学科$/.test(label)){
+    if(/^(?:规划|学习|辅导|所学|目标|主要|培训)?(?:学科|科目)$/.test(label)){
       const names=subjects.filter(subject=>value.includes(subject));
       fields.subjects=[...new Set([...fields.subjects,...(names.length?names:[value.trim()])])];
     }
@@ -151,33 +156,47 @@ export function parseStudyPlan(input:Buffer): {fields:PlanDraft;cells:PlanSource
     if(!fields.term&&/学期|学年/.test(text)&&text.length<70)fields.term=text;
   }
   for(const rows of raw.tables){
-    let month="", weekHeaders:PlanSourceCell[]=[];
+    const first=raw.cells.indexOf(rows[0]?.[0]);
+    const heading=raw.cells.slice(0,Math.max(0,first)).reverse().find(cell=>/^p\d+$/.test(cell.ref));
+    const precedingMonth=heading&&monthPattern.exec(meaningful(heading.text));
+    let month=precedingMonth?.index===0?precedingMonth[1]:"";
+    let monthRef=month?heading?.ref:undefined, weekHeaders:PlanSourceCell[]=[];
+    let weekly: {header:PlanSourceCell;entry:PlanEntry}[]=[];
     for(let i=0;i<rows.length;i++){
       const row=rows[i],head=meaningful(row[0]?.text??"");
       for(let j=0;j+1<row.length;j++)identity(meaningful(row[j].text),row[j+1].text);
       const label=monthPattern.exec(head)?.[1];
-      if(label){month=label;weekHeaders=[];}
+      if(label){month=label;monthRef=row[0].ref;weekHeaders=[];weekly=[];}
       if(label&&/目标|任务|规划|内容/.test(head)&&row.slice(1).some(cell=>cell.text.trim())){
         for(const cell of row.slice(1).filter(cell=>cell.text.trim())) add({subject:"",month,week:"",kind:"month",
           content:cell.text,estimated:"",sources:[row[0].ref,cell.ref]});
       }
-      if(row.slice(1).some(cell=>weekPattern.test(cell.text.trim()))){weekHeaders=row;continue;}
-      if(weekHeaders.length&&/时间|时长|课时/.test(head)&&fields.entries.length){
-        for(const [j,cell] of row.entries()){
-          if(!j||!cell.text.trim())continue;
-          const header=weekHeaders[j];
-          const latest=[...fields.entries].reverse().find(item=>item.kind==="week"&&item.sources.includes(header?.ref));
-          if(latest){latest.estimated=cell.text.trim();latest.sources.push(cell.ref);}
+      const headers=row.slice(1).filter(cell=>weekPattern.test(cell.text.trim()));
+      if(headers.length){weekHeaders=headers;weekly=[];continue;}
+      if(weekHeaders.length&&/时间|时长|课时/.test(head)){
+        const labelledSubjects=subjects.filter(subject=>head.includes(subject));
+        for(const cell of row.slice(1).filter(cell=>cell.text.trim())){
+          const header=coveringHeader(weekHeaders,cell);
+          const matched=weekly.filter(item=>item.header===header&&
+            (!labelledSubjects.length||labelledSubjects.length===1&&item.entry.subject===labelledSubjects[0]));
+          if(matched.length===1&&!matched[0].entry.estimated){
+            matched[0].entry.estimated=cell.text.trim();
+            matched[0].entry.sources.push(cell.ref);
+          }else if(matched.length!==1||matched[0].entry.estimated!==cell.text.trim()){
+            warnings.add("部分预计时长无法唯一对应学科或周任务，请核对原文时长行。");
+          }
         }
         continue;
       }
       if(weekHeaders.length&&!label){
-        for(const [j,cell] of row.entries()){
-          if(!j||!cell.text.trim()||!weekPattern.test(weekHeaders[j]?.text.trim()??""))continue;
-          const subject=subjects.find(item=>head===item||head===item+"学习")??"";
+        for(const cell of row.slice(1).filter(cell=>cell.text.trim())){
+          const header=coveringHeader(weekHeaders,cell);
+          if(!header){warnings.add("部分合并单元格横跨多个周次，请核对原文。");continue;}
+          const subject=subjects.find(item=>head===item||head===item+"学习"||head===item+"任务")??"";
           if(subject&&!fields.subjects.includes(subject))fields.subjects.push(subject);
-          add({subject,month,week:weekHeaders[j].text.trim(),kind:"week",content:cell.text,estimated:"",
-            sources:[weekHeaders[j].ref,cell.ref]});
+          add({subject,month,week:header.text.trim(),kind:"week",content:cell.text,estimated:"",
+            sources:[...(monthRef?[monthRef]:[]),header.ref,...(subject?[row[0].ref]:[]),cell.ref]});
+          weekly.push({header,entry:fields.entries.at(-1)!});
         }
         continue;
       }

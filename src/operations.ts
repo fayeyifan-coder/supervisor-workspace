@@ -8,6 +8,8 @@ import { dateApplies, type CycleRule, persistCycleRule, persistScheduleHours, ra
   recurringConfiguration, scheduleCommand, stableScheduleId, storedScheduleHours,
   type CycleKind, type CycleResult, type DayException, type DayExceptionAction, type FlexWindow, type GenerationResult, type ScheduleConfiguration, type ScheduleOrigin } from "./recurring-schedule";
 import { isExpectedVisit, minute, openingHours, shanghaiMinute, shanghaiParts, shiftDate } from "./schedule-calendar";
+import { confirmedPlanSourceAtOutcome } from "./study-plan-links";
+import type { PlanTaskLink } from "./study-plan-model";
 
 export { operationsProtection, verifyOperationsStudentLinks } from "./operations-schema";
 
@@ -96,6 +98,7 @@ export interface LearningBlock {
   createdAt: number;
   updatedAt: number;
   tasks: LearningTask[];
+  planSourceAtOutcome?: PlanTaskLink;
 }
 
 function invalid(message: string): never { throw new WorkspaceFault("invalid", message); }
@@ -171,7 +174,7 @@ function verifyHeader(path: string, layout: OperationsLayout): void {
   } finally { closeSync(fd); }
 }
 
-type ScheduleStudents = Pick<WorkspaceDatabase, "students"> & Partial<Pick<WorkspaceDatabase, "version" | "hasPlanTaskLink">>;
+type ScheduleStudents = Pick<WorkspaceDatabase, "students"> & Partial<Pick<WorkspaceDatabase, "version" | "hasPlanTaskLink" | "protectionConnection">>;
 
 export class OperationsDatabase {
   private writesBlocked = false;
@@ -594,7 +597,7 @@ export class OperationsDatabase {
       const other = this.db.prepare("SELECT 1 FROM learning_tasks WHERE id=? AND block_id<>?");
       if (tasks.some(task => other.get(task.id, change.id))) conflict("该任务编号已属于其他学习块。");
       if (block.tasks.some(task=>!tasks.some(next=>next.id===task.id)&&this.m1.hasPlanTaskLink?.(task.id))) {
-        conflict("该任务已关联历史规划版本，请保留任务身份。");
+        conflict("该任务已关联规划来源，请保留任务身份。");
       }
       this.db.prepare("DELETE FROM learning_tasks WHERE block_id=?").run(change.id);
       const insert = this.db.prepare(`INSERT INTO learning_tasks
@@ -644,10 +647,14 @@ export class OperationsDatabase {
       const task = block.tasks.find(item => item.id === taskId);
       if (block.status !== "in_progress" || !task || task.status === "done" || task.status === "skipped" ||
           (status === "in_progress" && task.status !== "planned")) conflict("学习任务状态或所属学习块不允许此操作。");
+      // Freeze source eligibility in the first recorded task outcome, independently of the block start.
+      const planSourceAtOutcome = task.status === "planned" && (this.m1.version ?? 0) >= 13 && this.m1.protectionConnection
+        ? confirmedPlanSourceAtOutcome(this.m1.protectionConnection(), this.db, block.studentId, taskId, now) : undefined;
       this.db.prepare("UPDATE learning_tasks SET status=?,result_notes=?,completed_at=? WHERE block_id=? AND id=?")
         .run(status, resultNotes, status === "in_progress" ? null : now, change.id, taskId);
       this.advanceBlock(change.id, now);
-      return this.learningBlock(change.id)!;
+      const updated = this.learningBlock(change.id)!;
+      return planSourceAtOutcome ? { ...updated, planSourceAtOutcome } : updated;
     });
   }
 

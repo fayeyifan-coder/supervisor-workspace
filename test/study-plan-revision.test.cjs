@@ -6,6 +6,7 @@ const {emptyPlan}=require('../build/study-plan-model.js');
 const {addManualStudyPlan,savePlanVersion,studentPlanViews,currentPlan}=require('../build/study-plan-versions.js');
 const {linkPlanTask,listPlanTasks,verifyPlanLinks}=require('../build/study-plan-links.js');
 const {shanghaiMinute}=require('../build/schedule-calendar.js');
+const {readPlanBoard}=require('../build/study-plan-overview.js');
 const {validateProtection,businessExportDocument}=Object.assign({},require('../build/offline-protection.js'),require('../build/business-export.js'));
 
 const uid=()=>randomUUID();
@@ -27,7 +28,7 @@ test('revision snapshots remain immutable and linked tasks keep the original eff
  const link={studentId:a.id,planId:plan,revision:1,entryId:anchor.id,taskId};
  const reference=linkPlanTask(db,ops.protectionConnection(),link,clock);
  assert.deepEqual(linkPlanTask(db,ops.protectionConnection(),link),reference);
- assert.throws(()=>linkPlanTask(db,ops.protectionConnection(),{...link,studentId:b.id}),/历史关联/);
+ assert.throws(()=>linkPlanTask(db,ops.protectionConnection(),{...link,studentId:b.id}),/不属于当前学生/);
  const change={...fields,entries:[anchor,{...future,content:'合成修订后的未来任务',estimated:'90 分钟'}]};
  const due=make({expectedRevision:1,effectiveOn:'2030-01-05',reason:'合成延期',fields:change});
  savePlanVersion(db,due,true,clock);
@@ -44,4 +45,89 @@ test('revision snapshots remain immutable and linked tasks keep the original eff
  const snapshot=f.capture();
  assert.equal(validateProtection(snapshot).summary.m1Version,13);
  assert.equal(businessExportDocument(snapshot,false).tables.find(row=>row.table==='study_plan_links').rows[0].revision,1);
+});
+
+test('planned sources require review on edits, rescheduling and different actual dates while frozen history survives revisions',t=>{
+ const f=exportFixture(t,1,13), db=f.m1.protectionConnection(), ops=f.operations, connection=ops.protectionConnection();
+ const [student]=f.m1.students(), studentId=student.id;
+ const firstDay='2030-01-02', revisionDay='2030-01-03';
+ const instant=(date,time='16:00')=>shanghaiMinute(date,time);
+ let clock=instant('2030-01-01','10:00');
+ t.mock.method(Date,'now',()=>++clock);
+ const item=subject=>({id:uid(),subject,month:'1月',week:'第1周',kind:'week',content:'合成周任务',estimated:'',
+  from:firstDay,to:'2030-01-04',sources:[]});
+ const math=item('数学'), english=item('英语');
+ const fields={...emptyPlan(),title:'合成关联计划',subjects:['数学','英语'],entries:[math,english]};
+ const planId=addManualStudyPlan(db,studentId,uid(),fields);
+ const saveRevision=(expectedRevision,effectiveOn)=>savePlanVersion(db,{studentId,planId,requestId:uid(),expectedRevision,
+  effectiveOn,startsOn:'2030-01-01',endsOn:'',state:'active',reason:'合成修订',fields},true,Date.now());
+ saveRevision(0,'2030-01-01');
+ saveRevision(1,revisionDay);
+ const change=(id,expectedRevision)=>({id,expectedRevision,studentId,requestId:uid()});
+ const baseline=(id,revision,date)=>ops.saveLearningBlock({...change(id,revision),
+  plannedStart:instant(date),plannedEnd:instant(date,'16:30')});
+ function setTask(block,taskId,subject,content){
+  return ops.saveLearningTasks({...change(block.id,block.revision),tasks:[{id:taskId,category:'foundation',subject,content}]});
+ }
+ function makeTask(){
+  const taskId=uid();
+  const block=setTask(baseline(uid(),0,firstDay),taskId,'数学','合成任务甲');
+  return {block,taskId};
+ }
+ const choose=(taskId,revision,entry=math)=>linkPlanTask(db,connection,{studentId,taskId,revision,entryId:entry.id,planId},Date.now());
+ const get=taskId=>listPlanTasks(db,connection,studentId).find(row=>row.id===taskId);
+ const board=day=>readPlanBoard(db,connection,[student],day).rows[0];
+ const edited=makeTask(), moved=makeTask(), late=makeTask();
+ assert.throws(()=>choose(edited.taskId,1,english),/学科不一致/);
+ for(const source of [edited,moved,late])choose(source.taskId,1);
+ assert.equal(get(edited.taskId).linkState,'planned');
+ assert.equal(board(firstDay).week.flatMap(row=>row.actual).length,0);
+ assert.equal(board(firstDay).week.flatMap(row=>row.planned).length,3);
+ const changed=setTask(edited.block,edited.taskId,'数学','合成已调整内容');
+ assert.equal(get(edited.taskId).linkState,'review');
+ assert.equal(choose(edited.taskId,1).basisRevision,changed.revision);
+ assert.equal(get(edited.taskId).linkState,'planned');
+ const changedSubject=setTask(changed,edited.taskId,'英语','合成已调整内容');
+ assert.equal(get(edited.taskId).linkState,'review');
+ assert.throws(()=>choose(edited.taskId,1),/学科不一致/);
+ choose(edited.taskId,1,english);
+ assert.equal(get(edited.taskId).linkState,'planned');
+ const rescheduled=baseline(moved.block.id,moved.block.revision,revisionDay);
+ assert.equal(get(moved.taskId).linkState,'review');
+ assert.throws(()=>choose(moved.taskId,1),/未生效/);
+ choose(moved.taskId,2);
+ assert.equal(get(moved.taskId).linkState,'planned');
+ clock=instant(firstDay,'16:05');
+ const lateBlockStarted=ops.recordLearningOutcome({...change(late.block.id,late.block.revision),action:'start'});
+ assert.equal(get(late.taskId).linkState,'planned');
+ clock=instant(revisionDay,'16:05');
+ const movedBlockStarted=ops.recordLearningOutcome({...change(rescheduled.id,rescheduled.revision),action:'start'});
+ assert.equal(get(moved.taskId).linkState,'planned');
+ const lateActual=ops.recordTaskOutcome({...change(lateBlockStarted.id,lateBlockStarted.revision),taskId:late.taskId,status:'in_progress'});
+ assert.equal(lateActual.planSourceAtOutcome,undefined);
+ assert.equal(get(late.taskId).date,revisionDay);
+ assert.equal(get(late.taskId).linkState,'review');
+ const complete=(block,taskId)=>ops.recordTaskOutcome({...change(block.id,block.revision),taskId,status:'done'});
+ const movedDone=complete(movedBlockStarted,moved.taskId), lateDone=complete(lateActual,late.taskId);
+ assert.equal(movedDone.planSourceAtOutcome.revision,2);
+ assert.equal(get(moved.taskId).linkState,'historical');
+ assert.equal(get(late.taskId).status,'done');
+ assert(!board(revisionDay).month.flatMap(row=>row.actual).some(row=>row.id===late.taskId));
+ assert(board(revisionDay).reviewLinks>0);
+ assert.throws(()=>choose(late.taskId,1),/未生效/);
+ choose(late.taskId,2);
+ assert.equal(get(late.taskId).linkState,'historical');
+ assert.throws(()=>setTask(movedDone,moved.taskId,'英语','合成改写结果'),/尚未开始/);
+ assert.throws(()=>setTask(lateDone,late.taskId,'数学','合成改写结果'),/尚未开始/);
+ const saved=get(moved.taskId).link;
+ saveRevision(2,revisionDay);
+ assert.deepEqual(get(moved.taskId).link,saved);
+ assert.equal(get(moved.taskId).linkState,'historical');
+ assert.throws(()=>choose(moved.taskId,3),/历史关联不能改写/);
+ assert.deepEqual(choose(moved.taskId,2),saved);
+ assert(board(revisionDay).month.some(row=>row.revision===2&&row.actual.some(task=>task.id===moved.taskId&&task.status==='done')));
+ assert.equal(get(edited.taskId).linkState,'planned');
+ assert.equal(get(edited.taskId).link.basisRevision,changedSubject.revision);
+ verifyPlanLinks(db,connection);
+ assert.equal(validateProtection(f.capture()).summary.m1Version,13);
 });

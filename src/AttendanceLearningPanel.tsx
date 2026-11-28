@@ -140,8 +140,9 @@ function TaskForm({ block, target, locked, submit, afterClose }: {
   </form>;
 }
 
-function TaskRow({ task, block, target, locked, submit }: {
+function TaskRow({ task, block, target, locked, submit, source }: {
   task: LearningTask; block: LearningBlock; target: LearningDayInput; locked: boolean; submit: Submit;
+  source?: NonNullable<LearningDay["planningSources"]>[string];
 }) {
   const [result, setResult] = useState<{ text: string; revision: number }>();
   const active = block.status === "in_progress" && (task.status === "planned" || task.status === "in_progress");
@@ -157,6 +158,8 @@ function TaskRow({ task, block, target, locked, submit }: {
       <span className="learning-status">{taskLabels[task.status]}</span>
     </div>
     <p>{task.content}</p>
+    {source?.linkState==="review"&&<p className="notice pending" role="status">规划来源待重新核对。任务结果仍可如实记录，请到学生学习规划确认来源。</p>}
+    {source?.link&&source.linkState!=="review"&&<p className="muted">{source.linkState==="historical"?"历史关联":"计划关联"} · 规划第 {source.link.revision} 版</p>}
     {(task.knowledgePoints || task.plannedTarget || task.resultNotes || task.completedAt !== null) && <dl>
       {task.knowledgePoints && <div><dt>知识点</dt><dd>{task.knowledgePoints}</dd></div>}
       {task.plannedTarget && <div><dt>预期目标</dt><dd>{task.plannedTarget}</dd></div>}
@@ -180,8 +183,9 @@ function TaskRow({ task, block, target, locked, submit }: {
   </li>;
 }
 
-function BlockCard({ block, target, locked, checkedOut, submit, onEdit }: {
+function BlockCard({ block, target, locked, checkedOut, submit, onEdit, sources }: {
   block: LearningBlock; target: LearningDayInput; locked: boolean; checkedOut: boolean; submit: Submit; onEdit: () => void;
+  sources?: LearningDay["planningSources"];
 }) {
   const [taskForm, setTaskForm] = useState(false);
   const waiting = block.status === "planned";
@@ -211,10 +215,11 @@ function BlockCard({ block, target, locked, checkedOut, submit, onEdit }: {
       {block.status === "in_progress" && <button className="primary" type="button" disabled={locked || hasActiveTask}
         onClick={() => update("finish")}>结束学习块</button>}
     </div>
+    {waiting && block.tasks.some(task=>sources?.[task.id]?.link) && <p className="muted">调整学习时段、任务学科或内容后，请重新核对规划来源。</p>}
     {waiting && checkedOut && <p className="muted">本次到校已签退，不能开始学习块。</p>}
     {block.status === "in_progress" && hasActiveTask && <p className="muted">请先完成或跳过进行中的任务，再结束学习块。</p>}
     {block.tasks.length ? <ol className="learning-task-list">{block.tasks.map(task =>
-      <TaskRow key={task.id} task={task} block={block} target={target} locked={locked} submit={submit} />)}</ol>
+      <TaskRow key={task.id} task={task} block={block} target={target} locked={locked} submit={submit} source={sources?.[task.id]} />)}</ol>
       : <p className="muted learning-no-tasks">这个学习块还没有任务。</p>}
     {taskForm && <TaskForm block={block} target={target} locked={locked} submit={submit} afterClose={() => setTaskForm(false)} />}
   </article>;
@@ -383,7 +388,7 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
         locked={locked} onDraft={setDraft} onSave={saveBlock} onClose={() => setDraft(undefined)} />}
       {!data.blocks.length && !draft && <p className="muted">这次到校还没有学习块。</p>}
       <div className="learning-block-list">{data.blocks.map(block => <BlockCard key={block.id} block={block} target={target}
-        checkedOut={plan.checkOutAt !== null} locked={locked} submit={(command, saved) => void save(command, saved)} onEdit={() => {
+        checkedOut={plan.checkOutAt !== null} locked={locked} sources={data.planningSources} submit={(command, saved) => void save(command, saved)} onEdit={() => {
           if (!draft || window.confirm("确认关闭当前学习块表单？")) setDraft(blockDraft(plan, block));
         }} />)}</div>
     </>}

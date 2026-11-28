@@ -51,6 +51,32 @@ test('v10 to v13 uses an independent native recovery and business export include
  const staged=await io.restore(original.dir,migrated);
  const verified=await io.inspect(original.dir,staged.profileName,2,13);
  assert(verified.bytes.equals(migrated));
+ const {DatabaseSync}=require('node:sqlite');
+ function rawTables(archive){
+  const result=new Map();
+  for(const [index,bytes] of validateProtection(archive).images.entries()){
+   const db=new DatabaseSync(':memory:');
+   try{
+    db.deserialize(Buffer.from(bytes));
+    for(const {name,sql} of db.prepare("SELECT name,sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()){
+     const table='"'+name.replaceAll('"','""')+'"';
+     const columns=db.prepare('PRAGMA table_info('+table+')').all();
+     const sorted=columns.map((_,position)=>position+1).join(',');
+     const select=db.prepare('SELECT * FROM '+table+' ORDER BY '+sorted);
+     select.setReadBigInts(true);
+     result.set(index+'/'+name,{sql,columns,rows:select.all()});
+    }
+   }finally{db.close();}
+  }
+  return result;
+ }
+ const originalTables=rawTables(before), restoredTables=rawTables(verified.bytes);
+ assert.equal(originalTables.size,29);
+ assert.equal(restoredTables.size,33);
+ for(const [name,original] of originalTables)assert.deepEqual(restoredTables.get(name),original,name);
+ assert.deepEqual([...restoredTables.keys()].filter(name=>!originalTables.has(name)).map(name=>name.split('/')[1]).sort(),
+  ['study_plan_links','study_plan_sources','study_plan_versions','study_plans']);
+ assert([...restoredTables].filter(([name])=>!originalTables.has(name)).every(([,table])=>table.rows.length===0));
  const manifest=businessExportDocument(verified.bytes,false);
  const originalData=businessExportDocument(before,false);
  assert.deepEqual(manifest.tables.filter(row=>originalData.tables.some(x=>x.table===row.table)),originalData.tables);
