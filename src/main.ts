@@ -528,14 +528,18 @@ async function start(owner: string, profile: string, state: ActivationState, ope
         try {
           if (extension!==".docx"&&extension!==".doc") throw new WorkspaceFault("invalid","请选择 DOCX 或旧版 DOC。");
           plainFile(path,documentLimit);
+          const entry=lstatSync(path);
           const handle=await open(path,"r");
           let bytes:Buffer;
           try {
-            const size=(await handle.stat()).size;
+            const opened=await handle.stat(), size=opened.size;
+            if(!opened.isFile()||opened.dev!==entry.dev||opened.ino!==entry.ino||opened.mtimeMs!==entry.mtimeMs)
+              throw new WorkspaceFault("conflict","Word 文件可能已改变，请重新选择。");
             if (size<8||size>documentLimit) throw new WorkspaceFault("invalid","单份 Word 原件须在 512 KiB 内。");
             bytes=Buffer.alloc(size+1);
             const {bytesRead}=await handle.read(bytes,0,bytes.length,0);
-            if (bytesRead!==size||(await handle.stat()).size!==size) throw new WorkspaceFault("conflict","Word 文件可能已改变，请重新选择。");
+            const after=await handle.stat();
+            if (bytesRead!==size||after.size!==size||after.mtimeMs!==opened.mtimeMs) throw new WorkspaceFault("conflict","Word 文件可能已改变，请重新选择。");
             bytes=bytes.subarray(0,size);
           } finally { await handle.close(); }
           if (extension===".doc"&&!bytes.subarray(0,8).equals(Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]))) {

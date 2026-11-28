@@ -31,7 +31,8 @@ export function StudyPlanBoard({api,refresh,onPlan,onLearning,visible}:{
  const response=loaded?.date===date?loaded.result:undefined;
  const board=response?.ok?response.value:undefined;
  const matches=(row:PlanBoardRow)=> (!student||row.studentId===student)&&(!subject||row.subjects.includes(subject))&&
-  (life==="all"||row.lifecycle===life)&&(!status||(status==="not-imported"?row.imported===0:row.status===status));
+  (life==="all"||row.lifecycle===life)&&(!status||(status==="not-imported"?row.imported===0:
+   status==="needs-review"?row.status==="review"||row.pending.length>0||row.today.some(plan=>plan.undated>0||plan.unassigned>0):row.status===status));
  const rows=board?.rows.filter(matches)??[];
  const subjects=[...new Set(board?.rows.flatMap(row=>row.subjects)??[])];
  const itemCount=(key:"week"|"month")=>rows.reduce((n,row)=>n+row[key].filter(item=>!subject||item.entry.subject===subject).length,0);
@@ -52,7 +53,7 @@ export function StudyPlanBoard({api,refresh,onPlan,onLearning,visible}:{
     <option value="">全部学科</option>{subjects.map(item=><option key={item}>{item}</option>)}
    </select></label>
    <label>规划状态<select value={status} onChange={event=>setStatus(event.target.value)}>
-    <option value="">全部</option><option value="not-imported">未导入 Word</option>
+    <option value="">全部</option><option value="not-imported">未导入 Word</option><option value="needs-review">有待核对事项</option>
     {Object.entries(stateLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
    </select></label>
   </div>

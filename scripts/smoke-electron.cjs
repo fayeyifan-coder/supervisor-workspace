@@ -100,7 +100,8 @@ const ok = reply => { assert.equal(reply.ok, true, JSON.stringify(reply)); retur
 const writeMethods = ["createStudent", "addLesson", "saveStudentEdit", "finishStudentEdit", "createParentConcern",
   "appendParentFollowUp", "saveStudentRecord", "saveStudentLifecycle", "changeCycleSchedule", "resolveStudentWrite", "saveSchedulePlan", "applyLearningChange",
   "acknowledgeOperation", "saveWorkItem", "setWorkItemStatus", "saveGrowthProfile", "pickStudentIntake",
-  "prepareStudentIntake", "saveStudentIntake"];
+  "prepareStudentIntake", "saveStudentIntake", "pickStudyPlans", "saveStudyPlan",
+  "createManualPlan", "savePlanVersion", "linkPlanTask"];
 
 async function rejectWrites(app) {
   for (const method of writeMethods) {
