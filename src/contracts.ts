@@ -24,6 +24,8 @@ export const channels = {
   addLesson: "mvp:add-lesson",
   dailyContext: "b5:daily-context",
   addQuickLesson: "b5:add-quick-lesson",
+  learningTracking:"b5:learning-tracking",
+  saveLearningTracking:"b5:save-learning-tracking",
   workItems: "m2b:work-items",
   searchWorkItems: "m2b:search-work-items",
   workHistory: "m2b:work-history",
@@ -249,6 +251,8 @@ export interface WorkspaceApi {
   addLesson(input: LessonInput): Promise<Result<Lesson>>;
   dailyContext(studentId:string,date:string): Promise<Result<import("./learning-daily").DailyContext>>;
   addQuickLesson(input:import("./learning-daily").DailyInput): Promise<Result<Lesson>>;
+  learningTracking(studentId:string):Promise<Result<import("./learning-tracking").TrackingView>>;
+  saveLearningTracking(input:import("./learning-tracking").TrackingInput):Promise<Result<import("./learning-tracking").TrackingRecord>>;
   workItems(today: string): Promise<Result<import("./worklog").WorkItem[]>>;
   searchWorkItems(from: string, to: string, query?: string): Promise<Result<import("./worklog").WorkItem[]>>;
   workHistory(id: string): Promise<Result<import("./worklog").WorkChange[]>>;

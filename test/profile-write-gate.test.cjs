@@ -45,7 +45,7 @@ test("business IPC writes and mutable import previews all use the shared writer 
     "appendParentFollowUp", "saveStudentRecord", "saveStudentLifecycle", "changeCycleSchedule", "resolveStudentWrite", "saveSchedulePlan", "applyLearningChange",
     "acknowledgeOperation", "saveWorkItem", "setWorkItemStatus", "saveGrowthProfile", "pickStudentIntake",
     "prepareStudentIntake", "saveStudentIntake", "pickStudyPlans", "saveStudyPlan",
-    "createManualPlan", "savePlanVersion", "linkPlanTask", "addQuickLesson"];
+    "createManualPlan", "savePlanVersion", "linkPlanTask", "addQuickLesson", "saveLearningTracking"];
   assert.deepEqual(registered.sort(), writes.sort());
   for (const write of writes) assert(!main.includes("ipcMain.handle(channels." + write + ","));
 });

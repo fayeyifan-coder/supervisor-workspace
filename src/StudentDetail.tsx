@@ -5,7 +5,7 @@ import { lifecycleLabels } from "./student-lifecycle";
 import type { OverviewSection } from "./StudentOverview";
 import "./student-detail.css";
 
-type Section = "overview" | "lifecycle" | "growth" | "history" | "sources" | "edit" | "parent" | "study-plan" | StudentRecordKind;
+type Section = "overview" | "lifecycle" | "growth" | "history" | "sources" | "edit" | "parent" | "study-plan" | "learning-tracking" | StudentRecordKind;
 const intakeStatus = { done: "已导入", pending: "待确认保存结果", review: "待核对" } as const;
 const intakeTime = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai", dateStyle: "medium", timeStyle: "medium",
@@ -60,11 +60,11 @@ function ImportSources({ api, student }: { api: WorkspaceApi; student: Student }
   </section>;
 }
 
-export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, lifecycle, overview, overviewVisible, recordPanels, studyPlan, focusPlan }:  {
+export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, lifecycle, overview, overviewVisible, recordPanels, studyPlan, focusPlan, learningTracking }:  {
   student: Student; api: WorkspaceApi; intakeOpen: boolean;
   actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode; parentFollowUp?: ReactNode; lifecycle?: ReactNode;
   overview?: (open: (section: OverviewSection, recordId?: string) => void) => ReactNode; overviewVisible?: boolean;
-  studyPlan?: ReactNode; focusPlan?: number;
+  studyPlan?: ReactNode; focusPlan?: number; learningTracking?: ReactNode;
   recordPanels: { id: StudentRecordKind; label: string; content: ReactNode }[];
 }) {
   const tabs: { id: Section; label: string; enabled: boolean }[] = [
@@ -72,6 +72,7 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
     { id: "parent", label: "家长诉求", enabled: Boolean(parentFollowUp) },
     { id: "score", label: "成绩趋势", enabled: recordPanels.some(panel => panel.id === "score") },
     { id: "study-plan", label: "学习规划", enabled: Boolean(studyPlan) },
+    { id: "learning-tracking", label: "单元与检测", enabled: Boolean(learningTracking) },
     { id: "growth", label: "成长档案", enabled: true },
     { id: "improvement", label: "提分方案", enabled: recordPanels.some(panel => panel.id === "improvement") },
     { id: "lifecycle", label: "跟进状态", enabled: Boolean(lifecycle) },
@@ -125,6 +126,7 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
       {selected === "overview" && overviewVisible && !intakeOpen && overview(openSource)}
     </div>}
     {studyPlan && <div id="student-section-study-plan" hidden={selected !== "study-plan"}>{!intakeOpen && studyPlan}</div>}
+    {learningTracking&&<div id="student-section-learning-tracking" hidden={selected!=="learning-tracking"}>{!intakeOpen&&learningTracking}</div>}
     <div id="student-section-growth" hidden={selected !== "growth"}>{!intakeOpen && growth}</div>
     <div id="student-section-history" hidden={selected !== "history"}>{history}</div>
     <div id="student-section-sources" hidden={selected !== "sources"}>

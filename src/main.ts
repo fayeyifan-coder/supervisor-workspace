@@ -18,6 +18,7 @@ import { documentLimit, emptyPlan, type PlanPickResult, type PlanSourceCell } fr
 import { readPlanBoard } from "./study-plan-overview";
 import { linkPlanTask, listPlanTasks } from "./study-plan-links";
 import { getDailyContext } from "./learning-daily";
+import { readTracking } from "./learning-tracking";
 import { addManualStudyPlan, savePlanVersion, studentPlanViews } from "./study-plan-versions";
 import { parseStudyPlan } from "./study-plan-docx";
 import { addStudyPlan, digestDocument, listStudyPlans, planExists, planId, planObject, studyPlanSource } from "./study-plans";
@@ -304,6 +305,14 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       return studentWrites.resolve(store, action, requestId);
     }));
   handleWrite(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
+  handle(channels.learningTracking,(event,student:unknown)=>invoke(event,store=>{
+    if(m1Version<15||!workLog)throw new WorkspaceFault("invalid","当前档案尚不支持单元检测。");
+    return readTracking(store.protectionConnection(),workLog.protectionConnection(),student);
+  }));
+  handleWrite(channels.saveLearningTracking,(event,raw:unknown)=>invoke(event,store=>{
+    if(m1Version<15||!workLog)throw new WorkspaceFault("invalid","当前档案尚不支持单元检测。");
+    return store.saveLearningTracking(workLog.protectionConnection(),raw);
+  }));
   handle(channels.dailyContext,(event,student:unknown,date:unknown)=>invoke(event,store=>{
     if(m1Version<14||!operations)throw new WorkspaceFault("invalid","当前档案尚不支持快速学习登记。");
     return getDailyContext(store.protectionConnection(),operations.protectionConnection(),student,date);

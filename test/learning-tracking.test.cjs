@@ -1,0 +1,30 @@
+const assert=require('node:assert/strict');
+const test=require('node:test');
+const {randomUUID}=require('node:crypto');
+const {exportFixture}=require('./export-fixture.cjs');
+const {readTracking,verifyTracking}=require('../build/learning-tracking.js');
+const {businessExportDocument}=require('../build/business-export.js');
+test('learning completion, detection, retest and reminders keep immutable source identities', t=>{
+ const f=exportFixture(t,2,15),db=f.m1.protectionConnection(),work=f.work.protectionConnection(),id=f.studentId;
+ const save=(request)=>f.m1.saveLearningTracking(work,request);
+ const unit={id:randomUUID(),studentId:id,expectedRevision:0,requestId:randomUUID(),date:'2026-11-26',
+  fields:{kind:'unit',subject:'数学',title:'合成方程',state:'learned',basis:'合成课程完成',planning:null}};
+ assert.equal(save(unit).fields.state,'learned');
+ const task=f.work.save({id:randomUUID(),studentId:id,title:'合成待检测',workDate:'2026-11-28',startedAt:'',notes:'',nextStep:''},()=>true);
+ const check={...unit,id:randomUUID(),requestId:randomUUID(),fields:{kind:'check',unitId:unit.id,scope:'合成方程检测',due:'2026-11-28',state:'pending',result:null,next:'',reminderId:task.id}};
+ const created=save(check);assert.deepEqual(save(check),created);
+ assert.throws(()=>save({...check,id:randomUUID(),requestId:randomUUID()}),/已关联另一项/);
+ const result={kind:'score',id:f.scoreId,revision:1};
+ const tested={...check,requestId:randomUUID(),expectedRevision:1,fields:{...check.fields,state:'tested',result}};
+ assert.throws(()=>save({...tested,fields:{...tested.fields,result:null}}),/真实检测结果/);
+ assert.equal(save(tested).fields.result.revision,1);
+ assert.throws(()=>save({...tested,requestId:randomUUID()}),/版本已变化/);
+ const retest=save({...tested,requestId:randomUUID(),expectedRevision:2,fields:{...tested.fields,state:'retest',next:'合成复测'}});
+ assert.equal(retest.fields.state,'retest');
+ assert.equal(readTracking(db,work,id).history.length,4);
+ assert.equal(readTracking(db,work,id).results.find(row=>row.id===f.scoreId).revision,2);
+ verifyTracking(db,work);
+ const exported=businessExportDocument(f.capture(),false);
+ assert.equal(exported.tables.find(row=>row.table==='learning_unit_events').rows.length,4);
+ assert(!JSON.stringify(retest.fields).includes('90.25'));
+});

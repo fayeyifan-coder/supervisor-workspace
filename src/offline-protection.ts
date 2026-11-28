@@ -5,6 +5,7 @@ import { freemem } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { verifyPlanLinks } from "./study-plan-links";
 import { dailySchema, verifyDailyRecords } from "./learning-daily";
+import { trackingSchema, verifyTracking } from "./learning-tracking";
 import { verifyPlanVersions } from "./study-plan-versions";
 import { studyPlanTables, verifyStudyPlans } from "./study-plans";
 import { verifyStudentLifecycle } from "./student-lifecycle";
@@ -223,6 +224,10 @@ function summary(dbs: DatabaseSync[], manifest: Omit<Manifest, "databases">): Pr
   if (m1Version >= 14) {
     verifyDailyRecords(m1, operations);
     if (manifest.m1UpgradedFrom && (manifest.m1SourceVersion??1)<14 && count(m1,dailySchema[0])) reject("升级新增的快速登记明细必须为空。");
+  }
+  if(m1Version>=15){
+    verifyTracking(m1,work);
+    if(manifest.m1UpgradedFrom&&(manifest.m1SourceVersion??1)<15&&count(m1,trackingSchema[0]))reject("升级新增的学科单元表必须为空。");
   }
   if (manifest.m1UpgradedFrom && (m1Version === 2 || manifest.m1SourceVersion === 1) &&
       (count(m1, "student_edits") !== 0 || count(m1, "student_edit_pending") !== 0)) {
