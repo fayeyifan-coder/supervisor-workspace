@@ -8,7 +8,7 @@ const displayStatus={active:"执行中",draft:"待核对",history:"历史规划"
 const kinds={month:"月度目标",week:"每周任务",note:"补充事项"} as const;
 type Draft={kind:"manual";id:string;fields:PlanDraft}|{kind:"version";input:PlanVersionInput};
 
-export function StudyPlanStudentPanel({api,student,refresh,onActivity,revisionsEnabled}:{api:WorkspaceApi;student:Student;refresh:number;revisionsEnabled:boolean;
+export function StudyPlanStudentPanel({api,student,refresh,onActivity,revisionsEnabled,focusPlan}:{api:WorkspaceApi;student:Student;refresh:number;revisionsEnabled:boolean;focusPlan?:{id?:string;revision?:number;sequence:number};
   onActivity:(dirty:boolean,busy:boolean)=>void}){
  const [plans,setPlans]=useState<PlanRecord[]>();
  const [generation,setGeneration]=useState(0);
@@ -26,6 +26,9 @@ export function StudyPlanStudentPanel({api,student,refresh,onActivity,revisionsE
  const [taskChoice,setTaskChoice]=useState("");
  const id=student.id;
  const date=shanghaiParts(Date.now()).date;
+ useEffect(()=>{
+  if(focusPlan){setSelected(focusPlan.id??"");setBasis(focusPlan.revision??0);setSubject("");setMonth("");setWeek("");}
+ },[focusPlan]);
  useEffect(()=>{
   let active=true;
   api.studyPlans(id).then(result=>{

@@ -15,6 +15,7 @@ import { maxIntakeBytes } from "./intake-format";
 import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSupportedProfileOpen, validateProtection,
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
 import { documentLimit, emptyPlan, type PlanPickResult, type PlanSourceCell } from "./study-plan-model";
+import { readPlanBoard } from "./study-plan-overview";
 import { linkPlanTask, listPlanTasks } from "./study-plan-links";
 import { addManualStudyPlan, savePlanVersion, studentPlanViews } from "./study-plan-versions";
 import { parseStudyPlan } from "./study-plan-docx";
@@ -564,6 +565,10 @@ async function start(owner: string, profile: string, state: ActivationState, ope
   handleWrite(channels.savePlanVersion,(event,raw:unknown)=>invoke(event,()=>{
     if(m1Version<12)throw new WorkspaceFault("invalid","当前档案尚不支持执行规划。");
     return savePlanVersion(planningStore(),raw,m1Version>=13);
+  }));
+  handle(channels.studyPlanBoard,(event,raw:unknown)=>invoke(event,store=>{
+    if(m1Version<13||!operations)throw new WorkspaceFault("invalid","当前档案尚不支持学习规划总览。");
+    return readPlanBoard(planningStore(),operations.protectionConnection(),store.students(),raw);
   }));
   handle(channels.planTasks,(event,id:unknown)=>invoke(event,()=>{
     if(m1Version<13||!operations)throw new WorkspaceFault("invalid","当前档案尚不支持任务来源关联。");

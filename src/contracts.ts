@@ -2,7 +2,7 @@ export const channels = {
   students: "mvp:students",
   pickStudyPlans: "plan:pick", saveStudyPlan: "plan:save", studyPlans: "plan:list",
   studyPlanSource: "plan:source", createManualPlan: "plan:manual", savePlanVersion: "plan:version",
-  planTasks: "plan:tasks", linkPlanTask: "plan:link-task", exportStudyPlanSource: "plan:export-source",
+  studyPlanBoard: "plan:board", planTasks: "plan:tasks", linkPlanTask: "plan:link-task", exportStudyPlanSource: "plan:export-source",
   history: "mvp:history",
   createStudent: "mvp:create-student",
   studentEditAvailable: "mvp:student-edit-available",
@@ -194,6 +194,7 @@ export interface WorkspaceApi {
   saveStudyPlan(input: {token:string; studentId:string; confirmed:boolean; fields:import("./study-plan-model").PlanDraft}): Promise<Result<{id:string;duplicate:boolean}>>;
   createManualPlan(input:{studentId:string; id:string;fields:import("./study-plan-model").PlanDraft}): Promise<Result<string>>;
   savePlanVersion(input:import("./study-plan-model").PlanVersionInput): Promise<Result<import("./study-plan-model").PlanVersion>>;
+  studyPlanBoard(date:string):Promise<Result<import("./study-plan-model").PlanBoardData>>;
   planTasks(studentId:string): Promise<Result<import("./study-plan-model").PlanTask[]>>;
   linkPlanTask(input:import("./study-plan-model").PlanLinkInput): Promise<Result<import("./study-plan-model").PlanTaskLink>>;
   studyPlans(studentId: string): Promise<Result<import("./study-plan-model").PlanRecord[]>>;

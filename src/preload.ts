@@ -9,6 +9,7 @@ const api: WorkspaceApi = {
   saveStudyPlan: input => ipcRenderer.invoke("plan:save", input),
   createManualPlan: input=>ipcRenderer.invoke("plan:manual",input),
   savePlanVersion: input=>ipcRenderer.invoke("plan:version",input),
+  studyPlanBoard: date=>ipcRenderer.invoke("plan:board",date),
   planTasks: id=>ipcRenderer.invoke("plan:tasks",id),
   linkPlanTask: input=>ipcRenderer.invoke("plan:link-task",input),
   studyPlans: id => ipcRenderer.invoke("plan:list", id),

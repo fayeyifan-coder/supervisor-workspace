@@ -1,0 +1,75 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const {randomUUID}=require('node:crypto');
+const {exportFixture}=require('./export-fixture.cjs');
+const {emptyPlan}=require('../build/study-plan-model.js');
+const {addManualStudyPlan,savePlanVersion}=require('../build/study-plan-versions.js');
+const {readPlanBoard}=require('../build/study-plan-overview.js');
+const {prepareProtectionRestore,validateProtection}=require('../build/offline-protection.js');
+const {businessExportDocument}=require('../build/business-export.js');
+test('overview separates established plans from missing and date-unknown work across month and year boundaries',t=>{
+ const f=exportFixture(t,20,13),m1=f.m1,db=m1.protectionConnection(),[a,b]=m1.students();
+ const date='2030-01-01', now=Date.parse(date+'T08:00:00+08:00');
+ const row=(from,to,content)=>({id:randomUUID(),subject:'数学',month:'12月/1月',week:'第5周',kind:'week',
+  content,estimated:'',from,to,sources:[]});
+ const fields={...emptyPlan(),title:'合成跨年规划',subjects:['数学'],entries:[
+  row('2029-12-28','2030-01-02','合成跨年任务'),row('','','合成日期待核对'),row('2030-01-29','','合成月末任务')]};
+ const plan=addManualStudyPlan(db,a.id,randomUUID(),fields);
+ savePlanVersion(db,{planId:plan,studentId:a.id,requestId:randomUUID(),expectedRevision:0,effectiveOn:date,startsOn:'2029-12-01',
+  endsOn:'2030-02-01',state:'active',reason:'合成跨年生效',fields},now);
+ m1.saveStudentLifecycle({studentId:b.id,requestId:randomUUID(),expectedRevision:0,status:'archived',reason:'合成归档'});
+ const source=f.capture();
+ const overview=readPlanBoard(db,f.operations.protectionConnection(),m1.students(),date);
+ assert.equal(overview.rows.length,20);
+ assert.equal(overview.weekFrom,'2029-12-31');
+ assert.equal(overview.monthTo,'2030-01-31');
+ assert.equal(overview.rows.filter(x=>x.status==='missing').length,19);
+ assert.equal(overview.rows.at(-1).studentId,b.id);
+ const info=overview.rows.find(x=>x.studentId===a.id);
+ assert.equal(info.today[0].undated,1);
+ assert.equal(info.today[0].revision,1);
+ assert.equal(info.week.length,1);
+ assert.equal(info.month.length,2);
+ assert(info.month.every(x=>x.actual.length===0));
+ assert.equal(businessExportDocument(source,false).tables.length,33);
+ assert.throws(()=>prepareProtectionRestore(source,2,10),/不能降级/);
+ assert.equal(validateProtection(source).summary.m1Version,13);
+});
+
+test('v10 to v13 uses an independent native recovery and business export includes plans without Word bytes',async t=>{
+ const {join}=require('node:path');
+ const {ProtectionFiles}=require('../build/offline-protection.js');
+ const {businessExportPayload}=require('../build/business-export.js');
+ const {studyPlanDocx}=require('./study-plan-docx-fixture.cjs');
+ const {parseStudyPlan}=require('../build/study-plan-docx.js');
+ const {addStudyPlan,digestDocument}=require('../build/study-plans.js');
+ const original=exportFixture(t,1,10), before=original.capture();
+ const migrated=prepareProtectionRestore(before,2,13);
+ const loaded=validateProtection(migrated);
+ assert.deepEqual(loaded.images.slice(1),validateProtection(before).images.slice(1));
+ const io=new ProtectionFiles(join(__dirname,'../build/recovery-io.exe'));
+ const staged=await io.restore(original.dir,migrated);
+ const verified=await io.inspect(original.dir,staged.profileName,2,13);
+ assert(verified.bytes.equals(migrated));
+ const manifest=businessExportDocument(verified.bytes,false);
+ const originalData=businessExportDocument(before,false);
+ assert.deepEqual(manifest.tables.filter(row=>originalData.tables.some(x=>x.table===row.table)),originalData.tables);
+ const names=manifest.tables.filter(row=>!originalData.tables.some(x=>x.table===row.table));
+ assert.equal(names.length,4);
+ assert(names.every(row=>row.sourceRows===0));
+ const f=exportFixture(t,1,13);
+ const word=await studyPlanDocx(), parsed=parseStudyPlan(word);
+ addStudyPlan(f.m1.protectionConnection(),f.studentId,parsed.fields,{filename:'合成原件.docx',cells:parsed.cells,bytes:word,sha256:digestDocument(word)});
+ const full=businessExportDocument(f.capture(),true);
+ const payload=await businessExportPayload(full);
+ const json=JSON.parse(payload.files.find(x=>x.name==='business-data.json').bytes);
+ const table=json.tables.find(x=>x.table==='study_plan_sources');
+ assert.equal(table.rows[0].sha256,digestDocument(word));
+ assert(!('document_bytes' in table.rows[0]));
+ assert(table.rows[0].cells_json.includes('合成未知备注'));
+ const {Workbook}=require('exceljs');
+ const book=new Workbook();
+ await book.xlsx.load(payload.files.find(x=>x.name==='business-data.xlsx').bytes);
+ assert(book.getWorksheet(table.sheet));
+ assert.equal(book.getWorksheet('导出说明').getCell('B2').text.includes('v13'),true);
+});

@@ -12,7 +12,7 @@ const exe = fs.realpathSync.native(resolve(exeArg));
 assert(!/^D:\\SupervisorWorkspace\\/i.test(exe));
 assert.equal(process.platform, 'win32');
 const output = resolve(outputArg); fs.mkdirSync(output, { recursive: true });
-const profile = (mode === 'legacy' ? 'phase2-legacy-' : mode === 'student-management' ? 'sw-services-v8-management-' : mode === 'batch3' ? 'sw-services-v10-batch3-' : 'sw-services-v6-phase2-') + randomUUID().replaceAll('-', '');
+const profile = (mode === 'legacy' ? 'phase2-legacy-' : mode === 'student-management' ? 'sw-services-v8-management-' : mode === 'batch3' ? 'sw-services-v10-batch3-' : mode === 'batch4' ? 'sw-services-v13-batch4-' : 'sw-services-v6-phase2-') + randomUUID().replaceAll('-', '');
 const owner = mode === 'legacy' ? join('D:\\Codex-Development\\Temp',profile) : join('D:\\Codex-Development\\Temp\\sw-student-services-profiles', profile);
 assert(!fs.existsSync(owner));
 const E = "process.mainModule.require('electron')", W = E + '.BrowserWindow.getAllWindows()[0]';
@@ -69,6 +69,10 @@ async function choose(alias) { await ui('Array.from(document.querySelectorAll("a
 async function profileShot(name) { await main(W+'.setSize(1100,1000);true');await ui('window.scrollTo(0,0);true');await delay(120);await main(W+'.capturePage().then(i=>process.mainModule.require("node:fs").writeFileSync('+JSON.stringify(join(output,name))+',i.toPNG())).then(()=>true)'); }
 (async()=>{
  await launch();
+ if (mode === 'batch4') {
+  evidence.batch4 = await require('./study-plan-acceptance.cjs')({main, ui, api, ok, wait, click, profileShot, E, output, reopen: async () => { await close(); await launch(); }});
+  await close(); evidence.completed = true; fs.writeFileSync(join(output, 'acceptance.json'), JSON.stringify(evidence, null, 2)); return;
+ }
  if (mode === 'batch3') {
   evidence.batch3 = await require('./batch3-acceptance.cjs')({main, ui, api, ok, wait, click, profileShot, E, output, reopen: async () => { await close(); await launch(); }});
   await close(); evidence.completed = true; fs.writeFileSync(join(output, 'acceptance.json'), JSON.stringify(evidence, null, 2)); return;

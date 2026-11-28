@@ -94,9 +94,12 @@ function readDocument(document: Buffer): Extracted {
     if(name==="p"&&current?.depth===stack.length){
       paragraphStack.pop();
       if(current.cell){current.cell.text+=(current.cell.text?"\n":"")+current.text;}
-      else if(current.text.trim()){
-        const line={ref:"p"+(++paragraph),text:current.text};
-        result.paragraphs.push(line);result.cells.push(line);
+      else {
+        paragraph++;
+        if(current.text.trim()){
+          const line={ref:"p"+paragraph,text:current.text};
+          result.paragraphs.push(line);result.cells.push(line);
+        }
       }
     } else if(name==="tc"&&table?.cell){table.column+=table.cell.span??1;table.cell=undefined;}
     else if(name==="tbl")tableStack.pop();
@@ -112,7 +115,7 @@ function readDocument(document: Buffer): Extracted {
   return result;
 }
 
-const monthPattern=/((?:20\d{2}\s*年\s*)?(?:1[0-2]|0?[1-9]|十[一二]?|[一二三四五六七八九])\s*月)/u;
+const monthPattern=/(?<!\d)((?:20\d{2}\s*年\s*)?(?:1[0-2]|0?[1-9]|十[一二]?|[一二三四五六七八九])\s*月)/u;
 const weekPattern=/^(?:第\s*[一二三四五六七八九十\d]+\s*周|周次\s*[一二三四五六七八九十\d]+)$/u;
 const subjects="语文 数学 英语 物理 化学 生物 科学 道德与法治 历史 地理 政治 信息技术".split(" ");
 function meaningful(line:string){return line.trim().replace(/^(?:[\d一二三四五六七八九十]+[、.．)）]\s*)/u,"");}
@@ -171,7 +174,9 @@ export function parseStudyPlan(input:Buffer): {fields:PlanDraft;cells:PlanSource
       if(weekHeaders.length&&!label){
         for(const [j,cell] of row.entries()){
           if(!j||!cell.text.trim()||!weekPattern.test(weekHeaders[j]?.text.trim()??""))continue;
-          add({subject:"",month,week:weekHeaders[j].text.trim(),kind:"week",content:cell.text,estimated:"",
+          const subject=subjects.find(item=>head===item||head===item+"学习")??"";
+          if(subject&&!fields.subjects.includes(subject))fields.subjects.push(subject);
+          add({subject,month,week:weekHeaders[j].text.trim(),kind:"week",content:cell.text,estimated:"",
             sources:[weekHeaders[j].ref,cell.ref]});
         }
         continue;

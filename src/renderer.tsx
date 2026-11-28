@@ -8,6 +8,7 @@ import { WeeklySchedulePanel } from "./WeeklySchedulePanel";
 import { DataProtectionPanel } from "./DataProtectionPanel";
 import { BusinessExportPanel } from "./BusinessExportPanel";
 import { StudentIntakePanel } from "./StudentIntakePanel";
+import { StudyPlanBoard } from "./StudyPlanBoard";
 import { StudyPlanStudentPanel } from "./StudyPlanStudentPanel";
 import { StudyPlanImportPanel } from "./StudyPlanImportPanel";
 import "./study-plans.css";
@@ -146,7 +147,7 @@ function App() {
   }, [api]);
   const [students, setStudents] = useState<Student[]>();
   const [scheduleEnabled, setScheduleEnabled] = useState<boolean>();
-  const [page, setPage] = useState<"schedule" | "board" | "students">("schedule");
+  const [page, setPage] = useState<"schedule" | "board" | "students" | "plan-board">("schedule");
   const [protectionOpen, setProtectionOpen] = useState(false);
   const [protectionBusy, setProtectionBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
@@ -169,7 +170,8 @@ function App() {
     setRecordActivity(old => old[kind]?.dirty === dirty && old[kind]?.busy === busy ? old : { ...old, [kind]: { dirty, busy } });
   }, []);
   const [parentFollowUpEnabled, setParentFollowUpEnabled] = useState(false);
-  const [profileReturn, setProfileReturn] = useState<"schedule" | "board">();
+  const [profileReturn, setProfileReturn] = useState<"schedule" | "board" | "plan-board">();
+  const [planJump,setPlanJump]=useState<{studentId:string;id?:string;revision?:number;sequence:number}>();
   const entry = useRef<{ trigger: HTMLButtonElement; scroll: number }>(null);
   const scheduleNav = useRef<HTMLButtonElement>(null);
   const [activeId, setActiveId] = useState<string>();
@@ -366,11 +368,12 @@ function App() {
     restoreEntry();
   }
 
-  function openLinkedStudent(studentId: string, origin: "schedule" | "board", trigger: HTMLButtonElement): boolean {
+  function openLinkedStudent(studentId: string, origin: "schedule" | "board" | "plan-board", trigger: HTMLButtonElement): boolean {
     if (!students?.some(student => student.id === studentId) || locked || editorBusy || intakeOpen) return false;
     if ((studentId !== activeId || creating) && !canLeaveStudentDrafts()) return false;
     entry.current = { trigger, scroll: window.scrollY };
     setActiveId(studentId);
+    if(origin!=="plan-board")setPlanJump(undefined);
     setCreating(false);
     setNotice(undefined);
     setProfileReturn(origin);
@@ -413,6 +416,8 @@ function App() {
           workspaceInfo?.mode === "synthetic" ? "合成验收 · 仅用虚构学生" : "档案模式待确认"}</span>
         <button className="secondary" type="button" aria-expanded={protectionOpen} aria-controls="data-export-center"
           disabled={protectionBusy || exportBusy} onClick={() => setProtectionOpen(open => !open)}>数据导出与备份</button>
+        {studentRecordVersion>=13&&students&&<button type="button" className="secondary" aria-current={page==="plan-board"&&!learning?"page":undefined}
+          disabled={locked||editorBusy||intakeOpen} onClick={()=>navigate("plan-board")}>学习规划总览</button>}
         {studentRecordVersion >= 11 && students && <button type="button" className="secondary" disabled={locked || editorBusy || intakeOpen}
           onClick={()=>setPlanImportOpen(true)}>导入 Word 规划</button>}
         {scheduleEnabled && <>
@@ -443,7 +448,7 @@ function App() {
     {!showingWorkspace && !students && listError && <button type="button" className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取档案</button>}
     {scheduleEnabled && students && <div hidden={page !== "schedule" && !learning}>
       <WeeklySchedulePanel api={api} recurringEnabled={studentRecordVersion >= 9} flexEnabled={studentRecordVersion >= 10} students={students} studentId={studentFilter} setStudentId={setStudentFilter}
-        learning={learning} learningBackLabel={page === "board" ? "返回今日到校" : page === "students" ? "返回学生概览" : undefined} onLearning={openLearning} onExitLearning={closeLearning}
+        learning={learning} learningBackLabel={page === "plan-board" ? "返回规划总览" : page === "board" ? "返回今日到校" : page === "students" ? "返回学生概览" : undefined} onLearning={openLearning} onExitLearning={closeLearning}
         learningLeaveGuard={learningLeaveGuard} onStudent={(id, trigger) => openLinkedStudent(id, "schedule", trigger)}
         summary={<section className="schedule-attendance" aria-labelledby="schedule-attendance-title">
           <h2 id="schedule-attendance-title">今日到校{attendance.result?.ok && <> · <time dateTime={attendance.result.value.date}>{attendance.result.value.date}</time></>}</h2>
@@ -452,6 +457,13 @@ function App() {
             : <p role="alert">{attendance.result.message}</p>}
         </section>} />
     </div>}
+    {studentRecordVersion>=13&&<div hidden={page!=="plan-board"||Boolean(learning)}><StudyPlanBoard api={api} refresh={planRefresh} visible={page==="plan-board"&&!learning}
+      onLearning={openLearning} onPlan={(studentId,id,revision,trigger)=>{
+        if(planEdit.dirty&&!canLeaveStudentDrafts())return;
+        if(openLinkedStudent(studentId,"plan-board",trigger)){
+          setPlanJump(old=>({studentId,id,revision,sequence:(old?.sequence??0)+1}));
+        }
+      }}/></div>}
     {scheduleEnabled && students && <div hidden={page !== "board" || Boolean(learning)}>
       <AttendanceBoard api={api} result={attendance.result} reload={attendance.reload} students={students}
         onStudent={(id, trigger) => openLinkedStudent(id, "board", trigger)} onLearning={openLearning} />
@@ -512,13 +524,15 @@ function App() {
           {showStudentForm ? <StudentForm key={formVersion} disabled={locked} submit={input => void save({ kind: "student", input })} />
             : active && <StudentDetail student={active} api={api} intakeOpen={intakeOpen}
               overviewVisible={showingWorkspace && !learning}
-              studyPlan={studentRecordVersion>=12&&<StudyPlanStudentPanel key={active.id} api={api} student={active}
-                refresh={planRefresh} onActivity={planActivity} revisionsEnabled={studentRecordVersion>=13}/>}
+              focusPlan={planJump?.studentId===active.id?planJump.sequence:undefined}
+              studyPlan={studentRecordVersion>=12&&<StudyPlanStudentPanel key={active.id+":"+(planJump?.studentId===active.id?planJump.sequence:0)} api={api} student={active}
+                refresh={planRefresh} onActivity={planActivity} revisionsEnabled={studentRecordVersion>=13}
+                focusPlan={planJump?.studentId===active.id?planJump:undefined}/>}
               overview={studentRecordVersion >= 8 ? openSource => <StudentOverview key={active.id} studentId={active.id}
                 api={api} openSource={openSource} openVisit={openLearning} /> : undefined}
               actions={scheduleEnabled && <div className="schedule-heading-actions">
                 {profileReturn && <button className="secondary" type="button" disabled={editorBusy} onClick={returnToOrigin}>
-                  {profileReturn === "board" ? "返回今日到校" : "返回课表"}
+                  {profileReturn === "plan-board" ? "返回规划总览" : profileReturn === "board" ? "返回今日到校" : "返回课表"}
                 </button>}
                 <button className="secondary" type="button" disabled={locked || editorBusy}
                   onClick={() => {

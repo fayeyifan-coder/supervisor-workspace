@@ -36,3 +36,12 @@ export interface PlanTaskLink {taskId:string;studentId:string;planId:string;revi
 export interface PlanTask {id:string;date:string;subject:string;content:string;status:"planned"|"in_progress"|"done"|"skipped";
  attendanceId:string|null;blockId:string;link:PlanTaskLink|null}
 export interface PlanLinkInput {studentId:string;taskId:string;planId:string;revision:number;entryId:string}
+
+export interface PlanBoardEntry {key:string;studentId:string;planId:string;planTitle:string;revision:number;entry:PlanEntry;actual:PlanTask[]}
+export interface PlanBoardRow {
+ studentId:string;alias:string;grade:string;lifecycle:"active"|"paused"|"archived";status:"active"|"missing"|"review"|"history";
+ imported:number;plans:number;subjects:string[];
+ today:{id:string;title:string;revision:number;subjects:string[];undated:number;unassigned:number}[];
+ pending:{id:string;title:string}[];week:PlanBoardEntry[];month:PlanBoardEntry[];
+}
+export interface PlanBoardData {date:string;weekFrom:string;weekTo:string;monthFrom:string;monthTo:string;rows:PlanBoardRow[]}

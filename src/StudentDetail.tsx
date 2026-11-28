@@ -60,11 +60,11 @@ function ImportSources({ api, student }: { api: WorkspaceApi; student: Student }
   </section>;
 }
 
-export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, lifecycle, overview, overviewVisible, recordPanels, studyPlan }: {
+export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, lifecycle, overview, overviewVisible, recordPanels, studyPlan, focusPlan }:  {
   student: Student; api: WorkspaceApi; intakeOpen: boolean;
   actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode; parentFollowUp?: ReactNode; lifecycle?: ReactNode;
   overview?: (open: (section: OverviewSection, recordId?: string) => void) => ReactNode; overviewVisible?: boolean;
-  studyPlan?: ReactNode;
+  studyPlan?: ReactNode; focusPlan?: number;
   recordPanels: { id: StudentRecordKind; label: string; content: ReactNode }[];
 }) {
   const tabs: { id: Section; label: string; enabled: boolean }[] = [
@@ -82,6 +82,8 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
   ];
   const available = tabs.filter(tab => tab.enabled);
   const [selection, setSelection] = useState<{ studentId: string; section: Section }>();
+  useEffect(()=>{if(focusPlan!==undefined&&studyPlan)setSelection({studentId:student.id,section:"study-plan"});},
+    [focusPlan,student.id]);
   // Forget the prior student's explicit choice even if no tab is clicked on the next student.
   if (selection && selection.studentId !== student.id) setSelection(undefined);
   // Derive the new student's tab during render; do not unmount the detail tree to reset it.

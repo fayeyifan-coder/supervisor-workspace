@@ -8,3 +8,6 @@
 .study-plan-import code { overflow-wrap:anywhere; }
 
 .study-plan-text { white-space:pre-wrap; overflow-wrap:anywhere; }
+
+.study-board-rows { list-style:none; padding:0; display:grid; gap:12px; }
+.study-plan-board .attendance-overview { margin-block:14px; }
