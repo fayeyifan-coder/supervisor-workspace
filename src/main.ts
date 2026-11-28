@@ -19,6 +19,7 @@ import { readPlanBoard } from "./study-plan-overview";
 import { linkPlanTask, listPlanTasks } from "./study-plan-links";
 import { getDailyContext } from "./learning-daily";
 import { readTracking } from "./learning-tracking";
+import { readReview } from "./learning-week-review";
 import { addManualStudyPlan, savePlanVersion, studentPlanViews } from "./study-plan-versions";
 import { parseStudyPlan } from "./study-plan-docx";
 import { addStudyPlan, digestDocument, listStudyPlans, planExists, planId, planObject, studyPlanSource } from "./study-plans";
@@ -305,6 +306,14 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       return studentWrites.resolve(store, action, requestId);
     }));
   handleWrite(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
+  handle(channels.weeklyReview,(event,student:unknown,range:unknown)=>invoke(event,store=>{
+    if(m1Version<16||!operations||!workLog)throw new WorkspaceFault("invalid","当前档案尚不支持每周复盘。");
+    return readReview({m1:store.protectionConnection(),ops:operations.protectionConnection(),work:workLog.protectionConnection()},student,range);
+  }));
+  handleWrite(channels.saveWeeklyReview,(event,raw:unknown)=>invoke(event,store=>{
+    if(m1Version<16||!operations||!workLog||operationsPending.state().kind!=="empty")throw new WorkspaceFault("recovery","复盘需要已确认的教务事实。");
+    return store.saveWeeklyReview(operations.protectionConnection(),workLog.protectionConnection(),raw);
+  }));
   handle(channels.learningTracking,(event,student:unknown)=>invoke(event,store=>{
     if(m1Version<15||!workLog)throw new WorkspaceFault("invalid","当前档案尚不支持单元检测。");
     return readTracking(store.protectionConnection(),workLog.protectionConnection(),student);

@@ -15,6 +15,7 @@ import "./study-plans.css";
 import { StudentDetail } from "./StudentDetail";
 import { QuickLearningPanel } from "./QuickLearningPanel";
 import { LearningTrackingPanel } from "./LearningTrackingPanel";
+import { WeeklyReviewPanel } from "./WeeklyReviewPanel";
 import { StudentEditPanel } from "./StudentEditPanel";
 import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
 import { TrainingForPlan } from "./TrainingForPlan";
@@ -168,6 +169,8 @@ function App() {
   const quickStudent=students?.find(student=>student.id===quick?.studentId);
   function openQuick(studentId:string,attendanceId?:string){if(quick)return;setQuick({studentId,attendanceId});requestAnimationFrame(()=>document.querySelector(".quick-learning")?.scrollIntoView());}
   const [planRefresh,setPlanRefresh]=useState(0);
+  const [reviewEdit,setReviewEdit]=useState({dirty:false,busy:false});
+  const reviewActivity=useCallback((dirty:boolean,busy:boolean)=>setReviewEdit(old=>old.dirty===dirty&&old.busy===busy?old:{dirty,busy}),[]);
   const [unitEdit,setUnitEdit]=useState({dirty:false,busy:false});
   const unitActivity=useCallback((dirty:boolean,busy:boolean)=>setUnitEdit(old=>old.dirty===dirty&&old.busy===busy?old:{dirty,busy}),[]);
   const [planEdit,setPlanEdit]=useState({dirty:false,busy:false});
@@ -320,7 +323,7 @@ function App() {
   const active = students?.find(student => student.id === activeId);
   const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
-  const editorBusy = unitEdit.busy || planEdit.busy || lifecycleBusy || growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
+  const editorBusy = reviewEdit.busy || unitEdit.busy || planEdit.busy || lifecycleBusy || growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
   useLayoutEffect(() => {
     window.profileSwitchReady = freeze => {
       if (locked || editorBusy || intakeOpen || intakeBusy || learning || lifecycleDirty || growthDirty || studentEditDirty ||
@@ -337,10 +340,11 @@ function App() {
 
   function canLeaveStudentDrafts(): boolean {
     if (editorBusy) return false;
-    if ((unitEdit.dirty || planEdit.dirty || lifecycleDirty || growthDirty || studentEditDirty || parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty)) &&
+    if ((reviewEdit.dirty || unitEdit.dirty || planEdit.dirty || lifecycleDirty || growthDirty || studentEditDirty || parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty)) &&
         !window.confirm("学生档案有未保存输入，确定离开并放弃吗？")) return false;
     setPlanEdit({dirty:false,busy:false});
     setUnitEdit({dirty:false,busy:false});
+    setReviewEdit({dirty:false,busy:false});
     setLifecycleDirty(false);
     setGrowthDirty(false);
     setStudentEditDirty(false);
@@ -373,6 +377,7 @@ function App() {
   function closeLearning() {
     setLearning(undefined);
     attendance.reload();
+    setPlanRefresh(n=>n+1);
     restoreEntry();
   }
 
@@ -535,6 +540,8 @@ function App() {
             : active && <StudentDetail student={active} api={api} intakeOpen={intakeOpen}
               overviewVisible={showingWorkspace && !learning}
               focusPlan={planJump?.studentId===active.id?planJump.sequence:undefined}
+              weeklyReview={studentRecordVersion>=16&&<WeeklyReviewPanel key={active.id} api={api} studentId={active.id} refresh={planRefresh}
+                onActivity={reviewActivity}/>}
               learningTracking={studentRecordVersion>=15&&<LearningTrackingPanel key={active.id} api={api} studentId={active.id}
                 onActivity={unitActivity} onSaved={()=>setPlanRefresh(n=>n+1)}/>}
               studyPlan={studentRecordVersion>=12&&<StudyPlanStudentPanel key={active.id+":"+(planJump?.studentId===active.id?planJump.sequence:0)} api={api} student={active}

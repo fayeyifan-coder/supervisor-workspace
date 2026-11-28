@@ -45,11 +45,12 @@ const planLinkTable = table("mvp", "study_plan_links", "学习任务与规划来
  "task_id,student_id,plan_id,revision,entry_id,linked_at,basis_revision", "history");
 const dailyDetails = table("mvp","learning_record_details","每日学习登记明细","lesson_id,attendance_id,task_id,prior_task_id,details_json");
 const trackingHistory = table("mvp","learning_unit_events","学科单元与检测历史","entity_id,revision,request_id,student_id,changed_on,saved_at,payload","history");
+const reviewHistory = table("mvp","learning_week_reviews","每周学习复盘历史","student_id,from_on,to_on,revision,request_id,saved_at,state,source_digest,snapshot_json,notes_json","history");
 export const exportTablesFor = (version: number) =>
-  [...exportTables, ...(version >= 8 ? [lifecycleTable] : []), ...(version >= 9 ? recurringTables : []), ...(version >= 10 ? [attendanceExceptionTable] : []), ...(version >= 11 ? studyPlanTables : []), ...(version >= 12 ? [planVersionTable] : []), ...(version >= 13 ? [planLinkTable] : []), ...(version >= 14 ? [dailyDetails] : []), ...(version >= 15 ? [trackingHistory] : [])];
+  [...exportTables, ...(version >= 8 ? [lifecycleTable] : []), ...(version >= 9 ? recurringTables : []), ...(version >= 10 ? [attendanceExceptionTable] : []), ...(version >= 11 ? studyPlanTables : []), ...(version >= 12 ? [planVersionTable] : []), ...(version >= 13 ? [planLinkTable] : []), ...(version >= 14 ? [dailyDetails] : []), ...(version >= 15 ? [trackingHistory] : []), ...(version >= 16 ? [reviewHistory] : [])];
 
 export const columnLabels: Record<string, string> = {
- changed_on:"状态变化日期", lesson_id:"学习记录身份", attendance_id:"实际到课身份", prior_task_id:"引用未完成任务身份", details_json:"教学结构化明细",
+ from_on:"复盘起日", to_on:"复盘止日", source_digest:"事实来源摘要", notes_json:"人工复盘字段", changed_on:"状态变化日期", lesson_id:"学习记录身份", attendance_id:"实际到课身份", prior_task_id:"引用未完成任务身份", details_json:"教学结构化明细",
  sha256: "原件 SHA256", filename: "原件文件名", byte_length: "原件字节数", imported_at: "导入时间戳",
  cells_json: "原文位置与文本", document_bytes: "Word 二进制原件", source_sha256: "关联原件 SHA256", task_id: "实际学习任务身份", entry_id: "规划条目身份", linked_at: "关联时间戳", basis_revision: "关联依据学习块修订", effective_on: "修订生效日", fields_json: "执行版本完整字段", initial_json: "不可变初始规划",
  id: "记录身份", entity_id: "实体身份", request_id: "请求身份", student_id: "学生UUID", alias: "学生代号",
