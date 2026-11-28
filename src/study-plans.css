@@ -4,7 +4,9 @@
 .study-plan-original { display:grid; gap:8px; max-height:24rem; overflow:auto; }
 .study-plan-original > div { padding:8px; border-bottom:1px solid #d5ddd1; }
 .study-plan-original dd { margin:4px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
-.study-plan-file-list { display:flex; flex-wrap:wrap; gap:8px; padding-left: 1.4rem; }
+.study-plan-file-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap:8px; padding:0; list-style:none; }
+.study-plan-file-list button { width:100%; text-align:left; overflow-wrap:anywhere; }
+.study-plan-file-list button[aria-pressed="true"] { border-color:#567160; background:#e3ebe0; }
 .study-plan-import code { overflow-wrap:anywhere; }
 
 .study-plan-text { white-space:pre-wrap; overflow-wrap:anywhere; }

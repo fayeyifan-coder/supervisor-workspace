@@ -44,10 +44,10 @@ export function StudyPlanImportPanel({api,students,onClose,onSaved}:{api:Workspa
   <p className="muted">一次选择 1 至 20 份 Word 文件。逐份核对学生身份与学科后保存。单份原件上限 512 KiB。</p>
   <button type="button" className="primary" disabled={busy} onClick={()=>void pick()}>选择 Word 文件</button>
   {status&&<p role="status" aria-live="polite">{status}</p>}
-  {files.length>0&&<ol className="study-plan-file-list">{files.map((file,index)=><li key={index}>
+  {files.length>0&&<ul className="study-plan-file-list">{files.map((file,index)=><li key={index}>
    <button type="button" className="secondary" disabled={busy} aria-pressed={selected===index} onClick={()=>{setSelected(index);setStatus("");}}>
     {file.name} · {file.issue?"需人工处理":file.review&&drafts[file.review.token]?.result?"已处理":"待核对"}
-   </button></li>)}</ol>}
+   </button></li>)}</ul>}
   {files[selected]?.issue&&<p role="alert">{files[selected].issue} 可在 Word 本地另存为 DOCX 后重试，或在学生档案人工新建规划。</p>}
   {review&&draft&&<div>
    <h3>{review.name}</h3>

@@ -1,5 +1,8 @@
 const assert=require('node:assert/strict');
-const { randomUUID }=require('node:crypto');
+const { createHash, randomUUID }=require('node:crypto');
+const { DatabaseSync }=require('node:sqlite');
+const { Workbook }=require('exceljs');
+const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const { join }=require('node:path');
 const { writeFile,readFile }=require('node:fs/promises');
 const { studyPlanDocx }=require('../test/study-plan-docx-fixture.cjs');
@@ -92,6 +95,18 @@ module.exports=async function verifyStudyPlanning({main,ui,api,ok,wait,click,pro
  await click('查看原文与来源');
  await wait(()=>ui('document.querySelector("#student-section-study-plan .study-plan-original")?.innerText.includes("合成未知备注")'));
  await profileShot('student-study-plan.png');
+ await click('手工新建规划','#student-section-study-plan button');
+ assert.equal(await ui('window.profileSwitchReady(false)'),false);
+ const chooseOther=()=>ui('Array.from(document.querySelectorAll("aside button")).find(x=>x.textContent.includes('+JSON.stringify(other.alias)+')).click();true');
+ await ui('window.confirm=()=>false;true');
+ await chooseOther();
+ assert(await ui('document.querySelector("#student-section-study-plan")?.innerText.includes("合成半年学习规划 1")'));
+ assert(await ui('Boolean(document.querySelector("#student-section-study-plan form"))'));
+ await ui('window.confirm=()=>true;true');
+ await chooseOther();
+ await click('学习规划','.student-detail-nav button');
+ await wait(()=>ui('document.querySelector("#student-section-study-plan")?.innerText.includes("合成半年学习规划 2")'),'other student planning');
+ assert.equal(await ui('Boolean(document.querySelector("#student-section-study-plan .study-plan-original"))'),false);
  await reopen();
  const reopened=ok(await api('studyPlans',student.id))[0];
  assert.equal(reopened.versions.length,2);
@@ -100,10 +115,33 @@ module.exports=async function verifyStudyPlanning({main,ui,api,ok,wait,click,pro
  const backup=ok(await api('exportProtection'));
  const checked=validateProtection(await readFile(backup.location));
  assert.equal(checked.summary.m1Version,13);
+ const image=new DatabaseSync(':memory:');
+ try{
+  image.deserialize(Buffer.from(checked.images[0]));
+  const originals=image.prepare('SELECT sha256,document_bytes FROM study_plan_sources').all();
+  assert.equal(originals.length,20);
+  assert.deepEqual(originals.map(row=>row.sha256).sort(),reviews.map(row=>row.review.sha256).sort());
+  for (const row of originals) assert.equal(digest(row.document_bytes),row.sha256);
+ }finally{image.close();}
  const exportPreview=ok(await api('prepareBusinessExport',{includeSourceText:false}));
  assert.equal(exportPreview.tables.length,33);
- assert(exportPreview.tables.find(row=>row.table==='study_plan_sources').excludedColumns.includes('document_bytes'));
- ok(await api('cancelBusinessExport',exportPreview.token));
+ const metadata=exportPreview.tables.find(row=>row.table==='study_plan_sources');
+ assert(metadata.excludedColumns.includes('document_bytes'));
+ const published=ok(await api('writeBusinessExport',exportPreview.token));
+ for(const file of published.files) assert.equal(digest(await readFile(join(published.location,file.name))),file.sha256);
+ const json=JSON.parse(await readFile(join(published.location,'business-data.json'),'utf8'));
+ const workbook=new Workbook();
+ await workbook.xlsx.readFile(join(published.location,'business-data.xlsx'));
+ assert.equal(json.m1Version,13);
+ for(const [table,expected] of [['study_plan_sources',20],['study_plans',20],['study_plan_versions',2],['study_plan_links',1]]){
+  const mapping=json.tables.find(row=>row.table===table);
+  assert.equal(mapping.rows.length,expected);
+  assert.equal(workbook.getWorksheet(mapping.sheet).rowCount,expected+1);
+ }
+ const originalRows=json.tables.find(row=>row.table==='study_plan_sources').rows;
+ assert.deepEqual(originalRows.map(row=>row.sha256).sort(),reviews.map(row=>row.review.sha256).sort());
+ assert(originalRows.every(row=>!('document_bytes' in row)&&!('cells_json' in row)));
  return {version,schema:13,students:20,files:20,pickerCancel:true,limitEnforced:true,partialFailure:true,duplicateRetry:true,
-   historicalTaskVersion:1,activePlans:1,backup:backup.location,tableCount:33,screenshots:['word-import.png','planning-overview.png','student-study-plan.png']};
+   studentSwitchDraftGuard:true,historicalTaskVersion:1,activePlans:1,backup:backup.location,backupWordDigests:20,tableCount:33,
+   businessExport:published.location,businessExportFiles:published.files,screenshots:['word-import.png','planning-overview.png','student-study-plan.png']};
 };
