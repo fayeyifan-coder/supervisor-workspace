@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { freemem } from "node:os";
 import { DatabaseSync } from "node:sqlite";
+import { verifyPlanVersions } from "./study-plan-versions";
 import { studyPlanTables, verifyStudyPlans } from "./study-plans";
 import { verifyStudentLifecycle } from "./student-lifecycle";
 import { isM1Version, m1Protection, m1ProtectionLayout, verifyStudentEdits, WorkspaceFault, type M1Version } from "./database";
@@ -119,6 +120,7 @@ function checkImage(db: DatabaseSync, layout: Layout): void {
   if (layout.key === "mvp" && layout.version >= 4) verifyStudentRecords(db, layout.version);
   if (layout.key === "mvp" && layout.version >= 8) verifyStudentLifecycle(db);
   if (layout.key === "mvp" && layout.version >= 11) verifyStudyPlans(db);
+  if (layout.key === "mvp" && layout.version >= 12) verifyPlanVersions(db);
 }
 
 function imageSize(source: DatabaseSync, layout: Layout): number {
@@ -230,6 +232,9 @@ function summary(dbs: DatabaseSync[], manifest: Omit<Manifest, "databases">): Pr
   }
   if (manifest.m1UpgradedFrom && m1Version >= 11 && (manifest.m1SourceVersion ?? 1) < 11 && studyPlanTables.some(table => count(m1,table))) {
     reject("升级新增的学习规划表必须为空。");
+  }
+  if (manifest.m1UpgradedFrom && m1Version >= 12 && (manifest.m1SourceVersion ?? 1) < 12 && count(m1,"study_plan_versions")) {
+    reject("升级新增的规划执行修订表必须为空。");
   }
   return { createdAt: manifest.createdAt, applicationVersion: manifest.applicationVersion,
     formatVersion: manifest.formatVersion, m1Version,

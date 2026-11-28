@@ -8,6 +8,7 @@ import { WeeklySchedulePanel } from "./WeeklySchedulePanel";
 import { DataProtectionPanel } from "./DataProtectionPanel";
 import { BusinessExportPanel } from "./BusinessExportPanel";
 import { StudentIntakePanel } from "./StudentIntakePanel";
+import { StudyPlanStudentPanel } from "./StudyPlanStudentPanel";
 import { StudyPlanImportPanel } from "./StudyPlanImportPanel";
 import "./study-plans.css";
 import { StudentDetail } from "./StudentDetail";
@@ -161,6 +162,8 @@ function App() {
   const [studentRecordVersion, setStudentRecordVersion] = useState(0);
   const [planImportOpen,setPlanImportOpen]=useState(false);
   const [planRefresh,setPlanRefresh]=useState(0);
+  const [planEdit,setPlanEdit]=useState({dirty:false,busy:false});
+  const planActivity=useCallback((dirty:boolean,busy:boolean)=>setPlanEdit(old=>old.dirty===dirty&&old.busy===busy?old:{dirty,busy}),[]);
   const [recordActivity, setRecordActivity] = useState<Partial<Record<StudentRecordKind, { dirty: boolean; busy: boolean }>>>({});
   const onRecordActivity = useCallback((kind: StudentRecordKind, dirty: boolean, busy: boolean) => {
     setRecordActivity(old => old[kind]?.dirty === dirty && old[kind]?.busy === busy ? old : { ...old, [kind]: { dirty, busy } });
@@ -308,7 +311,7 @@ function App() {
   const active = students?.find(student => student.id === activeId);
   const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
-  const editorBusy = lifecycleBusy || growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
+  const editorBusy = planEdit.busy || lifecycleBusy || growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
   useLayoutEffect(() => {
     window.profileSwitchReady = freeze => {
       if (locked || editorBusy || intakeOpen || intakeBusy || learning || lifecycleDirty || growthDirty || studentEditDirty ||
@@ -325,8 +328,9 @@ function App() {
 
   function canLeaveStudentDrafts(): boolean {
     if (editorBusy) return false;
-    if ((lifecycleDirty || growthDirty || studentEditDirty || parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty)) &&
+    if ((planEdit.dirty || lifecycleDirty || growthDirty || studentEditDirty || parentFollowUpDirty || Object.values(recordActivity).some(activity => activity.dirty)) &&
         !window.confirm("学生档案有未保存输入，确定离开并放弃吗？")) return false;
+    setPlanEdit({dirty:false,busy:false});
     setLifecycleDirty(false);
     setGrowthDirty(false);
     setStudentEditDirty(false);
@@ -508,6 +512,8 @@ function App() {
           {showStudentForm ? <StudentForm key={formVersion} disabled={locked} submit={input => void save({ kind: "student", input })} />
             : active && <StudentDetail student={active} api={api} intakeOpen={intakeOpen}
               overviewVisible={showingWorkspace && !learning}
+              studyPlan={studentRecordVersion>=12&&<StudyPlanStudentPanel key={active.id} api={api} student={active}
+                refresh={planRefresh} onActivity={planActivity}/>}
               overview={studentRecordVersion >= 8 ? openSource => <StudentOverview key={active.id} studentId={active.id}
                 api={api} openSource={openSource} openVisit={openLearning} /> : undefined}
               actions={scheduleEnabled && <div className="schedule-heading-actions">

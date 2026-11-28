@@ -93,6 +93,14 @@ export function studyPlanSource(db:DatabaseSync,studentId:string,id:string){
   if(!row||!(row.document_bytes instanceof Uint8Array)||digestDocument(row.document_bytes)!==row.sha256)return invalid("找不到已校验的原始 Word 文件。");
   return {metadata:documentRecord(row),cells:checkCells(JSON.parse(String(row.cells_json))),bytes:Buffer.from(row.document_bytes)};
 }
+export function checkPlanBudget(db:DatabaseSync, extra:number){
+  const version=Number(db.prepare("PRAGMA user_version").get()?.user_version);
+  const revisionBytes=version>=12?" +(SELECT coalesce(sum(length(cast(fields_json AS BLOB))+length(cast(reason AS BLOB))),0) FROM study_plan_versions)":"";
+  const used=Number(db.prepare(`SELECT (SELECT coalesce(sum(byte_length+length(cast(cells_json AS BLOB))),0) FROM study_plan_sources)
+    +(SELECT coalesce(sum(length(cast(initial_json AS BLOB))),0) FROM study_plans)`+revisionBytes+" AS n").get()?.n??0);
+  const pageBytes=Number(db.prepare("PRAGMA page_count").get()?.page_count)*Number(db.prepare("PRAGMA page_size").get()?.page_size);
+  if(used+extra>attachmentBudget||extra>0&&pageBytes+extra+1024*1024>32*1024*1024)invalid("规划存储预算不足。现有数据仍可完整备份。");
+}
 export function addStudyPlan(db:DatabaseSync, studentId:string, raw:unknown, source:DocumentInput, id: string = randomUUID()):{id:string;duplicate:boolean}{
   planId(studentId);planId(id);
   if(!db.prepare("SELECT 1 FROM students WHERE id=?").get(studentId))invalid("请选择现有学生并确认身份。");
@@ -102,11 +110,7 @@ export function addStudyPlan(db:DatabaseSync, studentId:string, raw:unknown, sou
   const prior=db.prepare("SELECT id,student_id FROM study_plans WHERE source_sha256=?").get(source.sha256);
   if(prior){if(prior.student_id!==studentId)conflict("原件已与另一份学生档案关联，请人工核对。");return {id:String(prior.id),duplicate:true};}
   const cellsJson=JSON.stringify(cells), payload=JSON.stringify(fields), now=Date.now();
-  const used=Number(db.prepare(`SELECT (SELECT coalesce(sum(byte_length+length(cast(cells_json AS BLOB))),0) FROM study_plan_sources)
-    +(SELECT coalesce(sum(length(cast(initial_json AS BLOB))),0) FROM study_plans) AS n`).get()?.n??0);
-  const projected=source.bytes.length+Buffer.byteLength(cellsJson)+Buffer.byteLength(payload);
-  const pageBytes=Number(db.prepare("PRAGMA page_count").get()?.page_count)*Number(db.prepare("PRAGMA page_size").get()?.page_size);
-  if(used+projected>attachmentBudget||pageBytes+projected+1024*1024>32*1024*1024)invalid("规划原件存储预算不足。现有数据仍可完整备份。");
+  checkPlanBudget(db,source.bytes.length+Buffer.byteLength(cellsJson)+Buffer.byteLength(payload));
   db.exec("BEGIN IMMEDIATE");
   try{
     db.prepare("INSERT INTO study_plan_sources VALUES(?,?,?,?,?,?)").run(source.sha256,filename,source.bytes.length,now,cellsJson,source.bytes);

@@ -15,6 +15,7 @@ import { maxIntakeBytes } from "./intake-format";
 import { captureProtection, prepareProtectionRestore, ProtectionFiles, requireSupportedProfileOpen, validateProtection,
   verifyProtectionStores, type ProtectionFormat } from "./offline-protection";
 import { documentLimit, emptyPlan, type PlanPickResult, type PlanSourceCell } from "./study-plan-model";
+import { addManualStudyPlan, savePlanVersion, studentPlanViews } from "./study-plan-versions";
 import { parseStudyPlan } from "./study-plan-docx";
 import { addStudyPlan, digestDocument, listStudyPlans, planExists, planId, planObject, studyPlanSource } from "./study-plans";
 import { OperationsDatabase } from "./operations";
@@ -552,7 +553,17 @@ async function start(owner: string, profile: string, state: ActivationState, ope
     if(!source||request.confirmed!==true)throw new WorkspaceFault("invalid","请重新选择 Word 文件，预览后人工确认学生。");
     return addStudyPlan(planningStore(),planId(request.studentId),request.fields,source,source.id);
   }));
-  handle(channels.studyPlans,(event,id:unknown)=>invoke(event,()=>listStudyPlans(planningStore(),planId(id))));
+  handle(channels.studyPlans,(event,id:unknown)=>invoke(event,()=>m1Version>=12
+    ? studentPlanViews(planningStore(),planId(id)):listStudyPlans(planningStore(),planId(id))));
+  handleWrite(channels.createManualPlan,(event,raw:unknown)=>invoke(event,()=>{
+    if(m1Version<12)throw new WorkspaceFault("invalid","当前档案尚不支持手工规划。");
+    const input=planObject(raw);
+    return addManualStudyPlan(planningStore(),planId(input.studentId),planId(input.id),input.fields);
+  }));
+  handleWrite(channels.savePlanVersion,(event,raw:unknown)=>invoke(event,()=>{
+    if(m1Version<12)throw new WorkspaceFault("invalid","当前档案尚不支持执行规划。");
+    return savePlanVersion(planningStore(),raw,false);
+  }));
   handle(channels.studyPlanSource,(event,id:unknown,plan:unknown)=>invoke(event,()=>{
     const {metadata,cells}=studyPlanSource(planningStore(),planId(id),planId(plan));
     return {metadata,cells};

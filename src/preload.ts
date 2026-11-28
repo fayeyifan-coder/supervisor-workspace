@@ -7,6 +7,8 @@ import type { GrowthSaveInput } from "./growth-profile";
 const api: WorkspaceApi = {
   pickStudyPlans: () => ipcRenderer.invoke("plan:pick"),
   saveStudyPlan: input => ipcRenderer.invoke("plan:save", input),
+  createManualPlan: input=>ipcRenderer.invoke("plan:manual",input),
+  savePlanVersion: input=>ipcRenderer.invoke("plan:version",input),
   studyPlans: id => ipcRenderer.invoke("plan:list", id),
   studyPlanSource: (id, plan) => ipcRenderer.invoke("plan:source", id, plan),
   exportStudyPlanSource: (id, plan) => ipcRenderer.invoke("plan:export-source", id, plan),

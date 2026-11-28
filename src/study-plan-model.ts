@@ -20,9 +20,14 @@ export interface PlanDocumentReview {
 }
 export interface PlanPickResult { name: string; review?: PlanDocumentReview; issue?: string }
 export interface PlanSource { sha256: string; filename: string; byteLength: number; importedAt: number }
-export interface PlanRecord { id: string; studentId: string; createdAt: number; source: PlanSource | null; initial: PlanDraft }
+export interface PlanRecord { id: string; studentId: string; createdAt: number; source: PlanSource | null; initial: PlanDraft; versions?: PlanVersion[] }
 export function emptyPlan(): PlanDraft {
   return { title:"", term:"", learner:"", grade:"", subjects:[], context:"", goals:"", habits:"", notes:"", entries:[] };
 }
 export const planUuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 export function planDate(input: string): boolean { return input === "" || shanghaiMinute(input, "00:00") !== null; }
+
+export interface PlanVersion {revision:number;effectiveOn:string;startsOn:string;endsOn:string;state:"draft"|"active"|"history";
+  reason:string;changedAt:number;fields:PlanDraft}
+export interface PlanVersionInput {studentId:string;planId:string;requestId:string;expectedRevision:number;effectiveOn:string;
+  startsOn:string;endsOn:string;state:PlanVersion["state"];reason:string;fields:PlanDraft}
