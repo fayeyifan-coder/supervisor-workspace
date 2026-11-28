@@ -6,7 +6,7 @@ import {mondayOf,shanghaiParts,shiftDate} from "./schedule-calendar";
 
 export type LearningJump={kind:"student"|"history"|"plan"|"score"|"unit"|"task"|"visit"|"work";id?:string;attendanceId?:string|null;revision?:number};
 const life={active:"正常跟进",paused:"暂停学习",archived:"已归档",all:"全部"};
-const statuses={all:"全部",missing:"到课待登记",unfinished:"明确未完成",checks:"待检测或复测",sources:"规划来源待核对",review:"复盘待处理","follow-up":"有跟进事项"};
+const statuses={all:"全部",missing:"到课待登记",unfinished:"未完成或跳过",checks:"待检测或复测",sources:"规划来源待核对",review:"复盘待处理","follow-up":"有跟进事项"};
 const reviewLabels={missing:"尚未建立",draft:"草稿",confirmed:"已确认"};
 const thisMonday=()=>mondayOf(shanghaiParts(Date.now()).date);
 const week=(monday:string)=>({from:monday,to:shiftDate(monday,6)});
@@ -61,13 +61,13 @@ export function WeeklyLearningManagement({api,refresh,visible,onJump,onDraft}:{a
    <ul className="study-board-rows">{view.rows.map(row=><li className="panel" key={row.studentId}>
     <div className="schedule-form-heading"><h2><button type="button" className="schedule-profile-link" onClick={event=>onJump(row.studentId,{kind:"student"},event.currentTarget)}>{row.alias}</button></h2>
      <span>{row.grade} · {life[row.lifecycle]}</span></div>
-    <p>到课 {row.recordedVisits}/{row.visits} 次已关联学习事实 · 学习记录 {row.facts} 条 · 规划 {row.planned} 项 / 已有完成依据 {row.executed} 项</p>
+    <p>到课 {row.recordedVisits}/{row.visits} 次已关联学习事实 · 学习记录 {row.facts} 条 · 规划 {row.planned} 项 · 有执行记录 {row.executed} 项 · 有明确完成记录 {row.completed} 项</p>
     <div className="schedule-buttons">
      <button type="button" className="secondary" onClick={()=>choose(row)}>复盘 · {reviewLabels[row.review.state]}{row.review.outdated?" · 待更新":""}</button>
      {row.planRef&&<button type="button" className="secondary" onClick={event=>onJump(row.studentId,{kind:"plan",id:row.planRef!.planId,revision:row.planRef!.revision},event.currentTarget)}>查看规划版本</button>}
      {row.scoreId&&<button type="button" className="secondary" onClick={event=>onJump(row.studentId,{kind:"score",id:row.scoreId},event.currentTarget)}>查看实际成绩</button>}
     </div>
-    {Object.entries({missing:"到课待登记",unfinished:"明确未完成",checks:"待检测与复测",sources:"规划来源待核对",followUps:"后续跟进"}).map(([name,label])=>{
+    {Object.entries({missing:"到课待登记",unfinished:"未完成或跳过",checks:"待检测与复测",sources:"规划来源待核对",followUps:"后续跟进"}).map(([name,label])=>{
      const items=row[name as "missing"|"unfinished"|"checks"|"sources"|"followUps"];
      return items.length>0&&<details key={name}><summary>{label}（{items.length}）</summary><ul>{items.map((item,index)=><li key={item.id+"-"+index}>
       <button type="button" className="schedule-profile-link" onClick={event=>onJump(row.studentId,item,event.currentTarget)}>{item.date&&item.date+" · "}{item.text}</button>

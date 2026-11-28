@@ -192,6 +192,7 @@ export type PendingOperationState =
   | { kind: "damaged"; descriptor?: ScheduleReceiptInput };
 
 export interface WorkspaceInfo {
+  capacity?: import("./backup-capacity").BackupCapacity;
   mode: "production" | "synthetic";
   backupFormat: 1 | 2 | null;
 }

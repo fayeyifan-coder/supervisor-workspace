@@ -8,6 +8,8 @@ const checkStates={pending:"待检测",tested:"已检测",retest:"待复测",can
 const recordName=(f:TrackingFields)=>f.kind==="unit"?f.title:f.scope;
 const stateLabel=(f:TrackingFields)=>f.kind==="unit"?unitStates[f.state]:checkStates[f.state];
 const keyRef=(x:{kind:string;id:string;revision:number})=>[x.kind,x.id,x.revision].join("/");
+const sameSubject=(a:string,b:string|undefined)=>a.trim().normalize("NFKC")===b?.trim().normalize("NFKC");
+const sourceLabel=(source:TrackingView["results"][number])=>source.title+" · "+(source.kind==="score"?"考试":"专项训练")+"第 "+source.revision+" 版"+(source.plan?" · 提分方案第 "+source.plan.revision+" 版":"");
 const keyPlan=(x:{planId:string;entryId:string;revision:number})=>[x.planId,x.entryId,x.revision].join("/");
 
 export function LearningTrackingPanel({api,studentId,onActivity,onSaved}:{api:WorkspaceApi;studentId:string;onActivity:(dirty:boolean,busy:boolean)=>void;onSaved:()=>void}){
@@ -22,6 +24,8 @@ export function LearningTrackingPanel({api,studentId,onActivity,onSaved}:{api:Wo
  },[api,studentId,reload]);
  useEffect(()=>{onActivity(Boolean(draft),busy);return()=>onActivity(false,false);},[draft,busy,onActivity]);
  const units=(view?.records??[]).filter((r):r is TrackingRecord&{fields:UnitFields}=>r.fields.kind==="unit");
+ const resultsByRef=new Map(view?.results.map(row=>[keyRef(row),row]));
+ const resultText=(ref:CheckFields["result"])=>{const source=ref&&resultsByRef.get(keyRef(ref));return source?sourceLabel(source):"";};
  const checks=(view?.records??[]).filter((r):r is TrackingRecord&{fields:CheckFields}=>r.fields.kind==="check");
  const begin=(fields:TrackingFields,record?:TrackingRecord)=>setDraft({id:record?.id??crypto.randomUUID(),studentId,date,
   requestId:crypto.randomUUID(),expectedRevision:record?.revision??0,fields});
@@ -48,7 +52,7 @@ export function LearningTrackingPanel({api,studentId,onActivity,onSaved}:{api:Wo
     <button type="button" className="secondary" disabled={Boolean(draft)||busy} onClick={()=>begin({kind:"check",unitId:unit.id,scope:unit.fields.title,due:"",state:"pending",result:null,next:"",reminderId:null})}>建立检测任务</button>
     {checks.filter(row=>row.fields.unitId===unit.id).map(row=><p key={row.id}>
       <button type="button" className="schedule-profile-link" disabled={Boolean(draft)||busy} onClick={()=>begin(row.fields,row)}>{row.fields.scope}</button>
-      {" · "+stateLabel(row.fields)+(row.fields.due?" · 预计 "+row.fields.due:"")}{row.fields.result&&" · 已引用真实结果第 "+row.fields.result.revision+" 版"}
+      {" · "+stateLabel(row.fields)+(row.fields.due?" · 预计 "+row.fields.due:"")}{row.fields.result&&" · "+resultText(row.fields.result)}
       {row.fields.next&&" · "+row.fields.next}
     </p>)}
    </li>)}
@@ -74,7 +78,7 @@ export function LearningTrackingPanel({api,studentId,onActivity,onSaved}:{api:Wo
       const result=view?.results.find(row=>keyRef(row)===event.target.value);
       patch({result:result?{id:result.id,kind:result.kind,revision:result.revision}:null});
      }}><option value="">尚未关联</option>{f.result&&!view?.results.some(row=>keyRef(row)===keyRef(f.result!))&&<option value={keyRef(f.result)}>已引用的历史修订</option>}
-      {view?.results.filter(row=>row.subject===selectedUnit?.fields.subject&&row.date<=draft.date).map(row=><option key={keyRef(row)} value={keyRef(row)}>{row.date} · {row.title} · 第 {row.revision} 版</option>)}</select></label>
+      {view?.results.filter(row=>sameSubject(row.subject,selectedUnit?.fields.subject)&&row.date<=draft.date).map(row=><option key={keyRef(row)} value={keyRef(row)}>{row.date} · {sourceLabel(row)}</option>)}</select></label>
      <label>已有工作事项<select value={f.reminderId??""} onChange={event=>patch({reminderId:event.target.value||null})}>
       <option value="">未关联</option>{view?.reminders.map(row=><option key={row.id} value={row.id}>{row.date} · {row.title}</option>)}</select></label>
      <label>后续巩固安排<input value={f.next} maxLength={400} onChange={event=>patch({next:event.target.value})}/></label>
@@ -85,7 +89,7 @@ export function LearningTrackingPanel({api,studentId,onActivity,onSaved}:{api:Wo
   </form>}
   {view&&view.history.length>0&&<details><summary>历史变更（{view.history.length}）</summary><ul className="student-source-list">{view.history.map(row=><li key={row.requestId}>
    {row.date} · {recordName(row.fields)} · 第 {row.revision} 版 · {stateLabel(row.fields)}
-   <p>{row.fields.kind==="unit"?row.fields.basis:row.fields.next}{row.fields.kind==="check"&&row.fields.result&&" · 结果版本 "+row.fields.result.revision}</p>
+   <p>{row.fields.kind==="unit"?row.fields.basis:row.fields.next}{row.fields.kind==="check"&&row.fields.result&&" · "+resultText(row.fields.result)}</p>
   </li>)}</ul></details>}
  </section>;
 }

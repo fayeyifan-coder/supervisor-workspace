@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { readStudentRecords } from "./student-records";
+import { readStudentRecords,resolveDetectionSource,type DetectionResultRef,type DetectionSource } from "./student-records";
 import { studentPlanViews } from "./study-plan-versions";
 import { planDate } from "./study-plan-model";
 import { planId, planObject, planString } from "./study-plans";
@@ -9,7 +9,8 @@ import { WorkspaceFault } from "./workspace-fault";
 
 export type UnitState="new"|"learning"|"learned"|"waiting"|"tested"|"consolidate";
 export type CheckState="pending"|"tested"|"retest"|"cancelled";
-export type ResultRef={kind:"score"|"training";id:string;revision:number};
+export type ResultRef=DetectionResultRef;
+export const resultKey=(ref:ResultRef)=>[ref.kind,ref.id,ref.revision].join("/");
 export interface UnitFields {kind:"unit";subject:string;title:string;state:UnitState;basis:string;planning:DailyPlanRef|null}
 export interface CheckFields {kind:"check";unitId:string;scope:string;due:string;state:CheckState;result:ResultRef|null;next:string;reminderId:string|null}
 export type TrackingFields=UnitFields|CheckFields;
@@ -17,7 +18,7 @@ export type TrackingInput={id:string;studentId:string;requestId:string;expectedR
 export type TrackingRecord=TrackingInput&{revision:number;savedAt:number};
 export interface TrackingView {
  records:TrackingRecord[]; history:TrackingRecord[];
- results:(ResultRef&{subject:string;date:string;title:string})[];
+ results:DetectionSource[];
  reminders:{id:string;title:string;date:string}[];
  plans:(DailyPlanRef&{subject:string;title:string})[];
 }
@@ -64,12 +65,6 @@ function input(raw:unknown):TrackingInput{
  return {id:planId(req.id),studentId:planId(req.studentId),requestId:planId(req.requestId),
    expectedRevision:validRevision(req.expectedRevision,0),date:validDate(req.date,true),fields};
 }
-function resultDetails(db:DatabaseSync,studentId:string,ref:ResultRef){
- const table=ref.kind==="score"?"student_scores":"student_training_results";
- const row=db.prepare("SELECT payload FROM "+table+" WHERE entity_id=? AND revision=? AND student_id=?").get(ref.id,ref.revision,studentId);
- if(!row)return;
- const payload=JSON.parse(String(row.payload));return payload.version===2?payload.fields as Record<string,string>:payload as Record<string,string>;
-}
 function unitRecord(db:DatabaseSync,id:string,studentId:string){
  const row=db.prepare(rowSql+" WHERE entity_id=? AND student_id=? ORDER BY revision DESC LIMIT 1").get(id,studentId);
  const record=row?decode(row):undefined;
@@ -87,8 +82,8 @@ function checkReferences(db:DatabaseSync,work:DatabaseSync|undefined,record:Trac
   const unit=unitRecord(db,fields.unitId,studentId);
   if(!unit)return invalid("请选择该学生的学科单元。");
   if(fields.result){
-   const result=resultDetails(db,studentId,fields.result);
-   if(!result||!sameSubject(unit.subject,result.subject)||((result.takenOn||result.trainedOn)>record.date))
+   const result=resolveDetectionSource(db,studentId,fields.result);
+   if(!result||!sameSubject(unit.subject,result.subject)||result.date>record.date)
      return invalid("检测结果须来自这名学生的同学科已发生记录。");
   }
   if(fields.reminderId&&work&&!work.prepare("SELECT 1 FROM work_items WHERE id=? AND student_id=?").get(fields.reminderId,studentId))
@@ -100,9 +95,11 @@ export function readTracking(db:DatabaseSync,work:DatabaseSync,id:unknown):Track
  if(!db.prepare("SELECT 1 FROM students WHERE id=?").get(studentId))return invalid("找不到该学生。");
  const history=db.prepare(rowSql+" WHERE student_id=? ORDER BY revision DESC,entity_id").all(studentId).map(decode);
  const records=[...new Map(history.slice().reverse().map(row=>[row.id,row])).values()];
- const results=(["score","training"] as const).flatMap(kind=>readStudentRecords(db,version,kind,studentId).records.map(record=>({
-  kind,id:record.id,revision:record.revision,subject:record.fields.subject,date:record.fields.takenOn||record.fields.trainedOn,title:record.fields.assessment||record.fields.activity
- })));
+ const candidates:ResultRef[]=(["score","training"] as const).flatMap(kind=>readStudentRecords(db,version,kind,studentId).records
+  .map(({id,revision})=>({kind,id,revision})));
+ for(const item of history)if(item.fields.kind==="check"&&item.fields.result)candidates.push(item.fields.result);
+ const results=[...new Map(candidates.map(ref=>[resultKey(ref),ref])).values()]
+  .map(ref=>resolveDetectionSource(db,studentId,ref)).filter((source):source is DetectionSource=>Boolean(source));
  const reminders=work.prepare("SELECT id,title,work_date AS date FROM work_items WHERE student_id=? ORDER BY work_date DESC LIMIT 100").all(studentId) as unknown as TrackingView["reminders"];
  const plans=studentPlanViews(db,studentId).flatMap(plan=>(plan.versions??[]).slice(0,1).flatMap(version=>
   version.fields.entries.map(entry=>({planId:plan.id,revision:version.revision,entryId:entry.id,subject:entry.subject,title:entry.content}))));

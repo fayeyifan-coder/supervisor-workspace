@@ -7,6 +7,7 @@ import { verifyPlanLinks } from "./study-plan-links";
 import { dailySchema, verifyDailyRecords } from "./learning-daily";
 import { trackingSchema, verifyTracking } from "./learning-tracking";
 import { reviewSchema, verifyReviewSnapshots } from "./learning-week-review";
+import { backupDatabaseLimit,backupDatabaseWarning,databasePages } from "./backup-capacity";
 import { verifyPlanVersions } from "./study-plan-versions";
 import { studyPlanTables, verifyStudyPlans } from "./study-plans";
 import { verifyStudentLifecycle } from "./student-lifecycle";
@@ -32,7 +33,7 @@ function layoutsFor(format: ProtectionFormat, m1Version: M1Version = 1) {
 }
 const magic = Buffer.from("SWBACK1\n");
 const fiveMagic = Buffer.from("SWBACK2\n");
-const maxDatabase = 32 * 1024 * 1024;
+const maxDatabase = backupDatabaseLimit;
 const maxPackage = 161 * 1024 * 1024;
 const maxManifest = 16 * 1024;
 const maxRecoveryEvidence = 32 * 1024;
@@ -128,17 +129,32 @@ function checkImage(db: DatabaseSync, layout: Layout): void {
 }
 
 function imageSize(source: DatabaseSync, layout: Layout): number {
-  const pageCount = Number(source.prepare("PRAGMA page_count").get()?.page_count);
-  const pageSize = Number(source.prepare("PRAGMA page_size").get()?.page_size);
-  if (!Number.isSafeInteger(pageCount * pageSize) || pageCount * pageSize > maxDatabase) {
+  const {bytes}=databasePages(source);
+  if (bytes > maxDatabase) {
     reject("数据库超过离线备份上限：" + layout.key);
   }
-  return pageCount * pageSize;
+  return bytes;
+}
+
+function boundedPageImage(source:DatabaseSync,layout:Layout,bytes:number):Buffer{
+  // The caller holds the source snapshot lock. Normalize journal mode on the copy only.
+  const image=Buffer.from(source.serialize());
+  if(image.length!==bytes||image[18]!==image[19]||!([1,2].includes(image[18])))reject("无法生成可独立恢复的页镜像。");
+  image[18]=image[19]=1;
+  const check=new DatabaseSync(":memory:",{allowExtension:false,enableForeignKeyConstraints:true});
+  try{
+    check.deserialize(image);
+    check.exec("PRAGMA trusted_schema=OFF; PRAGMA query_only=ON");
+    checkImage(check,layout);
+    return image;
+  }finally{check.close();}
 }
 
 function snapshot(source: DatabaseSync, layout: Layout): Buffer {
-  imageSize(source, layout);
+  const bytesAtSource=imageSize(source, layout);
   checkImage(source, layout);
+  // Near the cap, a rebuild could allocate more pages than a verified page image.
+  if(bytesAtSource>=backupDatabaseWarning)return boundedPageImage(source,layout,bytesAtSource);
   const memory = new DatabaseSync(":memory:", { allowExtension: false, enableForeignKeyConstraints: true });
   try {
     memory.exec("PRAGMA trusted_schema=OFF; PRAGMA journal_mode=MEMORY; PRAGMA max_page_count=8192; BEGIN");
@@ -155,6 +171,10 @@ function snapshot(source: DatabaseSync, layout: Layout): Buffer {
     const bytes = Buffer.from(memory.serialize());
     if (bytes.length > maxDatabase || bytes[18] !== 1 || bytes[19] !== 1) reject("无法生成普通 SQLite 镜像。");
     return bytes;
+  } catch(error){
+    const code=(error as {errcode?:number}|null)?.errcode;
+    if(typeof code==="number"&&(code&255)===13)return boundedPageImage(source,layout,bytesAtSource);
+    throw error;
   } finally { memory.close(); }
 }
 

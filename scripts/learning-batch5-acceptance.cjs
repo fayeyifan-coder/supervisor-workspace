@@ -81,6 +81,25 @@ module.exports=async function acceptLearning({main,ui,api,ok,wait,click,profileS
  await click('单元与检测','.student-detail-nav button');
  await wait(()=>ui('document.querySelector("#student-section-learning-tracking")?.innerText.includes("待复测")'));
  await profileShot('unit-detection.png');
+ const record=async(kind,id,fields,expectedRevision=0)=>{
+  const requestId=randomUUID();
+  ok(await api('saveStudentRecord',{studentId:student.id,kind,id,requestId,expectedRevision,fields}));
+  ok(await api('resolveStudentWrite','confirm',requestId));
+ };
+ const planId=randomUUID(),trainingId=randomUUID();
+ const planFields={title:'合成数学训练方案',subject:'数学',startsOn:day,targetOn:day,baseline:'合成起点',target:'合成目标',practice:'合成训练',status:'执行中'};
+ await record('improvement',planId,planFields);
+ await record('training',trainingId,{activity:'合成观察型训练',planId,planRevision:'1',trainedOn:day,sequence:'过程',score:'',maximum:'',result:'合成训练观察',nextStep:''});
+ await record('improvement',planId,{...planFields,title:'合成修订方案',subject:'英语'},1);
+ await click('学生档案','nav button');
+ await choose(other);
+ await choose(student);
+ await click('单元与检测','.student-detail-nav button');
+ await wait(()=>ui('document.querySelector("#student-section-learning-tracking")?.innerText.includes("待复测")'));
+ await click('合成分式检测','.schedule-profile-link');
+ await wait(()=>ui('Array.from(document.querySelectorAll("#student-section-learning-tracking option")).some(o=>o.textContent.includes("合成观察型训练")&&o.textContent.includes("提分方案第 1 版"))'));
+ await profileShot('detection-fixed-training.png');
+ await click('关闭修订','#student-section-learning-tracking button');
  await choose(other);
  await click('单元与检测','.student-detail-nav button');
  await wait(()=>ui('document.querySelector("#student-section-learning-tracking")?.innerText.includes("尚未建立学科单元")'));
@@ -106,6 +125,33 @@ module.exports=async function acceptLearning({main,ui,api,ok,wait,click,profileS
  assert.equal(review.facts.onSiteMinutes,53);assert.equal(review.facts.visitsWithoutCheckout,1);
  assert.equal(review.facts.facts.find(x=>x.content==='合成分式作业').completion,'partial');
  assert(!Object.hasOwn(review.facts,'healthScore'));
+ const fixed={kind:'training',id:trainingId,revision:1};
+ ok(await api('saveLearningTracking',{...detection,requestId:randomUUID(),expectedRevision:1,fields:{...detection.fields,result:fixed}}));
+ const planEntry=(content)=>({id:randomUUID(),subject:'数学',month:'1月',week:'第1周',kind:'week',content,estimated:'',from:day,to:'',sources:[]});
+ const entries=['合成详细流程结束','合成详细任务跳过'].map(planEntry);
+ const {emptyPlan}=require('../build/study-plan-model.js');
+ const fields={...emptyPlan(),title:'合成周执行口径',subjects:['数学'],entries};
+ const studyPlanId=ok(await api('createManualPlan',{studentId:student.id,id:randomUUID(),fields}));
+ ok(await api('savePlanVersion',{studentId:student.id,planId:studyPlanId,requestId:randomUUID(),expectedRevision:0,effectiveOn:day,startsOn:day,endsOn:'',state:'active',reason:'合成计划确认',fields}));
+ await setClock('18:15');
+ const apply=(id,expectedRevision,command,fields)=>save('applyLearningChange',{id,expectedRevision,command,studentId:student.id,attendanceId:slot2.id,...fields});
+ let block=await apply(randomUUID(),0,'saveLearningBlock',{plannedStart:at('18:05'),plannedEnd:at('18:55')});
+ const tasks=entries.map(row=>({id:randomUUID(),category:'foundation',subject:'数学',content:row.content}));
+ block=await apply(block.id,block.revision,'saveLearningTasks',{tasks});
+ for(const [index,task] of tasks.entries())ok(await api('linkPlanTask',{studentId:student.id,planId:studyPlanId,revision:1,entryId:entries[index].id,taskId:task.id}));
+ block=await apply(block.id,block.revision,'recordLearningOutcome',{action:'start'});
+ block=await apply(block.id,block.revision,'recordTaskOutcome',{taskId:tasks[0].id,status:'done',resultNotes:'合成详细流程观察'});
+ await apply(block.id,block.revision,'recordTaskOutcome',{taskId:tasks[1].id,status:'skipped',resultNotes:'合成未执行观察'});
+ const current=ok(await api('weeklyReview',student.id,range));
+ assert.deepEqual(current.facts.plans.find(item=>item.entryId===entries[0].id).evidence,{executed:true,completed:false,unfinished:false,skipped:false});
+ assert.deepEqual(current.facts.plans.find(item=>item.entryId===entries[1].id).evidence,{executed:false,completed:false,unfinished:true,skipped:true});
+ assert(current.outdated);
+ assert.deepEqual(current.history[0],review.history[0]);
+ assert.deepEqual(current.facts.tracking.find(item=>item.id===testId).fields.result,fixed);
+ await click('本周','.weekly-management button');
+ await wait(()=>ui('document.querySelector(".weekly-management .study-board-rows")?.innerText.includes("有执行记录 1 项 · 有明确完成记录 0 项")'));
+ assert((await ui('document.querySelector(".weekly-management .study-board-rows").innerText')).includes('合成详细任务跳过'));
+ await profileShot('weekly-execution-closeout.png');
  const selector='(()=>{'+E+'.dialog.showOpenDialog=async()=>({canceled:false,filePaths:['+JSON.stringify(output)+']});return true;})()';
  await main(selector);
  const protect=ok(await api('exportProtection')),backup=validateProtection(await readFile(protect.location));
@@ -116,11 +162,12 @@ module.exports=async function acceptLearning({main,ui,api,ok,wait,click,profileS
  for(const file of exported.files)assert.equal(sha(await readFile(join(exported.location,file.name))),file.sha256);
  const doc=JSON.parse(await readFile(join(exported.location,'business-data.json'),'utf8')), book=new Workbook();
  await book.xlsx.readFile(join(exported.location,'business-data.xlsx'));
- for(const [name,count] of [['learning_record_details',21],['learning_unit_events',2],['learning_week_reviews',1]]){
+ for(const [name,count] of [['learning_record_details',21],['learning_unit_events',3],['learning_week_reviews',1]]){
   const table=doc.tables.find(row=>row.table===name);
   assert.equal(table.exportedRows,count);assert.equal(book.getWorksheet(table.sheet).rowCount,count+1);
  }
  return {version:'0.5.0',schema:16,studentCount:20,actualVisits:2,retainedDraft:true,detailSwitchIsolated:true,confirmedRevision:1,
    visitsWithoutCheckout:1,tableCount:36,backup:protect.location,export:exported.location,
-   screenshots:['daily-quick.png','unit-detection.png','weekly-review.png','weekly-management.png']};
+   fixedTrainingPlanRevision:1,explicitCompletionSeparate:true,skippedInQueue:true,historicalReviewUnchanged:true,
+   screenshots:['daily-quick.png','unit-detection.png','weekly-review.png','weekly-management.png','detection-fixed-training.png','weekly-execution-closeout.png']};
 };

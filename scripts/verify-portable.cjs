@@ -51,7 +51,7 @@ function verifyAsar(archive) {
     "build/operations.js", "build/operations-schema.js", "build/recurring-schedule.js", "build/study-plan-model.js", "build/study-plan-docx.js", "build/study-plans.js", "build/study-plan-versions.js", "build/study-plan-links.js", "build/study-plan-overview.js", "build/saxes.runtime.js", "build/xml-ed5.runtime.js", "build/xml-ed2.runtime.js", "build/xml-ns.runtime.js", "build/signin-calendar.js", "build/signin-sheets.js", "build/schedule-api.js", "build/schedule-calendar.js", "build/learning-api.js", "build/operations-pending.js",
     "build/learning-drafts.js", "build/learning-daily.js", "build/learning-tracking.js", "build/learning-week-review.js", "build/learning-week-overview.js",
     "build/production-profile.js", "build/production-admission.js", "build/profile-write-gate.js",
-    "build/backup-status.js", "build/diagnostics.js", "build/score-trend.js", "build/student-overview.js", "build/business-export.js", "build/business-export-schema.js", "build/business-export-files.js", "build/exceljs.runtime.js"];
+    "build/backup-status.js", "build/backup-capacity.js", "build/diagnostics.js", "build/score-trend.js", "build/student-overview.js", "build/business-export.js", "build/business-export-schema.js", "build/business-export-files.js", "build/exceljs.runtime.js"];
   const allowed = new Set(["package.json", "build", "dist", "dist/assets", "dist/index.html", ...buildFiles]);
   for (const path of contents) {
     assert(allowed.has(path) || assetsPattern.test(path), "Unexpected ASAR member: " + path);

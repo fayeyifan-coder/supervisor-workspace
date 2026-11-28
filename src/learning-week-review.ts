@@ -13,11 +13,17 @@ import {WorkspaceFault} from "./workspace-fault";
 export interface ReviewRange {from:string;to:string}
 type Event={id:string;date:string;text:string;revision?:number;next?:string};
 type Visit={id:string;checkIn:number;checkOut:number|null;revision:number};
+type Teaching="complete"|"partial"|"incomplete"|"unassessed";
+type Workflow="done"|"in_progress"|"skipped";
+type Evidence={executed:boolean;teaching:Teaching;skipped:boolean};
+type DetailOrigin={workflow:Workflow;recordedAt:number|null;observation:string};
 type Fact={id:string;date:string;subject:string;content:string;completion:string;recordedAt:number|null;source:"quick"|"history"|"detail";
  attendanceId:string|null;taskId:string|null;mastery?:string;tags?:string[];problem?:string;intervention?:string;next?:string;
- planning?:DailyPlanRef;planningNeedsReview?:boolean};
+ planning?:DailyPlanRef;planningNeedsReview?:boolean;evidence?:Evidence;detailOrigin?:DetailOrigin};
 type Score={id:string;revision:number;date:string;subject:string;title:string;score:number;maximum:number};
-type SourcePlan=DailyPlanRef&{subject:string;content:string;from:string;to:string;execution:"recorded"|"incomplete"|"unrecorded"};
+type PlanEvidence={executed:boolean;completed:boolean;unfinished:boolean;skipped:boolean};
+type SourcePlan=DailyPlanRef&{subject:string;content:string;from:string;to:string;execution:"recorded"|"incomplete"|"unrecorded"|"executed";
+ evidence?:PlanEvidence};
 export interface WeekFacts {
  studentId:string;range:ReviewRange;visits:Visit[];onSiteMinutes:number|null;visitsWithoutCheckout:number;
  facts:Fact[];pendingTasks:{id:string;subject:string;date:string;content:string;attendanceId:string|null;planningNeedsReview:boolean}[];
@@ -52,8 +58,22 @@ export function periodOf(date:string,workWeek:boolean):ReviewRange{
 }
 const inRange=(date:string,{from,to}:ReviewRange)=>date>=from&&date<=to;
 const sourceKey=(ref:DailyPlanRef)=>[ref.planId,ref.revision,ref.entryId].join("/");
-const qualify=(field:string)=>field==="complete"||field==="完成"||field==="已完成";
-const partial=(field:string)=>field==="partial"||field==="incomplete"||field==="部分完成"||field==="未完成"||field==="skipped";
+function teaching(completion:string):Teaching {
+ switch(completion){
+  case "complete":case "完成":case "已完成":return "complete";
+  case "partial":case "部分完成":return "partial";
+  case "incomplete":case "未完成":return "incomplete";
+  default:return "unassessed";
+ }
+}
+function evidenceOf(completion:string,workflow?:Workflow):Evidence{
+ const outcome=teaching(completion);
+ return {executed:workflow!=="skipped"||outcome==="complete"||outcome==="partial",teaching:outcome,skipped:workflow==="skipped"};
+}
+export function hasUnfinishedEvidence(fact:Fact){
+ const evidence=fact.evidence??evidenceOf(fact.completion,fact.completion==="skipped"?"skipped":undefined);
+ return evidence.teaching==="partial"||evidence.teaching==="incomplete"||evidence.skipped&&evidence.teaching!=="complete";
+}
 function minutes(visits:Visit[],start:number,end:number){
  const intervals=visits.filter(v=>v.checkOut!==null).map(v=>[Math.max(start,v.checkIn),Math.min(end,v.checkOut!)])
   .filter(([a,b])=>a<=b).sort(([a],[b])=>a-b);
@@ -68,25 +88,32 @@ function minutes(visits:Visit[],start:number,end:number){
 function recordFacts({m1,ops}:Stores,studentId:string,range:ReviewRange){
  const tasks=listPlanTasks(m1,ops,studentId),byTask=new Map(tasks.map(task=>[task.id,task]));
  const rows=m1.prepare("SELECT l.*, d.details_json FROM learning_records l LEFT JOIN learning_record_details d ON d.lesson_id=l.id WHERE l.student_id=? AND study_date BETWEEN ? AND ? ORDER BY study_date,l.created_at,l.id").all(studentId,range.from,range.to);
+ const resultsById=new Map(ops.prepare("SELECT id,completed_at,result_notes FROM learning_tasks WHERE block_id IN(SELECT id FROM learning_blocks WHERE student_id=?)").all(studentId).map(row=>[row.id,row]));
+ const detailOrigin=(id:string,workflow:string):DetailOrigin|undefined=>{
+  if(workflow!=="done"&&workflow!=="in_progress"&&workflow!=="skipped")return;
+  const row=resultsById.get(id);
+  return {workflow,recordedAt:typeof row?.completed_at==="number"?row.completed_at:null,observation:String(row?.result_notes??"")};
+ };
  const attached=new Set<string>();
  const facts=rows.map((row):Fact=>{
   const detail=row.details_json?JSON.parse(String(row.details_json)) as DailyInput:undefined;
   const task=detail?.taskId?byTask.get(detail.taskId):undefined;
   if(detail?.taskId)attached.add(detail.taskId);
   const inherited=task?.linkState==="historical"&&task.link?{planId:task.link.planId,revision:task.link.revision,entryId:task.link.entryId}:undefined;
-  return {id:String(row.id),date:String(row.study_date),subject:String(row.subject),content:String(row.task),completion:detail?.completion||String(row.completion),
+  const completion=detail?.completion||String(row.completion),origin=task&&detailOrigin(task.id,task.status);
+  return {id:String(row.id),date:String(row.study_date),subject:String(row.subject),content:String(row.task),completion,
+   evidence:evidenceOf(completion,origin?.workflow),detailOrigin:origin,
    recordedAt:Number(row.created_at),source:detail?"quick":"history",attendanceId:detail?.attendanceId??null,taskId:detail?.taskId??null,
    mastery:detail?.mastery,tags:detail?.tags,problem:detail?.problem??String(row.assessment),intervention:detail?.intervention,next:String(row.next_step),
    planning:task?.linkState==="review"?undefined:detail?.planning??inherited,planningNeedsReview:task?.linkState==="review"};
  });
- const factsById=new Map(ops.prepare("SELECT id,completed_at,result_notes FROM learning_tasks WHERE block_id IN(SELECT id FROM learning_blocks WHERE student_id=?)").all(studentId).map(row=>[row.id,row]));
  for(const task of tasks){
   if(attached.has(task.id)||!inRange(task.date,range)||task.status==="planned")continue;
-  const row=factsById.get(task.id);
+  const origin=detailOrigin(task.id,task.status)!;
   const link=task.linkState==="historical"?task.link:undefined;
   facts.push({id:task.id,date:task.date,subject:task.subject,content:task.content,completion:task.status,
-    recordedAt:typeof row?.completed_at==="number"?row.completed_at:null,source:"detail",attendanceId:task.attendanceId,taskId:task.id,
-    problem:row?.result_notes?String(row.result_notes):undefined,
+    recordedAt:origin.recordedAt,source:"detail",attendanceId:task.attendanceId,taskId:task.id,
+    evidence:evidenceOf(task.status,origin.workflow),detailOrigin:origin,
     planning:link?{planId:link.planId,revision:link.revision,entryId:link.entryId}:undefined,planningNeedsReview:task.linkState==="review"});
  }
  facts.sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id));
@@ -109,9 +136,11 @@ function plannedEntries(db:DatabaseSync,studentId:string,range:ReviewRange,facts
     const ref={planId:plan.id,revision:version.revision,entryId:entry.id};
     const key=sourceKey(ref);
     if(map.has(key))continue;
-    const evidence=bySource.get(key)??[];
-    map.set(key,{...ref,subject:entry.subject,content:entry.content,from:entry.from,to:entry.to,
-      execution:evidence.some(f=>qualify(f.completion))?"recorded":evidence.some(f=>partial(f.completion))?"incomplete":"unrecorded"});
+    const factsForSource=bySource.get(key)??[];
+    const evidence={executed:factsForSource.some(f=>f.evidence?.executed),completed:factsForSource.some(f=>f.evidence?.teaching==="complete"),
+     unfinished:factsForSource.some(hasUnfinishedEvidence),skipped:factsForSource.some(f=>f.evidence?.skipped)};
+    map.set(key,{...ref,subject:entry.subject,content:entry.content,from:entry.from,to:entry.to,evidence,
+      execution:evidence.completed?"recorded":evidence.unfinished?"incomplete":evidence.executed?"executed":"unrecorded"});
    }
   }
  }

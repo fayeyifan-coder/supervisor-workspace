@@ -144,10 +144,12 @@ function App() {
   const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo>();
   useEffect(() => {
     let mounted = true;
-    void api.workspaceInfo().then(reply => {
-      if (mounted && reply.ok) setWorkspaceInfo(reply.value);
-    }).catch(() => undefined);
-    return () => { mounted = false; };
+    function readInfo(){
+      void api.workspaceInfo().then(reply => {if(mounted&&reply.ok)setWorkspaceInfo(reply.value);}).catch(()=>undefined);
+    }
+    readInfo();
+    const timer=window.setInterval(readInfo,60_000);
+    return ()=>{mounted=false;window.clearInterval(timer);};
   }, [api]);
   const [students, setStudents] = useState<Student[]>();
   const [scheduleEnabled, setScheduleEnabled] = useState<boolean>();
@@ -466,13 +468,15 @@ function App() {
     </header>
     {planImportOpen&&students&&<StudyPlanImportPanel api={api} students={students} onClose={()=>setPlanImportOpen(false)}
       onSaved={()=>setPlanRefresh(value=>value+1)} />}
+    {workspaceInfo?.capacity&&workspaceInfo.capacity.stores.some(store=>store.bytes>=workspaceInfo.capacity!.warning)&&
+      <p className="notice pending" role="status">数据库接近 32 MiB 完整备份上限。请现在生成并校验完整备份。达到上限的新增写入会显示失败，保留档案及已确认记录。</p>}
     {quick&&quickStudent&&<QuickLearningPanel key={quickStudent.id} api={api} student={quickStudent} attendanceId={quick.attendanceId} initialDate={quick.date}
       onClose={()=>setQuick(undefined)} onSaved={()=>{setHistoryRefresh(n=>n+1);setPlanRefresh(n=>n+1);}}/>}
     <section id="data-export-center" hidden={!protectionOpen} aria-label="数据导出与备份">
       <div className="schedule-heading-actions"><h1>数据导出与备份</h1><button className="secondary" type="button"
         disabled={protectionBusy || exportBusy} onClick={() => setProtectionOpen(false)}>收起数据面板</button></div>
       <p className="muted">仅备份和导出已保存记录。未保存草稿仍保留在原页面，请先保存需要纳入的内容。</p>
-      <DataProtectionPanel api={api} backupFormat={workspaceInfo?.backupFormat} onBusyChange={setProtectionBusy} />
+      <DataProtectionPanel capacity={workspaceInfo?.capacity} api={api} backupFormat={workspaceInfo?.backupFormat} onBusyChange={setProtectionBusy} />
       <BusinessExportPanel api={api} supported={workspaceInfo?.backupFormat === 2 && studentRecordVersion >= 6} onBusyChange={setExportBusy} />
     </section>
     {parentFollowUpEnabled && students && <StudentWriteRecoveryPanel api={api} students={students}

@@ -1,7 +1,7 @@
 import type {DatabaseSync} from "node:sqlite";
 import type {Student} from "./contracts";
 import {shanghaiParts} from "./schedule-calendar";
-import {readWeekFacts,reviewRange,fingerprint,type ReviewRange,type WeekFacts} from "./learning-week-review";
+import {readWeekFacts,reviewRange,fingerprint,hasUnfinishedEvidence,type ReviewRange,type WeekFacts} from "./learning-week-review";
 import type {TrackingFields} from "./learning-tracking";
 import {planObject,planString} from "./study-plans";
 import {WorkspaceFault} from "./workspace-fault";
@@ -13,14 +13,13 @@ export interface WeeklyManagementQuery {
 type Jump={id:string;text:string;date:string;attendanceId?:string|null;kind:"visit"|"task"|"history"|"unit"|"work"};
 export interface WeeklyManagementRow {
  studentId:string;alias:string;grade:string;lifecycle:NonNullable<Student["lifecycleStatus"]>;
- visits:number;recordedVisits:number;facts:number;planned:number;executed:number;
+ visits:number;recordedVisits:number;facts:number;planned:number;executed:number;completed:number;
  missing:Jump[];unfinished:Jump[];checks:Jump[];sources:Jump[];followUps:Jump[];
  review:{state:"missing"|"draft"|"confirmed";revision:number;outdated:boolean};
  planRef?:{planId:string;revision:number};scoreId?:string;
 }
 export interface WeeklyManagementView {range:ReviewRange;subjects:string[];rows:WeeklyManagementRow[];attendanceStudents:number;visits:number}
 const statusOptions:WeeklyQueueStatus[]=["all","missing","unfinished","checks","sources","review","follow-up"];
-const incomplete=new Set(["partial","incomplete","部分完成","未完成"]);
 export function weeklyManagementQuery(raw:unknown):WeeklyManagementQuery{
  const r=planObject(raw),lifecycle=r.lifecycle as WeeklyManagementQuery["lifecycle"],status=r.status as WeeklyQueueStatus;
  if(!["all","active","paused","archived"].includes(lifecycle)||!statusOptions.includes(status))throw new WorkspaceFault("invalid","请选择有效的总览筛选条件。");
@@ -52,8 +51,8 @@ function summary(m1:DatabaseSync,student:Student,facts:WeekFacts,subject:string)
  const followUps:Jump[]=[...facts.followUps.map((row):Jump=>({id:row.id,date:row.date,text:row.text,kind:"work"})),
   ...relevant.filter(row=>row.next).map((row):Jump=>({...jump(row),text:row.next!}))];
  return {studentId:student.id,alias:student.alias,grade:student.grade,lifecycle:student.lifecycleStatus??"active",visits:facts.visits.length,
-   recordedVisits:facts.visits.length-missing.length,facts:relevant.length,planned:plans.length,executed:plans.filter(row=>row.execution==="recorded").length,
-   missing,unfinished:relevant.filter(row=>incomplete.has(row.completion)).map(jump),
+   recordedVisits:facts.visits.length-missing.length,facts:relevant.length,planned:plans.length,executed:plans.filter(row=>row.evidence?.executed).length,completed:plans.filter(row=>row.evidence?.completed).length,
+   missing,unfinished:relevant.filter(hasUnfinishedEvidence).map(jump),
    checks:checkQueue(m1,student.id,facts.range.to,subject),sources,followUps,
    review:{state:(latest?.state??"missing") as WeeklyManagementRow["review"]["state"],revision:Number(latest?.revision??0),
     outdated:Boolean(latest&&latest.source_digest!==fingerprint(facts))},

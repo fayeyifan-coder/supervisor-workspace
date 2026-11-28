@@ -54,6 +54,9 @@ const lessonColumns = "id, student_id AS studentId, study_date AS date, subject,
 export function failure(error: unknown): Failure {
   if (error instanceof WorkspaceFault) return { ok: false, code: error.code, message: error.message };
   const code = (error as { errcode?: number } | null)?.errcode;
+  if(typeof code==="number"&&(code&255)===13){
+    return {ok:false,code:"recovery",message:"本机存储空间不足或已达到离线备份容量，未完成保存。请保留草稿和已有备份。"};
+  }
   if (typeof code === "number" && [5, 6].includes(code & 255)) {
     return { ok: false, code: "busy", message: "本地数据库正被占用，请稍后重试。" };
   }

@@ -21,6 +21,7 @@ import { getDailyContext } from "./learning-daily";
 import { DailyDrafts } from "./learning-drafts";
 import { readTracking } from "./learning-tracking";
 import { readReview } from "./learning-week-review";
+import {applyBackupPageLimit,readBackupCapacity} from "./backup-capacity";
 import { readWeeklyManagement } from "./learning-week-overview";
 import { addManualStudyPlan, savePlanVersion, studentPlanViews } from "./study-plan-versions";
 import { parseStudyPlan } from "./study-plan-docx";
@@ -165,6 +166,7 @@ function openProfile(profile: string, format: ProtectionFormat, m1Version: M1Ver
       throw new WorkspaceFault("recovery", "五库档案中有数据库无法打开，请保留现场。");
     }
     operations = OperationsDatabase.open(join(profile, "data"), database, initializeOperations);
+    if(m1Version>=16)for(const store of completeStores(format))applyBackupPageLimit(store.protectionConnection());
   }
   return { startupError, growthStartupError, intakeStartupError, intake };
 }
@@ -745,7 +747,8 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       lastSuccessfulBackupAt: readBackupStatus(profile) } } : denied());
   handle<WorkspaceInfo, []>(channels.workspaceInfo, event => isTrusted(event, window)
     ? { ok: true, value: { mode: production?.root === productionInstallRoot ? "production" : "synthetic",
-      backupFormat: database && workLog && growthProfile && intakeStore && (format === 1 || operations) ? format : null } }
+      backupFormat: database && workLog && growthProfile && intakeStore && (format === 1 || operations) ? format : null,
+      ...(m1Version>=16?{capacity:readBackupCapacity(completeStores(format).map(store=>store.protectionConnection()))}:{}) } }
     : denied());
   handle(channels.activateRecovery, event => protect(event, async () => {
     await requireSwitchReady(event);

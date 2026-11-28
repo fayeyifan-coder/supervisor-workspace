@@ -224,12 +224,30 @@ export function readStudentRecords(db: DatabaseSync, version: number, kind: unkn
   return { studentId, records };
 }
 
-function verifyTrainingPlan(db: DatabaseSync, studentId: string, fields: Record<string, string>): void {
+function resolveTrainingPlan(db: DatabaseSync, studentId: string, fields: Record<string, string>): StudentRecord {
   const definition = studentRecordDefinitions.improvement;
   const row = db.prepare(`SELECT ${columns} FROM ${definition.table} WHERE entity_id=? AND revision=?`)
     .get(fields.planId, Number(fields.planRevision));
   if (!row || row.studentId !== studentId) invalid("训练结果须关联该学生的已保存方案版本。");
-  if (fields.trainedOn < record(row, definition, 6).fields.startsOn) invalid("训练日期不能早于所选方案版本的开始日期。");
+  const plan=record(row,definition,6);
+  if (fields.trainedOn < plan.fields.startsOn) invalid("训练日期不能早于所选方案版本的开始日期。");
+  return plan;
+}
+
+export type DetectionResultRef={kind:"score"|"training";id:string;revision:number};
+export type DetectionSource=DetectionResultRef&{subject:string;date:string;title:string;
+ plan?:{id:string;revision:number;title:string}};
+export function resolveDetectionSource(db:DatabaseSync,studentId:string,ref:DetectionResultRef):DetectionSource|undefined{
+  const version=Number(db.prepare("PRAGMA user_version").get()?.user_version);
+  const definition=definitionFor(ref.kind,version);
+  const row=db.prepare(`SELECT ${columns} FROM ${definition.table} WHERE entity_id=? AND revision=? AND student_id=?`)
+    .get(ref.id,ref.revision,studentId);
+  if(!row)return;
+  const result=record(row,definition,version);
+  if(ref.kind==="score")return {...ref,subject:result.fields.subject,date:result.fields.takenOn,title:result.fields.assessment};
+  const plan=resolveTrainingPlan(db,studentId,result.fields);
+  return {...ref,subject:plan.fields.subject,date:result.fields.trainedOn,title:result.fields.activity,
+   plan:{id:plan.id,revision:plan.revision,title:plan.fields.title}};
 }
 
 export function studentRecordInput(version: number, raw: unknown): StudentRecordInput {
@@ -277,7 +295,7 @@ export function saveStudentRecord(db: DatabaseSync, version: number, raw: unknow
       const original = fieldsFor(definition, JSON.parse(String(previous.payload)));
       if (original.planId !== fields.planId || original.planRevision !== fields.planRevision) invalid("已保存的训练结果不能改绑方案。");
     }
-    verifyTrainingPlan(db, studentId, fields);
+    resolveTrainingPlan(db, studentId, fields);
   }
   const revision = expected + 1, savedAt = Date.now();
   db.prepare(`INSERT INTO ${definition.table} VALUES (?,?,?,?,?,?)`).run(requestId, id, studentId, revision, payload, savedAt);
@@ -298,7 +316,7 @@ export function verifyStudentRecords(db: DatabaseSync, version: number): void {
         if (last?.id === next.id && (last.fields.planId !== next.fields.planId || last.fields.planRevision !== next.fields.planRevision)) {
           invalid("训练结果的方案来源不一致。");
         }
-        verifyTrainingPlan(db, next.studentId, next.fields);
+        resolveTrainingPlan(db, next.studentId, next.fields);
       }
       requests.add(next.requestId);
       last = next;

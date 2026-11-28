@@ -6,7 +6,9 @@ import {mondayOf,shanghaiParts,shiftDate} from "./schedule-calendar";
 const blank:ReviewNotes={evaluation:"",issues:"",next:"",parent:""};
 const completeness:Record<string,string>={complete:"完成",partial:"部分完成",incomplete:"未完成",in_progress:"已开始",skipped:"已跳过",done:"详细任务已登记完成"};
 const mastery:Record<string,string>={good:"较好",basic:"基本掌握",review:"需巩固",unassessed:"未评估"};
-const execution={recorded:"已有完成记录",incomplete:"已有未完成或部分完成记录",unrecorded:"尚无已确认执行依据"};
+const execution={recorded:"已有完成记录",incomplete:"已有未完成或部分完成记录",unrecorded:"尚无已确认执行依据",executed:"已有实际执行记录，完成程度未评估"};
+const workflowLabels={done:"流程已结束",in_progress:"流程进行中",skipped:"流程已跳过"};
+const teachingLabels={complete:"教学完成",partial:"部分完成",incomplete:"未完成",unassessed:"完成程度未评估"};
 const trackingState:Record<string,string>={new:"尚未开始",learning:"学习中",learned:"学习完成",waiting:"待检测",tested:"已检测",consolidate:"待巩固",pending:"待检测",retest:"待复测",cancelled:"取消"};
 function courseWeek(work=false):ReviewRange{
  const monday=mondayOf(shanghaiParts(Date.now()).date);
@@ -19,16 +21,16 @@ function FactSources({facts:f}:{facts:WeekFacts}){
   <details open><summary>实际学习与教师干预（{f.facts.length}）</summary>
    {!f.facts.length?<p>尚未登记学习事实。</p>:<ul className="student-source-list">{f.facts.map(row=><li key={row.id}>
     <strong>{row.date} · {row.subject||"学科未登记"} · {row.content}</strong>
-    <p>{completeness[row.completion]??row.completion} · {row.source==="quick"?"快速登记":row.source==="detail"?"详细任务":"学习历史"}
-      {row.mastery&&" · "+(mastery[row.mastery]??row.mastery)}{row.planning&&" · 规划第 "+row.planning.revision+" 版"}
+    <p>{row.evidence?teachingLabels[row.evidence.teaching]:completeness[row.completion]??row.completion} · {row.source==="quick"?"快速登记":row.source==="detail"?"详细任务":"学习历史"}
+      {row.detailOrigin&&" · "+workflowLabels[row.detailOrigin.workflow]}{row.mastery&&" · 掌握 "+(mastery[row.mastery]??row.mastery)}{row.planning&&" · 规划第 "+row.planning.revision+" 版"}
       {row.planningNeedsReview&&" · 规划来源待核对"}</p>
     {row.tags?.length?<p>学习表现 {row.tags.join("、")}</p>:null}
-    {row.problem&&<p>问题与观察 {row.problem}</p>}{row.intervention&&<p>教师干预 {row.intervention}</p>}{row.next&&<p>下次安排 {row.next}</p>}
+    {row.problem&&<p>问题与观察 {row.problem}</p>}{row.detailOrigin?.observation&&<p>详细任务观察 {row.detailOrigin.observation}</p>}{row.intervention&&<p>教师干预 {row.intervention}</p>}{row.next&&<p>下次安排 {row.next}</p>}
    </li>)}</ul>}
   </details>
   <details><summary>计划与偏差（{f.plans.length}）</summary>
    {!f.plans.length?<p>本范围没有已定日的规划。</p>:<ul>{f.plans.map(row=><li key={row.planId+"/"+row.revision+"/"+row.entryId}>
-    {row.from} · {row.subject} · {row.content} · 第 {row.revision} 版 · {execution[row.execution]}</li>)}</ul>}
+    {row.from} · {row.subject} · {row.content} · 第 {row.revision} 版 · {row.evidence?[row.evidence.executed?"有实际执行记录":"无确认执行记录",row.evidence.completed?"有明确完成记录":"",row.evidence.unfinished?"有部分完成、未完成或跳过":"",row.evidence.executed&&!row.evidence.completed&&!row.evidence.unfinished?"完成程度未评估":""].filter(Boolean).join(" · "):execution[row.execution]}</li>)}</ul>}
    {f.pendingTasks.map(row=><p key={row.id}>{row.date} · {row.subject} · {row.content} · 详细任务尚未开始</p>)}
   </details>
   <details><summary>考试与单元检测（{f.scores.length+f.tracking.length}）</summary>

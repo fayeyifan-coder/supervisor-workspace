@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import type { ProtectionResult, WorkspaceApi } from "./contracts";
+import type {BackupCapacity} from "./backup-capacity";
 
 const reminderInterval = 3 * 24 * 60 * 60 * 1000;
 
-export function DataProtectionPanel({ api, backupFormat, onBusyChange }: { api: WorkspaceApi; backupFormat?: 1 | 2 | null; onBusyChange?: (busy: boolean) => void }) {
+export function DataProtectionPanel({ api, backupFormat, onBusyChange,capacity }: { api: WorkspaceApi;capacity?:BackupCapacity; backupFormat?: 1 | 2 | null; onBusyChange?: (busy: boolean) => void }) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
   const [result, setResult] = useState<ProtectionResult>();
@@ -64,6 +65,7 @@ export function DataProtectionPanel({ api, backupFormat, onBusyChange }: { api: 
     <p className="muted">{backupFormat === 2 ? "SWBACK2 覆盖学生档案及其业务记录、工作日志、成长档案、JSON 导入和教务五库。" :
       backupFormat === 1 ? "SWBACK1 覆盖学生档案、工作日志、成长档案及 JSON 导入四库。" : "当前档案的完整备份能力尚未确认。"}
       恢复会创建独立档案。保存草稿并核对待确认请求后方可切换。最终确认后工作台将正常关闭，重开进入目标档案。</p>
+    {capacity&&<p className="muted">单库离线备份上限 {(capacity.limit/1048576).toFixed(0)} MiB · {capacity.stores.map(store=>store.name+" "+(store.bytes/1048576).toFixed(2)+" MiB").join(" · ")}</p>}
     <p>最近一次已校验的本地备份：{lastBackup
       ? new Date(lastBackup).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })
       : lastBackup === null ? "暂无记录" : "正在读取…"}</p>
