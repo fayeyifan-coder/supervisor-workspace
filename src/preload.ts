@@ -64,6 +64,7 @@ const api: WorkspaceApi = {
   addQuickLesson: input => ipcRenderer.invoke("b5:add-quick-lesson",input),
   learningTracking:studentId=>ipcRenderer.invoke("b5:learning-tracking",studentId),
   saveLearningTracking:input=>ipcRenderer.invoke("b5:save-learning-tracking",input),
+  weeklyLearningManagement:input=>ipcRenderer.invoke("b5:weekly-management",input),
   weeklyReview:(studentId,range)=>ipcRenderer.invoke("b5:weekly-review",studentId,range),
   saveWeeklyReview:input=>ipcRenderer.invoke("b5:save-weekly-review",input),
   workItems: (day: string) => ipcRenderer.invoke("m2b:work-items", day),

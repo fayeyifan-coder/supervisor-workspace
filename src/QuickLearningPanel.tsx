@@ -4,9 +4,9 @@ import type { DailyContext,DailyInput } from "./learning-daily";
 import { shanghaiParts } from "./schedule-calendar";
 
 const commonTags=["专注","主动提问","草稿清晰","笔记完整","审题需提醒","错题已整理","作业已完成","作业待补"];
-export function QuickLearningPanel({api,student,attendanceId,onClose,onSaved}:{api:WorkspaceApi;student:Student;attendanceId?:string;onClose:()=>void;onSaved:()=>void}){
+export function QuickLearningPanel({api,student,attendanceId,initialDate,onClose,onSaved}:{api:WorkspaceApi;student:Student;attendanceId?:string;initialDate?:string;onClose:()=>void;onSaved:()=>void}){
  const today=shanghaiParts(Date.now()).date;
- const empty=():DailyInput=>({id:crypto.randomUUID(),studentId:student.id,date:today,subject:"",content:"",
+ const empty=():DailyInput=>({id:crypto.randomUUID(),studentId:student.id,date:initialDate??today,subject:"",content:"",
   completion:"",mastery:"unassessed",tags:[],problem:"",intervention:"",next:"",attendanceId:attendanceId??null,
   source:attendanceId?"attendance":"other",taskId:null,priorTaskId:null,planning:null});
  const [draft,setDraft]=useState(empty),[key,setKey]=useState(""),[dirty,setDirty]=useState(false);

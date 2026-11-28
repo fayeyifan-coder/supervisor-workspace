@@ -225,10 +225,11 @@ function BlockCard({ block, target, locked, checkedOut, submit, onEdit, sources 
   </article>;
 }
 
-export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, leaveGuard, focusTaskId, allowLeave, backLabel = "返回课表" }: {
+export function AttendanceLearningPanel({ api, target, alias, reloadVersion, confirmedRequestId, blocked, submit, onBack, leaveGuard, focusTaskId, allowLeave, onQuickLearning, backLabel = "返回课表" }: {
   api: WorkspaceApi; target: LearningDayInput; alias: string; reloadVersion: number; confirmedRequestId?: string; blocked: boolean;
   submit: (command: LearningChange) => Promise<Result<AttendancePlan | LearningBlock>>; onBack: () => void; backLabel?: string; focusTaskId?: string; allowLeave?: boolean;
   leaveGuard: Ref<() => boolean>;
+  onQuickLearning?: (studentId:string,attendanceId:string,date:string)=>void;
 }) {
   const [data, setData] = useState<LearningDay>();
   const [reload, setReload] = useState(0);
@@ -384,6 +385,8 @@ export function AttendanceLearningPanel({ api, target, alias, reloadVersion, con
         {mayAddBlock && <button type="button" className="secondary" disabled={locked || Boolean(draft)}
           onClick={() => setDraft(blockDraft(plan))}>新建学习块</button>}
       </div>
+      {onQuickLearning&&plan.checkInAt!==null&&<button type="button" className="secondary" disabled={locked}
+        onClick={()=>onQuickLearning(plan.studentId,plan.id,shanghaiParts(plan.checkInAt!).date)}>快速学习登记</button>}
       {draft && <BlockForm plan={plan} draft={draft} latest={data.blocks.find(block => block.id === draft.id)}
         locked={locked} onDraft={setDraft} onSave={saveBlock} onClose={() => setDraft(undefined)} />}
       {!data.blocks.length && !draft && <p className="muted">这次到校还没有学习块。</p>}

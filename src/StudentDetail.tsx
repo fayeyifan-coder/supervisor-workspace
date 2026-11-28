@@ -60,11 +60,11 @@ function ImportSources({ api, student }: { api: WorkspaceApi; student: Student }
   </section>;
 }
 
-export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, lifecycle, overview, overviewVisible, recordPanels, studyPlan, focusPlan, learningTracking, weeklyReview }:  {
+export function StudentDetail({ student, api, intakeOpen, actions, growth, history, edit, parentFollowUp, lifecycle, overview, overviewVisible, recordPanels, studyPlan, focusPlan, learningTracking, weeklyReview, focusLearning }:  {
   student: Student; api: WorkspaceApi; intakeOpen: boolean;
   actions: ReactNode; growth: ReactNode; history: ReactNode; edit?: ReactNode; parentFollowUp?: ReactNode; lifecycle?: ReactNode;
   overview?: (open: (section: OverviewSection, recordId?: string) => void) => ReactNode; overviewVisible?: boolean;
-  studyPlan?: ReactNode; focusPlan?: number; learningTracking?: ReactNode; weeklyReview?: ReactNode;
+  studyPlan?: ReactNode; focusPlan?: number; learningTracking?: ReactNode; weeklyReview?: ReactNode; focusLearning?:{section:Section;recordId?:string;sequence:number};
   recordPanels: { id: StudentRecordKind; label: string; content: ReactNode }[];
 }) {
   const tabs: { id: Section; label: string; enabled: boolean }[] = [
@@ -86,6 +86,16 @@ export function StudentDetail({ student, api, intakeOpen, actions, growth, histo
   const [selection, setSelection] = useState<{ studentId: string; section: Section }>();
   useEffect(()=>{if(focusPlan!==undefined&&studyPlan)setSelection({studentId:student.id,section:"study-plan"});},
     [focusPlan,student.id]);
+  useEffect(()=>{
+    if(!focusLearning)return;
+    setSelection({studentId:student.id,section:focusLearning.section});
+    requestAnimationFrame(()=>{
+      const section=document.getElementById("student-section-"+focusLearning.section);
+      const record=focusLearning.recordId&&(document.getElementById("student-source-"+focusLearning.section+"-"+focusLearning.recordId)||
+       document.getElementById("learning-unit-"+focusLearning.recordId));
+      (record||section)?.scrollIntoView({block:"start"});
+    });
+  },[focusLearning?.section,focusLearning?.recordId,focusLearning?.sequence,student.id]);
   // Forget the prior student's explicit choice even if no tab is clicked on the next student.
   if (selection && selection.studentId !== student.id) setSelection(undefined);
   // Derive the new student's tab during render; do not unmount the detail tree to reset it.

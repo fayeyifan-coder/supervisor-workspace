@@ -7,8 +7,8 @@ const today = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-export function WorkLogPanel({ students, api, backupFormat }: {
-  students: Student[]; api: WorkspaceApi; backupFormat?: 1 | 2 | null;
+export function WorkLogPanel({ students, api, backupFormat, focusItem }: {
+  students: Student[]; api: WorkspaceApi; backupFormat?: 1 | 2 | null; focusItem?:{id:string;sequence:number};
 }) {
   const [rows, setRows] = useState<WorkItem[]>([]);
   const [history, setHistory] = useState<WorkItem[]>([]);
@@ -24,6 +24,7 @@ export function WorkLogPanel({ students, api, backupFormat }: {
     api.searchWorkItems("0001-01-01", day, query).then(r => { if (r.ok) setHistory(r.value); else setNotice(r.message); });
   };
   useEffect(() => { refresh(); }, [api, day, query]);
+  useEffect(()=>{if(focusItem){const row=document.getElementById("work-item-"+focusItem.id);(row??document.getElementById("worklog-heading"))?.scrollIntoView({block:"start"});}},[focusItem,rows]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -67,7 +68,7 @@ export function WorkLogPanel({ students, api, backupFormat }: {
       </fieldset>
     </form>
     <h3>今日待办与到期未完成</h3>
-    {!rows.length ? <p className="muted">目前没有到期未完成事项。</p> : <ul className="work-items">{rows.map(item => <li key={item.id}>
+    {!rows.length ? <p className="muted">目前没有到期未完成事项。</p> : <ul className="work-items">{rows.map(item => <li key={item.id} id={"work-item-"+item.id}>
       <strong>{item.title}</strong><span>{item.workDate} · {item.status}{item.studentId ? ` · ${students.find(s => s.id === item.studentId)?.alias ?? "已关联学生"}` : ""}</span>
       <p>{item.notes}</p>{item.nextStep && <p>下一步：{item.nextStep}</p>}
       <div className="work-actions"><button className="secondary" onClick={() => setEditing(item)}>修改</button>

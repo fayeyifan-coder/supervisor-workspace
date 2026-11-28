@@ -55,12 +55,28 @@ test('linked quick and detailed records count once and actual institution time i
 });
 
 test('complete v13 archive restores into independent v16 with three empty tables and matching business data',async t=>{
- const f=exportFixture(t,2,13), original=f.capture();
+ const f=exportFixture(t,2,13), db=f.m1.protectionConnection();
+ const {studyPlanDocx}=require('./study-plan-docx-fixture.cjs');
+ const {parseStudyPlan}=require('../build/study-plan-docx.js');
+ const {digestDocument,addStudyPlan}=require('../build/study-plans.js');
+ const {savePlanVersion}=require('../build/study-plan-versions.js');
+ const originalWord=await studyPlanDocx();
+ const parsed=parseStudyPlan(originalWord);
+ const plan=addStudyPlan(db,f.studentId,parsed.fields,{filename:'合成学习规划.docx',bytes:originalWord,cells:parsed.cells,sha256:digestDocument(originalWord)});
+ const current={...parsed.fields,entries:parsed.fields.entries.map(entry=>({...entry,subject:entry.subject||'数学'}))};
+ savePlanVersion(db,{studentId:f.studentId,planId:plan.id,requestId:randomUUID(),expectedRevision:0,effectiveOn:'2030-01-01',startsOn:'2030-01-01',endsOn:'',state:'active',reason:'合成执行确认',fields:current},true,Date.parse('2029-12-30'));
+ const original=f.capture();
  const target=prepareProtectionRestore(original,2,16), after=validateProtection(target);
  const io=new ProtectionFiles(join(__dirname,'../build/recovery-io.exe'));
  const staged=await io.restore(f.dir,target);
  const verified=await io.inspect(f.dir,staged.profileName,2,16);
  assert(verified.bytes.equals(target));
+ const {DatabaseSync}=require("node:sqlite");
+ const copied=new DatabaseSync(":memory:");copied.deserialize(after.images[0]);
+ const source=copied.prepare("SELECT document_bytes,sha256 FROM study_plan_sources").get();
+ assert(Buffer.from(source.document_bytes).equals(originalWord));
+ assert.equal(source.sha256,digestDocument(originalWord));
+ copied.close();
  assert.deepEqual(after.images.slice(1),validateProtection(original).images.slice(1));
  const old=businessExportDocument(original,false), next=businessExportDocument(verified.bytes,false);
  assert.equal(next.tables.length,36);

@@ -71,10 +71,10 @@ function exceptionText(draft: Draft, schedule?: ScheduleHours): string {
     : "当天未配置营业时段。";
 }
 
-export function WeeklySchedulePanel({ api, recurringEnabled, flexEnabled, students, studentId, setStudentId, learning, learningBackLabel,
+export function WeeklySchedulePanel({ api, recurringEnabled, flexEnabled, students, studentId, setStudentId, learning, learningBackLabel, onQuickLearning,
   onLearning, onExitLearning, learningLeaveGuard, onStudent, summary }: {
   api: WorkspaceApi; recurringEnabled: boolean; flexEnabled: boolean; students: Student[]; studentId: string; setStudentId: (id: string) => void;
-  learning?: LearningDayInput & { focusTaskId?: string }; learningBackLabel?: string;
+  learning?: LearningDayInput & { focusTaskId?: string }; learningBackLabel?: string; onQuickLearning?: (studentId:string,attendanceId:string,date:string)=>void;
   onLearning: (target: LearningDayInput, trigger: HTMLButtonElement) => void;
   onExitLearning: () => void; learningLeaveGuard: Ref<() => boolean>;
   onStudent: (studentId: string, trigger: HTMLButtonElement) => boolean;
@@ -277,7 +277,7 @@ export function WeeklySchedulePanel({ api, recurringEnabled, flexEnabled, studen
     {learning && <AttendanceLearningPanel key={learning.attendanceId} api={api} target={learning} alias={names.get(learning.studentId) ?? "待核对学生"}
       reloadVersion={learningRevision} confirmedRequestId={confirmedLearningRequest}
       blocked={request.blocked} submit={request.run}
-      leaveGuard={learningLeaveGuard} backLabel={learningBackLabel} focusTaskId={learning.focusTaskId} allowLeave={flexEnabled}
+      leaveGuard={learningLeaveGuard} backLabel={learningBackLabel} focusTaskId={learning.focusTaskId} allowLeave={flexEnabled} onQuickLearning={onQuickLearning}
       onBack={onExitLearning} />}
     <section className="schedule-page" aria-labelledby="schedule-title" hidden={Boolean(learning)}
       data-profile-switch-draft={draftDirty || busy ? "" : undefined}>

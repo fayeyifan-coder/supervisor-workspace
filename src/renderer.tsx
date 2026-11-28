@@ -16,6 +16,7 @@ import { StudentDetail } from "./StudentDetail";
 import { QuickLearningPanel } from "./QuickLearningPanel";
 import { LearningTrackingPanel } from "./LearningTrackingPanel";
 import { WeeklyReviewPanel } from "./WeeklyReviewPanel";
+import { WeeklyLearningManagement,type LearningJump } from "./WeeklyLearningManagement";
 import { StudentEditPanel } from "./StudentEditPanel";
 import { ParentFollowUpPanel } from "./ParentFollowUpPanel";
 import { TrainingForPlan } from "./TrainingForPlan";
@@ -150,7 +151,7 @@ function App() {
   }, [api]);
   const [students, setStudents] = useState<Student[]>();
   const [scheduleEnabled, setScheduleEnabled] = useState<boolean>();
-  const [page, setPage] = useState<"schedule" | "board" | "students" | "plan-board">("schedule");
+  const [page, setPage] = useState<"schedule" | "board" | "students" | "plan-board" | "learning-board">("schedule");
   const [protectionOpen, setProtectionOpen] = useState(false);
   const [protectionBusy, setProtectionBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
@@ -165,10 +166,13 @@ function App() {
   const refreshStudentWrites = useCallback(() => setStudentWriteRefresh(value => value + 1), []);
   const [studentRecordVersion, setStudentRecordVersion] = useState(0);
   const [planImportOpen,setPlanImportOpen]=useState(false);
-  const [quick,setQuick]=useState<{studentId:string;attendanceId?:string}>();
+  const [quick,setQuick]=useState<{studentId:string;attendanceId?:string;date?:string}>();
   const quickStudent=students?.find(student=>student.id===quick?.studentId);
-  function openQuick(studentId:string,attendanceId?:string){if(quick)return;setQuick({studentId,attendanceId});requestAnimationFrame(()=>document.querySelector(".quick-learning")?.scrollIntoView());}
+  function openQuick(studentId:string,attendanceId?:string,date?:string){if(quick)return;setQuick({studentId,attendanceId,date});requestAnimationFrame(()=>document.querySelector(".quick-learning")?.scrollIntoView());}
   const [planRefresh,setPlanRefresh]=useState(0);
+  const [queueEdit,setQueueEdit]=useState({dirty:false,busy:false});
+  const queueActivity=useCallback((dirty:boolean,busy:boolean)=>setQueueEdit(old=>old.dirty===dirty&&old.busy===busy?old:{dirty,busy}),[]);
+  const [weekJump,setWeekJump]=useState<{studentId:string;section:"history"|"learning-tracking"|"score"|"work";recordId?:string;sequence:number}>();
   const [reviewEdit,setReviewEdit]=useState({dirty:false,busy:false});
   const reviewActivity=useCallback((dirty:boolean,busy:boolean)=>setReviewEdit(old=>old.dirty===dirty&&old.busy===busy?old:{dirty,busy}),[]);
   const [unitEdit,setUnitEdit]=useState({dirty:false,busy:false});
@@ -180,7 +184,7 @@ function App() {
     setRecordActivity(old => old[kind]?.dirty === dirty && old[kind]?.busy === busy ? old : { ...old, [kind]: { dirty, busy } });
   }, []);
   const [parentFollowUpEnabled, setParentFollowUpEnabled] = useState(false);
-  const [profileReturn, setProfileReturn] = useState<"schedule" | "board" | "plan-board">();
+  const [profileReturn, setProfileReturn] = useState<"schedule" | "board" | "plan-board" | "learning-board">();
   const [planJump,setPlanJump]=useState<{studentId:string;id?:string;revision?:number;sequence:number}>();
   const entry = useRef<{ trigger: HTMLButtonElement; scroll: number }>(null);
   const scheduleNav = useRef<HTMLButtonElement>(null);
@@ -323,7 +327,7 @@ function App() {
   const active = students?.find(student => student.id === activeId);
   const visibleHistory = history?.studentId === active?.id && history?.refresh === historyRefresh ? history : undefined;
   const locked = busy || pending !== undefined;
-  const editorBusy = reviewEdit.busy || unitEdit.busy || planEdit.busy || lifecycleBusy || growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
+  const editorBusy = queueEdit.busy || reviewEdit.busy || unitEdit.busy || planEdit.busy || lifecycleBusy || growthBusy || studentEditBusy || parentFollowUpBusy || Object.values(recordActivity).some(activity => activity.busy);
   useLayoutEffect(() => {
     window.profileSwitchReady = freeze => {
       if (locked || editorBusy || intakeOpen || intakeBusy || learning || lifecycleDirty || growthDirty || studentEditDirty ||
@@ -381,12 +385,13 @@ function App() {
     restoreEntry();
   }
 
-  function openLinkedStudent(studentId: string, origin: "schedule" | "board" | "plan-board", trigger: HTMLButtonElement): boolean {
+  function openLinkedStudent(studentId: string, origin: "schedule" | "board" | "plan-board" | "learning-board", trigger: HTMLButtonElement): boolean {
     if (!students?.some(student => student.id === studentId) || locked || editorBusy || intakeOpen) return false;
     if ((studentId !== activeId || creating) && !canLeaveStudentDrafts()) return false;
     entry.current = { trigger, scroll: window.scrollY };
     setActiveId(studentId);
     if(origin!=="plan-board")setPlanJump(undefined);
+    if(origin!=="learning-board")setWeekJump(undefined);
     setCreating(false);
     setNotice(undefined);
     setProfileReturn(origin);
@@ -398,9 +403,23 @@ function App() {
     return true;
   }
 
+  function jumpFromLearning(studentId:string,target:LearningJump,trigger:HTMLButtonElement){
+    if(editorBusy||locked||intakeOpen)return;
+    if((target.kind==="visit"||target.kind==="task")&&target.attendanceId){
+      openLearning({studentId,attendanceId:target.attendanceId},trigger,target.kind==="task"?target.id:undefined);
+      return;
+    }
+    if(!openLinkedStudent(studentId,"learning-board",trigger))return;
+    setWeekJump(undefined);
+    if(target.kind==="plan"){setPlanJump(old=>({studentId,id:target.id,revision:target.revision,sequence:(old?.sequence??0)+1}));return;}
+    const section=target.kind==="score"?"score":target.kind==="unit"?"learning-tracking":target.kind==="work"?"work":target.kind==="student"?undefined:"history";
+    if(section)setWeekJump(old=>({studentId,section,recordId:target.id,sequence:(old?.sequence??0)+1}));
+  }
+
   function returnToOrigin() {
     if (!profileReturn) return;
     setPage(profileReturn);
+    setWeekJump(undefined);
     setProfileReturn(undefined);
     restoreEntry();
   }
@@ -429,6 +448,8 @@ function App() {
           workspaceInfo?.mode === "synthetic" ? "合成验收 · 仅用虚构学生" : "档案模式待确认"}</span>
         <button className="secondary" type="button" aria-expanded={protectionOpen} aria-controls="data-export-center"
           disabled={protectionBusy || exportBusy} onClick={() => setProtectionOpen(open => !open)}>数据导出与备份</button>
+        {studentRecordVersion>=16&&students&&<button type="button" className="secondary" aria-current={page==="learning-board"&&!learning?"page":undefined}
+          disabled={locked||editorBusy||intakeOpen} onClick={()=>navigate("learning-board")}>学习管理总览</button>}
         {studentRecordVersion>=13&&students&&<button type="button" className="secondary" aria-current={page==="plan-board"&&!learning?"page":undefined}
           disabled={locked||editorBusy||intakeOpen} onClick={()=>navigate("plan-board")}>学习规划总览</button>}
         {studentRecordVersion >= 11 && students && <button type="button" className="secondary" disabled={locked || editorBusy || intakeOpen}
@@ -445,7 +466,7 @@ function App() {
     </header>
     {planImportOpen&&students&&<StudyPlanImportPanel api={api} students={students} onClose={()=>setPlanImportOpen(false)}
       onSaved={()=>setPlanRefresh(value=>value+1)} />}
-    {quick&&quickStudent&&<QuickLearningPanel key={quickStudent.id} api={api} student={quickStudent} attendanceId={quick.attendanceId}
+    {quick&&quickStudent&&<QuickLearningPanel key={quickStudent.id} api={api} student={quickStudent} attendanceId={quick.attendanceId} initialDate={quick.date}
       onClose={()=>setQuick(undefined)} onSaved={()=>{setHistoryRefresh(n=>n+1);setPlanRefresh(n=>n+1);}}/>}
     <section id="data-export-center" hidden={!protectionOpen} aria-label="数据导出与备份">
       <div className="schedule-heading-actions"><h1>数据导出与备份</h1><button className="secondary" type="button"
@@ -463,7 +484,7 @@ function App() {
     {!showingWorkspace && !students && listError && <button type="button" className="secondary" onClick={() => setListRefresh(value => value + 1)}>重新读取档案</button>}
     {scheduleEnabled && students && <div hidden={page !== "schedule" && !learning}>
       <WeeklySchedulePanel api={api} recurringEnabled={studentRecordVersion >= 9} flexEnabled={studentRecordVersion >= 10} students={students} studentId={studentFilter} setStudentId={setStudentFilter}
-        learning={learning} learningBackLabel={page === "plan-board" ? "返回规划总览" : page === "board" ? "返回今日到校" : page === "students" ? "返回学生概览" : undefined} onLearning={openLearning} onExitLearning={closeLearning}
+        learning={learning} onQuickLearning={studentRecordVersion>=14?openQuick:undefined} learningBackLabel={page === "learning-board" ? "返回学习管理" : page === "plan-board" ? "返回规划总览" : page === "board" ? "返回今日到校" : page === "students" ? "返回学生概览" : undefined} onLearning={openLearning} onExitLearning={closeLearning}
         learningLeaveGuard={learningLeaveGuard} onStudent={(id, trigger) => openLinkedStudent(id, "schedule", trigger)}
         summary={<section className="schedule-attendance" aria-labelledby="schedule-attendance-title">
           <h2 id="schedule-attendance-title">今日到校{attendance.result?.ok && <> · <time dateTime={attendance.result.value.date}>{attendance.result.value.date}</time></>}</h2>
@@ -472,6 +493,8 @@ function App() {
             : <p role="alert">{attendance.result.message}</p>}
         </section>} />
     </div>}
+    {studentRecordVersion>=16&&<div hidden={page!=="learning-board"||Boolean(learning)}><WeeklyLearningManagement api={api} refresh={planRefresh}
+      visible={page==="learning-board"&&!learning} onJump={jumpFromLearning} onDraft={queueActivity}/></div>}
     {studentRecordVersion>=13&&<div hidden={page!=="plan-board"||Boolean(learning)}><StudyPlanBoard api={api} refresh={planRefresh} visible={page==="plan-board"&&!learning}
       onLearning={openLearning} onPlan={(studentId,id,revision,trigger)=>{
         if(planEdit.dirty&&!canLeaveStudentDrafts())return;
@@ -540,6 +563,7 @@ function App() {
             : active && <StudentDetail student={active} api={api} intakeOpen={intakeOpen}
               overviewVisible={showingWorkspace && !learning}
               focusPlan={planJump?.studentId===active.id?planJump.sequence:undefined}
+              focusLearning={weekJump?.studentId===active.id&&weekJump.section!=="work"?{section:weekJump.section,recordId:weekJump.recordId,sequence:weekJump.sequence}:undefined}
               weeklyReview={studentRecordVersion>=16&&<WeeklyReviewPanel key={active.id} api={api} studentId={active.id} refresh={planRefresh}
                 onActivity={reviewActivity}/>}
               learningTracking={studentRecordVersion>=15&&<LearningTrackingPanel key={active.id} api={api} studentId={active.id}
@@ -552,7 +576,7 @@ function App() {
               actions={scheduleEnabled && <div className="schedule-heading-actions">
                 {studentRecordVersion>=14&&<button type="button" className="secondary" disabled={Boolean(quick)||editorBusy} onClick={()=>openQuick(active.id)}>快速学习登记</button>}
                 {profileReturn && <button className="secondary" type="button" disabled={editorBusy} onClick={returnToOrigin}>
-                  {profileReturn === "plan-board" ? "返回规划总览" : profileReturn === "board" ? "返回今日到校" : "返回课表"}
+                  {profileReturn === "learning-board" ? "返回学习管理" : profileReturn === "plan-board" ? "返回规划总览" : profileReturn === "board" ? "返回今日到校" : "返回课表"}
                 </button>}
                 <button className="secondary" type="button" disabled={locked || editorBusy}
                   onClick={() => {
@@ -587,7 +611,8 @@ function App() {
                   submit={input => void save({ kind: "lesson", input })} />
                 <HistoryView history={visibleHistory} reload={() => setHistoryRefresh(value => value + 1)} />
               </div>} />}
-          {students && <WorkLogPanel students={students} api={api} backupFormat={workspaceInfo?.backupFormat} />}
+          {students && <WorkLogPanel students={students} api={api} backupFormat={workspaceInfo?.backupFormat}
+            focusItem={weekJump?.section==="work"&&weekJump.studentId===activeId&&weekJump.recordId?{id:weekJump.recordId,sequence:weekJump.sequence}:undefined}/> }
         </div>
       </div>
     </div>

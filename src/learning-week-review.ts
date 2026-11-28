@@ -20,7 +20,7 @@ type Score={id:string;revision:number;date:string;subject:string;title:string;sc
 type SourcePlan=DailyPlanRef&{subject:string;content:string;from:string;to:string;execution:"recorded"|"incomplete"|"unrecorded"};
 export interface WeekFacts {
  studentId:string;range:ReviewRange;visits:Visit[];onSiteMinutes:number|null;visitsWithoutCheckout:number;
- facts:Fact[];pendingTasks:{id:string;subject:string;date:string;content:string;attendanceId:string|null}[];
+ facts:Fact[];pendingTasks:{id:string;subject:string;date:string;content:string;attendanceId:string|null;planningNeedsReview:boolean}[];
  plans:SourcePlan[];tracking:{id:string;revision:number;date:string;fields:TrackingFields}[];
  scores:Score[];scoreChanges:{subject:string;from:string;to:string;ratePoints:number;rawDelta:number|null}[];
  contacts:Event[];followUps:Event[];
@@ -40,7 +40,7 @@ export const reviewSchema=["learning_week_reviews","table","CREATE TABLE learnin
  "    PRIMARY KEY(student_id,from_on,to_on,revision)\n  ) STRICT"] as const;
 const fail=(message:string):never=>{throw new WorkspaceFault("invalid",message);};
 const conflict=(message:string):never=>{throw new WorkspaceFault("conflict",message);};
-const fingerprint=(value:unknown)=>createHash("sha256").update(JSON.stringify(value)).digest("hex");
+export const fingerprint=(value:unknown)=>createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export function reviewRange(raw:unknown):ReviewRange {
  const r=planObject(raw),from=planString(r.from,10,true),to=planString(r.to,10,true);
  if(shanghaiMinute(from,"00:00")===null||shanghaiMinute(to,"00:00")===null||to<from||to>shiftDate(from,30))return fail("请选择 1 至 31 天的复盘日期。");
@@ -52,7 +52,7 @@ export function periodOf(date:string,workWeek:boolean):ReviewRange{
 }
 const inRange=(date:string,{from,to}:ReviewRange)=>date>=from&&date<=to;
 const sourceKey=(ref:DailyPlanRef)=>[ref.planId,ref.revision,ref.entryId].join("/");
-const qualify=(field:string)=>field==="complete"||field==="done"||field==="完成"||field==="已完成";
+const qualify=(field:string)=>field==="complete"||field==="完成"||field==="已完成";
 const partial=(field:string)=>field==="partial"||field==="incomplete"||field==="部分完成"||field==="未完成"||field==="skipped";
 function minutes(visits:Visit[],start:number,end:number){
  const intervals=visits.filter(v=>v.checkOut!==null).map(v=>[Math.max(start,v.checkIn),Math.min(end,v.checkOut!)])
@@ -124,7 +124,7 @@ export function readWeekFacts(stores:Stores,studentId:string,range:ReviewRange):
  const visits=ops.prepare("SELECT id,check_in_at AS checkIn,check_out_at AS checkOut,revision FROM attendance_plans WHERE student_id=? AND check_in_at>=? AND check_in_at<? ORDER BY check_in_at,id").all(studentId,start,end) as unknown as Visit[];
  const {facts,tasks}=recordFacts(stores,studentId,range);
  const pendingTasks=tasks.filter(t=>inRange(t.date,range)&&t.status==="planned")
-  .map(({id,subject,date,content,attendanceId})=>({id,subject,date,content,attendanceId}));
+  .map(({id,subject,date,content,attendanceId,linkState})=>({id,subject,date,content,attendanceId,planningNeedsReview:linkState==="review"}));
  const plans=plannedEntries(m1,studentId,range,facts);
  const version=Number(m1.prepare("PRAGMA user_version").get()?.user_version);
  const scores=readStudentRecords(m1,version,"score",studentId).records

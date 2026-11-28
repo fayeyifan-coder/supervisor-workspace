@@ -20,6 +20,7 @@ import { linkPlanTask, listPlanTasks } from "./study-plan-links";
 import { getDailyContext } from "./learning-daily";
 import { readTracking } from "./learning-tracking";
 import { readReview } from "./learning-week-review";
+import { readWeeklyManagement } from "./learning-week-overview";
 import { addManualStudyPlan, savePlanVersion, studentPlanViews } from "./study-plan-versions";
 import { parseStudyPlan } from "./study-plan-docx";
 import { addStudyPlan, digestDocument, listStudyPlans, planExists, planId, planObject, studyPlanSource } from "./study-plans";
@@ -306,6 +307,10 @@ async function start(owner: string, profile: string, state: ActivationState, ope
       return studentWrites.resolve(store, action, requestId);
     }));
   handleWrite(channels.addLesson, (event, raw: unknown) => invoke(event, store => store.addLesson(raw)));
+  handle(channels.weeklyLearningManagement,(event,raw:unknown)=>invoke(event,store=>{
+    if(m1Version<16||!operations||!workLog)throw new WorkspaceFault("invalid","当前档案尚不支持学习管理总览。");
+    return readWeeklyManagement({m1:store.protectionConnection(),ops:operations.protectionConnection(),work:workLog.protectionConnection()},store.students(),raw);
+  }));
   handle(channels.weeklyReview,(event,student:unknown,range:unknown)=>invoke(event,store=>{
     if(m1Version<16||!operations||!workLog)throw new WorkspaceFault("invalid","当前档案尚不支持每周复盘。");
     return readReview({m1:store.protectionConnection(),ops:operations.protectionConnection(),work:workLog.protectionConnection()},student,range);
